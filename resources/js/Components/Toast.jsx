@@ -1,1 +1,110 @@
-﻿import { useEffect } from "react";const cfg = {  success: { bg: "#F0FDF4", border: "#22C55E", text: "#16A34A", icon: "\u2713" },  error: { bg: "#FEF2F2", border: "#EF4444", text: "#DC2626", icon: "\u2715" },  warning: { bg: "#FFFBEB", border: "#F58A07", text: "#D97706", icon: "!" },  info: { bg: "#EFF6FF", border: "#3F7DFF", text: "#2563EB", icon: "i" }};function ToastItem({ toast, onDismiss }) {  const c = cfg[toast.variant];  useEffect(() => {    const t = setTimeout(() => onDismiss(toast.id), 3500);    return () => clearTimeout(t);  }, [toast.id, onDismiss]);  return <div style={{    display: "flex",    alignItems: "center",    gap: 12,    background: c.bg,    border: `1px solid ${c.border}`,    borderLeft: `4px solid ${c.border}`,    borderRadius: 12,    padding: "12px 16px",    boxShadow: "0 4px 16px rgba(0,0,0,0.10)",    minWidth: 280,    maxWidth: 380,    animation: "slideInRight 0.25s ease"  }}>      <span style={{    width: 22,    height: 22,    borderRadius: "50%",    flexShrink: 0,    background: c.border,    color: "#fff",    display: "flex",    alignItems: "center",    justifyContent: "center",    fontSize: 12,    fontWeight: 700  }}>{c.icon}</span>      <p style={{ flex: 1, fontSize: 13, color: "#1E2F5F", fontWeight: 500, margin: 0 }}>{toast.message}</p>      <button    onClick={() => onDismiss(toast.id)}    style={{      border: "none",      background: "none",      cursor: "pointer",      color: "#9CA3AF",      fontSize: 18,      padding: "0 2px",      lineHeight: 1,      flexShrink: 0,      fontFamily: "inherit"    }}  >×</button>    </div>;}function Toast({ toasts, onDismiss }) {  if (toasts.length === 0) return null;  return <div style={{    position: "fixed",    bottom: 24,    right: 24,    zIndex: 2e3,    display: "flex",    flexDirection: "column",    gap: 10  }}>      {toasts.map((t) => <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />)}    </div>;}export {  Toast as default};
+﻿import { useEffect } from "react";
+const cfg = {
+    success: {
+        bg: "#F0FDF4",
+        border: "#22C55E",
+        text: "#16A34A",
+        icon: "\u2713",
+    },
+    error: {
+        bg: "#FEF2F2",
+        border: "#EF4444",
+        text: "#DC2626",
+        icon: "\u2715",
+    },
+    warning: { bg: "#FFFBEB", border: "#F58A07", text: "#D97706", icon: "!" },
+    info: { bg: "#EFF6FF", border: "#3F7DFF", text: "#2563EB", icon: "i" },
+};
+function ToastItem({ toast, onDismiss }) {
+    const c = cfg[toast.variant];
+    useEffect(() => {
+        const t = setTimeout(() => onDismiss(toast.id), 3500);
+        return () => clearTimeout(t);
+    }, [toast.id, onDismiss]);
+    return (
+        <div
+            style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                background: c.bg,
+                border: `1px solid ${c.border}`,
+                borderLeft: `4px solid ${c.border}`,
+                borderRadius: 12,
+                padding: "12px 16px",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+                minWidth: 280,
+                maxWidth: 380,
+                animation: "slideInRight 0.25s ease",
+            }}
+        >
+            {" "}
+            <span
+                style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    background: c.border,
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                }}
+            >
+                {c.icon}
+            </span>{" "}
+            <p
+                style={{
+                    flex: 1,
+                    fontSize: 13,
+                    color: "#1E2F5F",
+                    fontWeight: 500,
+                    margin: 0,
+                }}
+            >
+                {toast.message}
+            </p>{" "}
+            <button
+                onClick={() => onDismiss(toast.id)}
+                style={{
+                    border: "none",
+                    background: "none",
+                    cursor: "pointer",
+                    color: "#9CA3AF",
+                    fontSize: 18,
+                    padding: "0 2px",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    fontFamily: "inherit",
+                }}
+            >
+                ×
+            </button>{" "}
+        </div>
+    );
+}
+function Toast({ toasts, onDismiss }) {
+    if (toasts.length === 0) return null;
+    return (
+        <div
+            style={{
+                position: "fixed",
+                bottom: 24,
+                right: 24,
+                zIndex: 2e3,
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+            }}
+        >
+            {" "}
+            {toasts.map((t) => (
+                <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
+            ))}{" "}
+        </div>
+    );
+}
+export { Toast as default };

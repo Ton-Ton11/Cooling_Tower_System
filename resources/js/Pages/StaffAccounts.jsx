@@ -1,1 +1,708 @@
-﻿import { useState } from "react";import StatusBadge from "../Components/StatusBadge";import Modal from "../Components/Modal";import { users as initialUsers } from "../data/mockData";const roles = ["Manager", "Admin Assistant", "Tools Man", "Technician"];function StaffAccounts({ addToast }) {  const [users, setUsers] = useState(initialUsers.filter((u) => u.role !== "Customer"));  const [viewMode, setViewMode] = useState("active");  const [archiveTarget, setArchiveTarget] = useState(null);  const [restoreTarget, setRestoreTarget] = useState(null);  const [editTarget, setEditTarget] = useState(null);  const [editForm, setEditForm] = useState({});  const [addForm, setAddForm] = useState({ given_name: "", last_name: "", email: "", role: "Technician", contact_number: "", address: "" });  const [saveModal, setSaveModal] = useState(false);  const [addModal, setAddModal] = useState(false);  const activeStaff = users.filter((u) => u.status === "Active");  const archivedStaff = users.filter((u) => u.status === "Archived");  const handleArchive = () => {    if (!archiveTarget) return;    setUsers((prev) => prev.map((u) => u.user_id === archiveTarget.user_id ? { ...u, status: "Archived" } : u));    addToast(`Account for ${archiveTarget.given_name} ${archiveTarget.last_name} has been archived.`, "warning");    setArchiveTarget(null);  };  const handleRestore = () => {    if (!restoreTarget) return;    setUsers((prev) => prev.map((u) => u.user_id === restoreTarget.user_id ? { ...u, status: "Active" } : u));    addToast(`${restoreTarget.given_name} ${restoreTarget.last_name}'s account is active once again.`);    setRestoreTarget(null);  };  const handleSave = () => {    if (!editTarget) return;    setUsers((prev) => prev.map((u) => u.user_id === editTarget.user_id ? { ...u, ...editForm } : u));    addToast("Account has been updated successfully.");    setSaveModal(false);    setEditTarget(null);    setViewMode("active");  };  const handleAdd = () => {    const newUser = {      user_id: Math.max(...users.map((u) => u.user_id)) + 1,      role: addForm.role,      given_name: addForm.given_name,      last_name: addForm.last_name,      email: addForm.email,      contact_number: addForm.contact_number,      address: addForm.address,      birthdate: "1990-01-01",      sex: "Male",      created_at: "2026-08-10",      status: "Active"    };    setUsers((prev) => [...prev, newUser]);    addToast(`Employee/User ${addForm.given_name} ${addForm.last_name} has been added successfully.`);    setAddModal(false);    setViewMode("active");    setAddForm({ given_name: "", last_name: "", email: "", role: "Technician", contact_number: "", address: "" });  };  const displayList = viewMode === "archived" ? archivedStaff : activeStaff;  const roleColors = {    "Super Admin": "#EF4444",    Manager: "#F58A07",    "Admin Assistant": "#3F7DFF",    "Tools Man": "#22C55E",    Technician: "#8B5CF6",    Customer: "#9CA3AF"  };  if (viewMode === "edit" && editTarget) {    return <div style={{ animation: "fadeInUp 0.25s ease" }}>        <div className="page-header">          <div>            <button onClick={() => setViewMode("active")} style={{ background: "none", border: "none", color: "#3F7DFF", cursor: "pointer", fontSize: 13, marginBottom: 6, fontFamily: "inherit" }}>← Back to Staff</button>            <h1 className="page-title font-display">Edit Staff Account</h1>            <p className="page-subtitle">Update credentials and details for {editTarget.given_name} {editTarget.last_name}</p>          </div>        </div>        <div className="card" style={{ padding: 28, maxWidth: 560 }}>          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>            {[      { label: "First Name", key: "given_name" },      { label: "Last Name", key: "last_name" },      { label: "Email", key: "email" },      { label: "Contact Number", key: "contact_number" }    ].map((f) => <div key={f.key}>                <p className="section-label" style={{ marginBottom: 6 }}>{f.label}</p>                <input      className="input-field"      value={editForm[f.key] ?? editTarget[f.key] ?? ""}      onChange={(e) => setEditForm((prev) => ({ ...prev, [f.key]: e.target.value }))}    />              </div>)}            <div>              <p className="section-label" style={{ marginBottom: 6 }}>Role</p>              <select      className="input-field"      value={editForm.role ?? editTarget.role}      onChange={(e) => setEditForm((prev) => ({ ...prev, role: e.target.value }))}    >                {roles.map((r) => <option key={r} value={r}>{r}</option>)}              </select>            </div>          </div>          <div style={{ marginTop: 16 }}>            <p className="section-label" style={{ marginBottom: 6 }}>Address</p>            <input      className="input-field"      value={editForm.address ?? editTarget.address}      onChange={(e) => setEditForm((prev) => ({ ...prev, address: e.target.value }))}    />          </div>          <div style={{ display: "flex", gap: 10, marginTop: 24 }}>            <button className="btn-primary" onClick={() => setSaveModal(true)}>Save Changes</button>            <button className="btn-secondary" onClick={() => setViewMode("active")}>Cancel</button>          </div>        </div>        <Modal      open={saveModal}      title="Save Changes?"      message={`This will update the account details for ${editTarget.given_name} ${editTarget.last_name}.`}      confirmLabel="Yes, Save"      onConfirm={handleSave}      onCancel={() => setSaveModal(false)}    />      </div>;  }  if (viewMode === "add") {    return <div style={{ animation: "fadeInUp 0.25s ease" }}>        <div className="page-header">          <div>            <button onClick={() => setViewMode("active")} style={{ background: "none", border: "none", color: "#3F7DFF", cursor: "pointer", fontSize: 13, marginBottom: 6, fontFamily: "inherit" }}>← Back to Staff</button>            <h1 className="page-title font-display">Add New Staff / Employee</h1>            <p className="page-subtitle">Fill out details and register a new account</p>          </div>        </div>        <div className="card" style={{ padding: 28, maxWidth: 560 }}>          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>            {[      { label: "First Name", key: "given_name", placeholder: "e.g. Maria" },      { label: "Last Name", key: "last_name", placeholder: "e.g. Santos" },      { label: "Email Address", key: "email", placeholder: "email@coolingtower.com" },      { label: "Contact Number", key: "contact_number", placeholder: "09XX-XXX-XXXX" }    ].map((f) => <div key={f.key}>                <p className="section-label" style={{ marginBottom: 6 }}>{f.label}</p>                <input      className="input-field"      placeholder={f.placeholder}      value={addForm[f.key]}      onChange={(e) => setAddForm((prev) => ({ ...prev, [f.key]: e.target.value }))}    />              </div>)}            <div>              <p className="section-label" style={{ marginBottom: 6 }}>Role</p>              <select className="input-field" value={addForm.role} onChange={(e) => setAddForm((prev) => ({ ...prev, role: e.target.value }))}>                {roles.map((r) => <option key={r} value={r}>{r}</option>)}              </select>            </div>          </div>          <div style={{ marginTop: 16 }}>            <p className="section-label" style={{ marginBottom: 6 }}>Address</p>            <input className="input-field" placeholder="Full address" value={addForm.address} onChange={(e) => setAddForm((prev) => ({ ...prev, address: e.target.value }))} />          </div>          <div style={{ display: "flex", gap: 10, marginTop: 24 }}>            <button className="btn-primary" onClick={() => setAddModal(true)}>Register Account</button>            <button className="btn-secondary" onClick={() => setViewMode("active")}>Cancel</button>          </div>        </div>        <Modal      open={addModal}      title="Confirm Action?"      message={`Register a new ${addForm.role} account for ${addForm.given_name || "this employee"}?`}      confirmLabel="Yes, Add Employee"      onConfirm={handleAdd}      onCancel={() => setAddModal(false)}    />      </div>;  }  return <div style={{ animation: "fadeInUp 0.25s ease" }}>      <div className="page-header">        <div>          <h1 className="page-title font-display">Staff Accounts</h1>          <p className="page-subtitle">            {viewMode === "archived" ? `${archivedStaff.length} archived accounts` : `${activeStaff.length} active staff members`}          </p>        </div>        <div style={{ display: "flex", gap: 10 }}>          <button    className="btn-secondary"    onClick={() => setViewMode(viewMode === "archived" ? "active" : "archived")}  >            {viewMode === "archived" ? "\u2190 Active Staff" : "\u{1F5C3} View Archived"}          </button>          {viewMode === "active" && <button className="btn-primary" onClick={() => setViewMode("add")}>+ Add New Staff</button>}        </div>      </div>      <div className="card" style={{ padding: 20 }}>        <div style={{ overflowX: "auto" }}>          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>            <thead>              <tr style={{ background: "#F5F7FA" }}>                {["ID", "Name", "Role", "Email", "Contact", "Status", "Joined", "Actions"].map((h) => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "#6B7280", whiteSpace: "nowrap", borderBottom: "1px solid #EAECF0" }}>{h}</th>)}              </tr>            </thead>            <tbody>              {displayList.map((u) => <tr    key={u.user_id}    style={{ borderTop: "1px solid #F5F7FA" }}    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(63,125,255,0.04)"}    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}  >                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#9CA3AF" }}>#U{u.user_id.toString().padStart(3, "0")}</td>                  <td style={{ padding: "10px 12px" }}>                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>                      <div style={{    width: 30,    height: 30,    borderRadius: "50%",    background: `${roleColors[u.role] || "#8A93A6"}22`,    border: `1px solid ${roleColors[u.role] || "#8A93A6"}44`,    display: "flex",    alignItems: "center",    justifyContent: "center",    fontSize: 12,    color: roleColors[u.role] || "#8A93A6",    fontWeight: 700,    flexShrink: 0  }}>                        {u.given_name[0]}{u.last_name[0]}                      </div>                      <div>                        <p style={{ fontSize: 13, color: "#1E2F5F", fontWeight: 500, margin: 0 }}>{u.given_name} {u.last_name}</p>                        <p style={{ fontSize: 11, color: "#9CA3AF", margin: "1px 0 0" }}>{u.sex} · {u.birthdate}</p>                      </div>                    </div>                  </td>                  <td style={{ padding: "10px 12px" }}>                    <span style={{    fontSize: 11,    padding: "2px 8px",    borderRadius: 20,    background: `${roleColors[u.role] || "#8A93A6"}18`,    color: roleColors[u.role] || "#8A93A6",    border: `1px solid ${roleColors[u.role] || "#8A93A6"}30`,    fontFamily: "'DM Sans',sans-serif",    fontWeight: 600  }}>                      {u.role}                    </span>                  </td>                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280" }}>{u.email}</td>                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280" }}>{u.contact_number}</td>                  <td style={{ padding: "10px 12px" }}><StatusBadge status={u.status} /></td>                  <td style={{ padding: "10px 12px", fontSize: 11, color: "#9CA3AF" }}>{u.created_at}</td>                  <td style={{ padding: "10px 12px" }}>                    <div style={{ display: "flex", gap: 6 }}>                      {viewMode === "active" ? <>                          <button    className="btn-secondary"    style={{ padding: "4px 10px", fontSize: 11 }}    onClick={() => {      setEditTarget(u);      setEditForm({});      setViewMode("edit");    }}  >                            ✏️ Edit                          </button>                          <button    className="btn-danger"    style={{ padding: "4px 10px", fontSize: 11 }}    onClick={() => setArchiveTarget(u)}  >                            🗃 Archive                          </button>                        </> : <button    className="btn-primary"    style={{ padding: "4px 10px", fontSize: 11 }}    onClick={() => setRestoreTarget(u)}  >                          ↩ Restore                        </button>}                    </div>                  </td>                </tr>)}            </tbody>          </table>        </div>      </div>      <Modal    open={!!archiveTarget}    title="Confirm Archive Action?"    message={`This will deactivate ${archiveTarget?.given_name} ${archiveTarget?.last_name}'s account. They will no longer be able to access the system.`}    confirmLabel="Yes, Archive"    variant="danger"    onConfirm={handleArchive}    onCancel={() => setArchiveTarget(null)}  />      <Modal    open={!!restoreTarget}    title="Restore User from Archive?"    message={`${restoreTarget?.given_name} ${restoreTarget?.last_name}'s account will be reactivated.`}    confirmLabel="Yes, Restore"    onConfirm={handleRestore}    onCancel={() => setRestoreTarget(null)}  />    </div>;}export {  StaffAccounts as default};
+﻿import { useState } from "react";
+import StatusBadge from "../Components/StatusBadge";
+import Modal from "../Components/Modal";
+import { users as initialUsers } from "../data/mockData";
+const roles = ["Manager", "Admin Assistant", "Tools Man", "Technician"];
+function StaffAccounts({ addToast }) {
+    const [users, setUsers] = useState(
+        initialUsers.filter((u) => u.role !== "Customer"),
+    );
+    const [viewMode, setViewMode] = useState("active");
+    const [archiveTarget, setArchiveTarget] = useState(null);
+    const [restoreTarget, setRestoreTarget] = useState(null);
+    const [editTarget, setEditTarget] = useState(null);
+    const [editForm, setEditForm] = useState({});
+    const [addForm, setAddForm] = useState({
+        given_name: "",
+        last_name: "",
+        email: "",
+        role: "Technician",
+        contact_number: "",
+        address: "",
+    });
+    const [saveModal, setSaveModal] = useState(false);
+    const [addModal, setAddModal] = useState(false);
+    const activeStaff = users.filter((u) => u.status === "Active");
+    const archivedStaff = users.filter((u) => u.status === "Archived");
+    const handleArchive = () => {
+        if (!archiveTarget) return;
+        setUsers((prev) =>
+            prev.map((u) =>
+                u.user_id === archiveTarget.user_id
+                    ? { ...u, status: "Archived" }
+                    : u,
+            ),
+        );
+        addToast(
+            `Account for ${archiveTarget.given_name} ${archiveTarget.last_name} has been archived.`,
+            "warning",
+        );
+        setArchiveTarget(null);
+    };
+    const handleRestore = () => {
+        if (!restoreTarget) return;
+        setUsers((prev) =>
+            prev.map((u) =>
+                u.user_id === restoreTarget.user_id
+                    ? { ...u, status: "Active" }
+                    : u,
+            ),
+        );
+        addToast(
+            `${restoreTarget.given_name} ${restoreTarget.last_name}'s account is active once again.`,
+        );
+        setRestoreTarget(null);
+    };
+    const handleSave = () => {
+        if (!editTarget) return;
+        setUsers((prev) =>
+            prev.map((u) =>
+                u.user_id === editTarget.user_id ? { ...u, ...editForm } : u,
+            ),
+        );
+        addToast("Account has been updated successfully.");
+        setSaveModal(false);
+        setEditTarget(null);
+        setViewMode("active");
+    };
+    const handleAdd = () => {
+        const newUser = {
+            user_id: Math.max(...users.map((u) => u.user_id)) + 1,
+            role: addForm.role,
+            given_name: addForm.given_name,
+            last_name: addForm.last_name,
+            email: addForm.email,
+            contact_number: addForm.contact_number,
+            address: addForm.address,
+            birthdate: "1990-01-01",
+            sex: "Male",
+            created_at: "2026-08-10",
+            status: "Active",
+        };
+        setUsers((prev) => [...prev, newUser]);
+        addToast(
+            `Employee/User ${addForm.given_name} ${addForm.last_name} has been added successfully.`,
+        );
+        setAddModal(false);
+        setViewMode("active");
+        setAddForm({
+            given_name: "",
+            last_name: "",
+            email: "",
+            role: "Technician",
+            contact_number: "",
+            address: "",
+        });
+    };
+    const displayList = viewMode === "archived" ? archivedStaff : activeStaff;
+    const roleColors = {
+        "Super Admin": "#EF4444",
+        Manager: "#F58A07",
+        "Admin Assistant": "#3F7DFF",
+        "Tools Man": "#22C55E",
+        Technician: "#8B5CF6",
+        Customer: "#9CA3AF",
+    };
+    if (viewMode === "edit" && editTarget) {
+        return (
+            <div style={{ animation: "fadeInUp 0.25s ease" }}>
+                {" "}
+                <div className="page-header">
+                    {" "}
+                    <div>
+                        {" "}
+                        <button
+                            onClick={() => setViewMode("active")}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                color: "#3F7DFF",
+                                cursor: "pointer",
+                                fontSize: 13,
+                                marginBottom: 6,
+                                fontFamily: "inherit",
+                            }}
+                        >
+                            ← Back to Staff
+                        </button>{" "}
+                        <h1 className="page-title font-display">
+                            Edit Staff Account
+                        </h1>{" "}
+                        <p className="page-subtitle">
+                            Update credentials and details for{" "}
+                            {editTarget.given_name} {editTarget.last_name}
+                        </p>{" "}
+                    </div>{" "}
+                </div>{" "}
+                <div className="card" style={{ padding: 28, maxWidth: 560 }}>
+                    {" "}
+                    <div
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 16,
+                        }}
+                    >
+                        {" "}
+                        {[
+                            { label: "First Name", key: "given_name" },
+                            { label: "Last Name", key: "last_name" },
+                            { label: "Email", key: "email" },
+                            { label: "Contact Number", key: "contact_number" },
+                        ].map((f) => (
+                            <div key={f.key}>
+                                {" "}
+                                <p
+                                    className="section-label"
+                                    style={{ marginBottom: 6 }}
+                                >
+                                    {f.label}
+                                </p>{" "}
+                                <input
+                                    className="input-field"
+                                    value={
+                                        editForm[f.key] ??
+                                        editTarget[f.key] ??
+                                        ""
+                                    }
+                                    onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                            ...prev,
+                                            [f.key]: e.target.value,
+                                        }))
+                                    }
+                                />{" "}
+                            </div>
+                        ))}{" "}
+                        <div>
+                            {" "}
+                            <p
+                                className="section-label"
+                                style={{ marginBottom: 6 }}
+                            >
+                                Role
+                            </p>{" "}
+                            <select
+                                className="input-field"
+                                value={editForm.role ?? editTarget.role}
+                                onChange={(e) =>
+                                    setEditForm((prev) => ({
+                                        ...prev,
+                                        role: e.target.value,
+                                    }))
+                                }
+                            >
+                                {" "}
+                                {roles.map((r) => (
+                                    <option key={r} value={r}>
+                                        {r}
+                                    </option>
+                                ))}{" "}
+                            </select>{" "}
+                        </div>{" "}
+                    </div>{" "}
+                    <div style={{ marginTop: 16 }}>
+                        {" "}
+                        <p
+                            className="section-label"
+                            style={{ marginBottom: 6 }}
+                        >
+                            Address
+                        </p>{" "}
+                        <input
+                            className="input-field"
+                            value={editForm.address ?? editTarget.address}
+                            onChange={(e) =>
+                                setEditForm((prev) => ({
+                                    ...prev,
+                                    address: e.target.value,
+                                }))
+                            }
+                        />{" "}
+                    </div>{" "}
+                    <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+                        {" "}
+                        <button
+                            className="btn-primary"
+                            onClick={() => setSaveModal(true)}
+                        >
+                            Save Changes
+                        </button>{" "}
+                        <button
+                            className="btn-secondary"
+                            onClick={() => setViewMode("active")}
+                        >
+                            Cancel
+                        </button>{" "}
+                    </div>{" "}
+                </div>{" "}
+                <Modal
+                    open={saveModal}
+                    title="Save Changes?"
+                    message={`This will update the account details for ${editTarget.given_name} ${editTarget.last_name}.`}
+                    confirmLabel="Yes, Save"
+                    onConfirm={handleSave}
+                    onCancel={() => setSaveModal(false)}
+                />{" "}
+            </div>
+        );
+    }
+    if (viewMode === "add") {
+        return (
+            <div style={{ animation: "fadeInUp 0.25s ease" }}>
+                {" "}
+                <div className="page-header">
+                    {" "}
+                    <div>
+                        {" "}
+                        <button
+                            onClick={() => setViewMode("active")}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                color: "#3F7DFF",
+                                cursor: "pointer",
+                                fontSize: 13,
+                                marginBottom: 6,
+                                fontFamily: "inherit",
+                            }}
+                        >
+                            ← Back to Staff
+                        </button>{" "}
+                        <h1 className="page-title font-display">
+                            Add New Staff / Employee
+                        </h1>{" "}
+                        <p className="page-subtitle">
+                            Fill out details and register a new account
+                        </p>{" "}
+                    </div>{" "}
+                </div>{" "}
+                <div className="card" style={{ padding: 28, maxWidth: 560 }}>
+                    {" "}
+                    <div
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 16,
+                        }}
+                    >
+                        {" "}
+                        {[
+                            {
+                                label: "First Name",
+                                key: "given_name",
+                                placeholder: "e.g. Maria",
+                            },
+                            {
+                                label: "Last Name",
+                                key: "last_name",
+                                placeholder: "e.g. Santos",
+                            },
+                            {
+                                label: "Email Address",
+                                key: "email",
+                                placeholder: "email@coolingtower.com",
+                            },
+                            {
+                                label: "Contact Number",
+                                key: "contact_number",
+                                placeholder: "09XX-XXX-XXXX",
+                            },
+                        ].map((f) => (
+                            <div key={f.key}>
+                                {" "}
+                                <p
+                                    className="section-label"
+                                    style={{ marginBottom: 6 }}
+                                >
+                                    {f.label}
+                                </p>{" "}
+                                <input
+                                    className="input-field"
+                                    placeholder={f.placeholder}
+                                    value={addForm[f.key]}
+                                    onChange={(e) =>
+                                        setAddForm((prev) => ({
+                                            ...prev,
+                                            [f.key]: e.target.value,
+                                        }))
+                                    }
+                                />{" "}
+                            </div>
+                        ))}{" "}
+                        <div>
+                            {" "}
+                            <p
+                                className="section-label"
+                                style={{ marginBottom: 6 }}
+                            >
+                                Role
+                            </p>{" "}
+                            <select
+                                className="input-field"
+                                value={addForm.role}
+                                onChange={(e) =>
+                                    setAddForm((prev) => ({
+                                        ...prev,
+                                        role: e.target.value,
+                                    }))
+                                }
+                            >
+                                {" "}
+                                {roles.map((r) => (
+                                    <option key={r} value={r}>
+                                        {r}
+                                    </option>
+                                ))}{" "}
+                            </select>{" "}
+                        </div>{" "}
+                    </div>{" "}
+                    <div style={{ marginTop: 16 }}>
+                        {" "}
+                        <p
+                            className="section-label"
+                            style={{ marginBottom: 6 }}
+                        >
+                            Address
+                        </p>{" "}
+                        <input
+                            className="input-field"
+                            placeholder="Full address"
+                            value={addForm.address}
+                            onChange={(e) =>
+                                setAddForm((prev) => ({
+                                    ...prev,
+                                    address: e.target.value,
+                                }))
+                            }
+                        />{" "}
+                    </div>{" "}
+                    <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+                        {" "}
+                        <button
+                            className="btn-primary"
+                            onClick={() => setAddModal(true)}
+                        >
+                            Register Account
+                        </button>{" "}
+                        <button
+                            className="btn-secondary"
+                            onClick={() => setViewMode("active")}
+                        >
+                            Cancel
+                        </button>{" "}
+                    </div>{" "}
+                </div>{" "}
+                <Modal
+                    open={addModal}
+                    title="Confirm Action?"
+                    message={`Register a new ${addForm.role} account for ${addForm.given_name || "this employee"}?`}
+                    confirmLabel="Yes, Add Employee"
+                    onConfirm={handleAdd}
+                    onCancel={() => setAddModal(false)}
+                />{" "}
+            </div>
+        );
+    }
+    return (
+        <div style={{ animation: "fadeInUp 0.25s ease" }}>
+            {" "}
+            <div className="page-header">
+                {" "}
+                <div>
+                    {" "}
+                    <h1 className="page-title font-display">
+                        Staff Accounts
+                    </h1>{" "}
+                    <p className="page-subtitle">
+                        {" "}
+                        {viewMode === "archived"
+                            ? `${archivedStaff.length} archived accounts`
+                            : `${activeStaff.length} active staff members`}{" "}
+                    </p>{" "}
+                </div>{" "}
+                <div style={{ display: "flex", gap: 10 }}>
+                    {" "}
+                    <button
+                        className="btn-secondary"
+                        onClick={() =>
+                            setViewMode(
+                                viewMode === "archived" ? "active" : "archived",
+                            )
+                        }
+                    >
+                        {" "}
+                        {viewMode === "archived"
+                            ? "\u2190 Active Staff"
+                            : "\u{1F5C3} View Archived"}{" "}
+                    </button>{" "}
+                    {viewMode === "active" && (
+                        <button
+                            className="btn-primary"
+                            onClick={() => setViewMode("add")}
+                        >
+                            + Add New Staff
+                        </button>
+                    )}{" "}
+                </div>{" "}
+            </div>{" "}
+            <div className="card" style={{ padding: 20 }}>
+                {" "}
+                <div style={{ overflowX: "auto" }}>
+                    {" "}
+                    <table
+                        style={{
+                            width: "100%",
+                            borderCollapse: "collapse",
+                            minWidth: 700,
+                        }}
+                    >
+                        {" "}
+                        <thead>
+                            {" "}
+                            <tr style={{ background: "#F5F7FA" }}>
+                                {" "}
+                                {[
+                                    "ID",
+                                    "Name",
+                                    "Role",
+                                    "Email",
+                                    "Contact",
+                                    "Status",
+                                    "Joined",
+                                    "Actions",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        style={{
+                                            padding: "10px 12px",
+                                            textAlign: "left",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            letterSpacing: "0.05em",
+                                            textTransform: "uppercase",
+                                            color: "#6B7280",
+                                            whiteSpace: "nowrap",
+                                            borderBottom: "1px solid #EAECF0",
+                                        }}
+                                    >
+                                        {h}
+                                    </th>
+                                ))}{" "}
+                            </tr>{" "}
+                        </thead>{" "}
+                        <tbody>
+                            {" "}
+                            {displayList.map((u) => (
+                                <tr
+                                    key={u.user_id}
+                                    style={{ borderTop: "1px solid #F5F7FA" }}
+                                    onMouseEnter={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "rgba(63,125,255,0.04)")
+                                    }
+                                    onMouseLeave={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "transparent")
+                                    }
+                                >
+                                    {" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#9CA3AF",
+                                        }}
+                                    >
+                                        #U
+                                        {u.user_id.toString().padStart(3, "0")}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        {" "}
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 10,
+                                            }}
+                                        >
+                                            {" "}
+                                            <div
+                                                style={{
+                                                    width: 30,
+                                                    height: 30,
+                                                    borderRadius: "50%",
+                                                    background: `${roleColors[u.role] || "#8A93A6"}22`,
+                                                    border: `1px solid ${roleColors[u.role] || "#8A93A6"}44`,
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    fontSize: 12,
+                                                    color:
+                                                        roleColors[u.role] ||
+                                                        "#8A93A6",
+                                                    fontWeight: 700,
+                                                    flexShrink: 0,
+                                                }}
+                                            >
+                                                {" "}
+                                                {u.given_name[0]}
+                                                {u.last_name[0]}{" "}
+                                            </div>{" "}
+                                            <div>
+                                                {" "}
+                                                <p
+                                                    style={{
+                                                        fontSize: 13,
+                                                        color: "#1E2F5F",
+                                                        fontWeight: 500,
+                                                        margin: 0,
+                                                    }}
+                                                >
+                                                    {u.given_name} {u.last_name}
+                                                </p>{" "}
+                                                <p
+                                                    style={{
+                                                        fontSize: 11,
+                                                        color: "#9CA3AF",
+                                                        margin: "1px 0 0",
+                                                    }}
+                                                >
+                                                    {u.sex} · {u.birthdate}
+                                                </p>{" "}
+                                            </div>{" "}
+                                        </div>{" "}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        {" "}
+                                        <span
+                                            style={{
+                                                fontSize: 11,
+                                                padding: "2px 8px",
+                                                borderRadius: 20,
+                                                background: `${roleColors[u.role] || "#8A93A6"}18`,
+                                                color:
+                                                    roleColors[u.role] ||
+                                                    "#8A93A6",
+                                                border: `1px solid ${roleColors[u.role] || "#8A93A6"}30`,
+                                                fontFamily:
+                                                    "'DM Sans',sans-serif",
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            {" "}
+                                            {u.role}{" "}
+                                        </span>{" "}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#6B7280",
+                                        }}
+                                    >
+                                        {u.email}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#6B7280",
+                                        }}
+                                    >
+                                        {u.contact_number}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        <StatusBadge status={u.status} />
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 11,
+                                            color: "#9CA3AF",
+                                        }}
+                                    >
+                                        {u.created_at}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        {" "}
+                                        <div
+                                            style={{ display: "flex", gap: 6 }}
+                                        >
+                                            {" "}
+                                            {viewMode === "active" ? (
+                                                <>
+                                                    {" "}
+                                                    <button
+                                                        className="btn-secondary"
+                                                        style={{
+                                                            padding: "4px 10px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() => {
+                                                            setEditTarget(u);
+                                                            setEditForm({});
+                                                            setViewMode("edit");
+                                                        }}
+                                                    >
+                                                        {" "}
+                                                        ✏️ Edit{" "}
+                                                    </button>{" "}
+                                                    <button
+                                                        className="btn-danger"
+                                                        style={{
+                                                            padding: "4px 10px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() =>
+                                                            setArchiveTarget(u)
+                                                        }
+                                                    >
+                                                        {" "}
+                                                        🗃 Archive{" "}
+                                                    </button>{" "}
+                                                </>
+                                            ) : (
+                                                <button
+                                                    className="btn-primary"
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 11,
+                                                    }}
+                                                    onClick={() =>
+                                                        setRestoreTarget(u)
+                                                    }
+                                                >
+                                                    {" "}
+                                                    ↩ Restore{" "}
+                                                </button>
+                                            )}{" "}
+                                        </div>{" "}
+                                    </td>{" "}
+                                </tr>
+                            ))}{" "}
+                        </tbody>{" "}
+                    </table>{" "}
+                </div>{" "}
+            </div>{" "}
+            <Modal
+                open={!!archiveTarget}
+                title="Confirm Archive Action?"
+                message={`This will deactivate ${archiveTarget?.given_name} ${archiveTarget?.last_name}'s account. They will no longer be able to access the system.`}
+                confirmLabel="Yes, Archive"
+                variant="danger"
+                onConfirm={handleArchive}
+                onCancel={() => setArchiveTarget(null)}
+            />{" "}
+            <Modal
+                open={!!restoreTarget}
+                title="Restore User from Archive?"
+                message={`${restoreTarget?.given_name} ${restoreTarget?.last_name}'s account will be reactivated.`}
+                confirmLabel="Yes, Restore"
+                onConfirm={handleRestore}
+                onCancel={() => setRestoreTarget(null)}
+            />{" "}
+        </div>
+    );
+}
+export { StaffAccounts as default };

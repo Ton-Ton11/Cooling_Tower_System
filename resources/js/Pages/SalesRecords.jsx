@@ -1,1 +1,538 @@
-﻿import { useState } from "react";import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";import StatusBadge from "../Components/StatusBadge";import Modal from "../Components/Modal";import { bookings, weeklyRevenue, monthlyRevenue } from "../data/mockData";function SalesRecords({ addToast }) {  const [period, setPeriod] = useState("Monthly");  const [reportModal, setReportModal] = useState(false);  const [reportPeriod, setReportPeriod] = useState("Monthly");  const [generatedReport, setGeneratedReport] = useState(false);  const paidBookings = bookings.filter((b) => b.payment_status === "Paid");  const totalRevenue = paidBookings.reduce((s, b) => s + (b.amount_paid || 0), 0);  const gcashRevenue = paidBookings.filter((b) => b.payment_method === "GCash").reduce((s, b) => s + (b.amount_paid || 0), 0);  const cashRevenue = paidBookings.filter((b) => b.payment_method === "Cash").reduce((s, b) => s + (b.amount_paid || 0), 0);  const chartData = period === "Weekly" ? weeklyRevenue.map((d) => ({ key: d.day, revenue: d.revenue })) : period === "Monthly" ? monthlyRevenue.map((d) => ({ key: d.month, revenue: d.revenue })) : monthlyRevenue.map((d) => ({ key: d.month, revenue: d.revenue * 12 }));  const chartKey = "key";  const handleGenerateReport = () => {    addToast(`Booking Fee Sales and Records (${reportPeriod}) generated and saved.`);    setReportModal(false);    setGeneratedReport(true);  };  return <div style={{ animation: "fadeInUp 0.25s ease" }}>      <div className="page-header">        <div>          <h1 className="page-title font-display">Sales & Records</h1>          <p className="page-subtitle">Booking fee revenue, payment tracking, and reports</p>        </div>        <button className="btn-primary" onClick={() => setReportModal(true)}>📊 Generate Report</button>      </div>      {    /* KPI Row */  }      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 16, marginBottom: 24 }}>        {[    { label: "Total Revenue", value: `\u20B1${totalRevenue.toLocaleString()}`, color: "#16A34A" },    { label: "Paid Bookings", value: paidBookings.length, color: "#3F7DFF" },    { label: "GCash Revenue", value: `\u20B1${gcashRevenue.toLocaleString()}`, color: "#8B5CF6" },    { label: "Cash Revenue", value: `\u20B1${cashRevenue.toLocaleString()}`, color: "#F58A07" }  ].map((k) => <div key={k.label} className="card" style={{ padding: "16px 20px" }}>            <p style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "#6B7280", marginBottom: 8 }}>{k.label}</p>            <p style={{ fontSize: 24, fontWeight: 700, color: k.color }}>{k.value}</p>          </div>)}      </div>      {    /* Chart */  }      <div className="card" style={{ padding: 24, marginBottom: 20 }}>        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>          <div>            <p className="section-label">Revenue Over Time</p>            <p style={{ fontSize: 20, fontWeight: 700, color: "#1E2F5F" }}>              ₱{chartData.reduce((s, d) => s + d.revenue, 0).toLocaleString()}            </p>          </div>          <div className="tab-bar">            {["Weekly", "Monthly", "Annually"].map((p) => <button key={p} className={`tab-item ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{p}</button>)}          </div>        </div>        <ResponsiveContainer width="100%" height={220}>          {period === "Weekly" ? <BarChart data={chartData} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>              <defs>                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">                  <stop offset="0%" stopColor="#6FD0FA" stopOpacity={1} />                  <stop offset="100%" stopColor="#2F5CF0" stopOpacity={0.7} />                </linearGradient>              </defs>              <CartesianGrid strokeDasharray="3 3" stroke="#F0F2F5" />              <XAxis dataKey={chartKey} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />              <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => `\u20B1${(v / 1e3).toFixed(0)}k`} />              <Tooltip    contentStyle={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12, color: "#1E2F5F" }}    formatter={(v) => [`\u20B1${Number(v).toLocaleString()}`, "Revenue"]}  />              <Bar dataKey="revenue" fill="url(#barGrad)" radius={[4, 4, 0, 0]} />            </BarChart> : <AreaChart data={chartData} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>              <defs>                <linearGradient id="areaGrad2" x1="0" y1="0" x2="0" y2="1">                  <stop offset="5%" stopColor="#FFB84D" stopOpacity={0.3} />                  <stop offset="95%" stopColor="#D9660B" stopOpacity={0.02} />                </linearGradient>              </defs>              <CartesianGrid strokeDasharray="3 3" stroke="#F0F2F5" />              <XAxis dataKey={chartKey} tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />              <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => `\u20B1${(v / 1e3).toFixed(0)}k`} />              <Tooltip    contentStyle={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12, color: "#1E2F5F" }}    formatter={(v) => [`\u20B1${Number(v).toLocaleString()}`, "Revenue"]}  />              <Area type="monotone" dataKey="revenue" stroke="#F58A07" strokeWidth={2} fill="url(#areaGrad2)" />            </AreaChart>}        </ResponsiveContainer>      </div>      {generatedReport && <div style={{    display: "flex",    alignItems: "center",    gap: 12,    padding: "14px 20px",    borderRadius: 10,    marginBottom: 20,    background: "rgba(22,163,74,0.06)",    border: "1px solid rgba(22,163,74,0.2)"  }}>          <span style={{ fontSize: 20 }}>✅</span>          <div style={{ flex: 1 }}>            <p style={{ fontSize: 13, fontWeight: 600, color: "#16A34A" }}>Report Generated</p>            <p style={{ fontSize: 12, color: "#6B7280" }}>Booking Fee Sales and Records ({reportPeriod}) have been generated and saved.</p>          </div>          <button className="btn-primary" style={{ fontSize: 12, padding: "6px 14px" }}>⬇ Download PDF</button>        </div>}      {    /* Payments Table */  }      <div className="card" style={{ padding: 20 }}>        <p className="section-label" style={{ marginBottom: 14 }}>Payment Records</p>        <div style={{ overflowX: "auto" }}>          <table style={{ width: "100%", borderCollapse: "collapse" }}>            <thead>              <tr style={{ background: "#F5F7FA" }}>                {["Booking ID", "Client", "Service", "Amount Paid", "Method", "Status", "Date"].map((h) => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "#6B7280", whiteSpace: "nowrap", borderBottom: "1px solid #EAECF0" }}>{h}</th>)}              </tr>            </thead>            <tbody>              {bookings.map((b) => <tr    key={b.booking_id}    style={{ borderTop: "1px solid #F5F7FA" }}    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(63,125,255,0.04)"}    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}  >                  <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 600, color: "#3F7DFF" }}>#{b.booking_id}</td>                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1E2F5F" }}>{b.client_name}</td>                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.service}</td>                  <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: b.payment_status === "Paid" ? "#16A34A" : "#9CA3AF" }}>                    {b.payment_status === "Paid" ? `\u20B1${b.amount_paid?.toLocaleString()}` : "\u2014"}                  </td>                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280" }}>{b.payment_method || "\u2014"}</td>                  <td style={{ padding: "10px 12px" }}><StatusBadge status={b.payment_status} /></td>                  <td style={{ padding: "10px 12px", fontSize: 11, color: "#9CA3AF", whiteSpace: "nowrap" }}>{b.created_at}</td>                </tr>)}            </tbody>          </table>        </div>      </div>      <Modal    open={reportModal}    title="Generate Sales Report"    confirmLabel="Generate & Save"    onConfirm={handleGenerateReport}    onCancel={() => setReportModal(false)}  >        <div>          <p className="section-label" style={{ marginBottom: 8 }}>Select Report Period</p>          <div style={{ display: "flex", gap: 10 }}>            {["Weekly", "Monthly", "Annually"].map((p) => <button    key={p}    onClick={() => setReportPeriod(p)}    style={{      flex: 1,      padding: "10px 8px",      borderRadius: 8,      cursor: "pointer",      background: reportPeriod === p ? "linear-gradient(135deg,#3F7DFF,#1E2F5F)" : "#F5F7FA",      border: reportPeriod === p ? "none" : "1px solid #E5E7EB",      color: reportPeriod === p ? "#fff" : "#6B7280",      fontSize: 13,      fontWeight: 600    }}  >{p}</button>)}          </div>        </div>      </Modal>    </div>;}export {  SalesRecords as default};
+﻿import { useState } from "react";
+import {
+    AreaChart,
+    Area,
+    BarChart,
+    Bar,
+    XAxis,
+    YAxis,
+    Tooltip,
+    ResponsiveContainer,
+    CartesianGrid,
+} from "recharts";
+import StatusBadge from "../Components/StatusBadge";
+import Modal from "../Components/Modal";
+import { bookings, weeklyRevenue, monthlyRevenue } from "../data/mockData";
+function SalesRecords({ addToast }) {
+    const [period, setPeriod] = useState("Monthly");
+    const [reportModal, setReportModal] = useState(false);
+    const [reportPeriod, setReportPeriod] = useState("Monthly");
+    const [generatedReport, setGeneratedReport] = useState(false);
+    const paidBookings = bookings.filter((b) => b.payment_status === "Paid");
+    const totalRevenue = paidBookings.reduce(
+        (s, b) => s + (b.amount_paid || 0),
+        0,
+    );
+    const gcashRevenue = paidBookings
+        .filter((b) => b.payment_method === "GCash")
+        .reduce((s, b) => s + (b.amount_paid || 0), 0);
+    const cashRevenue = paidBookings
+        .filter((b) => b.payment_method === "Cash")
+        .reduce((s, b) => s + (b.amount_paid || 0), 0);
+    const chartData =
+        period === "Weekly"
+            ? weeklyRevenue.map((d) => ({ key: d.day, revenue: d.revenue }))
+            : period === "Monthly"
+              ? monthlyRevenue.map((d) => ({
+                    key: d.month,
+                    revenue: d.revenue,
+                }))
+              : monthlyRevenue.map((d) => ({
+                    key: d.month,
+                    revenue: d.revenue * 12,
+                }));
+    const chartKey = "key";
+    const handleGenerateReport = () => {
+        addToast(
+            `Booking Fee Sales and Records (${reportPeriod}) generated and saved.`,
+        );
+        setReportModal(false);
+        setGeneratedReport(true);
+    };
+    return (
+        <div style={{ animation: "fadeInUp 0.25s ease" }}>
+            {" "}
+            <div className="page-header">
+                {" "}
+                <div>
+                    {" "}
+                    <h1 className="page-title font-display">
+                        Sales & Records
+                    </h1>{" "}
+                    <p className="page-subtitle">
+                        Booking fee revenue, payment tracking, and reports
+                    </p>{" "}
+                </div>{" "}
+                <button
+                    className="btn-primary"
+                    onClick={() => setReportModal(true)}
+                >
+                    📊 Generate Report
+                </button>{" "}
+            </div>{" "}
+            {/* KPI Row */}{" "}
+            <div
+                style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                    gap: 16,
+                    marginBottom: 24,
+                }}
+            >
+                {" "}
+                {[
+                    {
+                        label: "Total Revenue",
+                        value: `\u20B1${totalRevenue.toLocaleString()}`,
+                        color: "#16A34A",
+                    },
+                    {
+                        label: "Paid Bookings",
+                        value: paidBookings.length,
+                        color: "#3F7DFF",
+                    },
+                    {
+                        label: "GCash Revenue",
+                        value: `\u20B1${gcashRevenue.toLocaleString()}`,
+                        color: "#8B5CF6",
+                    },
+                    {
+                        label: "Cash Revenue",
+                        value: `\u20B1${cashRevenue.toLocaleString()}`,
+                        color: "#F58A07",
+                    },
+                ].map((k) => (
+                    <div
+                        key={k.label}
+                        className="card"
+                        style={{ padding: "16px 20px" }}
+                    >
+                        {" "}
+                        <p
+                            style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                textTransform: "uppercase",
+                                letterSpacing: "0.05em",
+                                color: "#6B7280",
+                                marginBottom: 8,
+                            }}
+                        >
+                            {k.label}
+                        </p>{" "}
+                        <p
+                            style={{
+                                fontSize: 24,
+                                fontWeight: 700,
+                                color: k.color,
+                            }}
+                        >
+                            {k.value}
+                        </p>{" "}
+                    </div>
+                ))}{" "}
+            </div>{" "}
+            {/* Chart */}{" "}
+            <div className="card" style={{ padding: 24, marginBottom: 20 }}>
+                {" "}
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 20,
+                    }}
+                >
+                    {" "}
+                    <div>
+                        {" "}
+                        <p className="section-label">Revenue Over Time</p>{" "}
+                        <p
+                            style={{
+                                fontSize: 20,
+                                fontWeight: 700,
+                                color: "#1E2F5F",
+                            }}
+                        >
+                            {" "}
+                            ₱
+                            {chartData
+                                .reduce((s, d) => s + d.revenue, 0)
+                                .toLocaleString()}{" "}
+                        </p>{" "}
+                    </div>{" "}
+                    <div className="tab-bar">
+                        {" "}
+                        {["Weekly", "Monthly", "Annually"].map((p) => (
+                            <button
+                                key={p}
+                                className={`tab-item ${period === p ? "active" : ""}`}
+                                onClick={() => setPeriod(p)}
+                            >
+                                {p}
+                            </button>
+                        ))}{" "}
+                    </div>{" "}
+                </div>{" "}
+                <ResponsiveContainer width="100%" height={220}>
+                    {" "}
+                    {period === "Weekly" ? (
+                        <BarChart
+                            data={chartData}
+                            margin={{ top: 0, right: 0, left: -10, bottom: 0 }}
+                        >
+                            {" "}
+                            <defs>
+                                {" "}
+                                <linearGradient
+                                    id="barGrad"
+                                    x1="0"
+                                    y1="0"
+                                    x2="0"
+                                    y2="1"
+                                >
+                                    {" "}
+                                    <stop
+                                        offset="0%"
+                                        stopColor="#6FD0FA"
+                                        stopOpacity={1}
+                                    />{" "}
+                                    <stop
+                                        offset="100%"
+                                        stopColor="#2F5CF0"
+                                        stopOpacity={0.7}
+                                    />{" "}
+                                </linearGradient>{" "}
+                            </defs>{" "}
+                            <CartesianGrid
+                                strokeDasharray="3 3"
+                                stroke="#F0F2F5"
+                            />{" "}
+                            <XAxis
+                                dataKey={chartKey}
+                                tick={{ fontSize: 11, fill: "#9CA3AF" }}
+                                axisLine={false}
+                                tickLine={false}
+                            />{" "}
+                            <YAxis
+                                tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                                axisLine={false}
+                                tickLine={false}
+                                tickFormatter={(v) =>
+                                    `\u20B1${(v / 1e3).toFixed(0)}k`
+                                }
+                            />{" "}
+                            <Tooltip
+                                contentStyle={{
+                                    background: "#fff",
+                                    border: "1px solid #E5E7EB",
+                                    borderRadius: 8,
+                                    fontSize: 12,
+                                    color: "#1E2F5F",
+                                }}
+                                formatter={(v) => [
+                                    `\u20B1${Number(v).toLocaleString()}`,
+                                    "Revenue",
+                                ]}
+                            />{" "}
+                            <Bar
+                                dataKey="revenue"
+                                fill="url(#barGrad)"
+                                radius={[4, 4, 0, 0]}
+                            />{" "}
+                        </BarChart>
+                    ) : (
+                        <AreaChart
+                            data={chartData}
+                            margin={{ top: 0, right: 0, left: -10, bottom: 0 }}
+                        >
+                            {" "}
+                            <defs>
+                                {" "}
+                                <linearGradient
+                                    id="areaGrad2"
+                                    x1="0"
+                                    y1="0"
+                                    x2="0"
+                                    y2="1"
+                                >
+                                    {" "}
+                                    <stop
+                                        offset="5%"
+                                        stopColor="#FFB84D"
+                                        stopOpacity={0.3}
+                                    />{" "}
+                                    <stop
+                                        offset="95%"
+                                        stopColor="#D9660B"
+                                        stopOpacity={0.02}
+                                    />{" "}
+                                </linearGradient>{" "}
+                            </defs>{" "}
+                            <CartesianGrid
+                                strokeDasharray="3 3"
+                                stroke="#F0F2F5"
+                            />{" "}
+                            <XAxis
+                                dataKey={chartKey}
+                                tick={{ fontSize: 11, fill: "#9CA3AF" }}
+                                axisLine={false}
+                                tickLine={false}
+                            />{" "}
+                            <YAxis
+                                tick={{ fontSize: 10, fill: "#9CA3AF" }}
+                                axisLine={false}
+                                tickLine={false}
+                                tickFormatter={(v) =>
+                                    `\u20B1${(v / 1e3).toFixed(0)}k`
+                                }
+                            />{" "}
+                            <Tooltip
+                                contentStyle={{
+                                    background: "#fff",
+                                    border: "1px solid #E5E7EB",
+                                    borderRadius: 8,
+                                    fontSize: 12,
+                                    color: "#1E2F5F",
+                                }}
+                                formatter={(v) => [
+                                    `\u20B1${Number(v).toLocaleString()}`,
+                                    "Revenue",
+                                ]}
+                            />{" "}
+                            <Area
+                                type="monotone"
+                                dataKey="revenue"
+                                stroke="#F58A07"
+                                strokeWidth={2}
+                                fill="url(#areaGrad2)"
+                            />{" "}
+                        </AreaChart>
+                    )}{" "}
+                </ResponsiveContainer>{" "}
+            </div>{" "}
+            {generatedReport && (
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "14px 20px",
+                        borderRadius: 10,
+                        marginBottom: 20,
+                        background: "rgba(22,163,74,0.06)",
+                        border: "1px solid rgba(22,163,74,0.2)",
+                    }}
+                >
+                    {" "}
+                    <span style={{ fontSize: 20 }}>✅</span>{" "}
+                    <div style={{ flex: 1 }}>
+                        {" "}
+                        <p
+                            style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "#16A34A",
+                            }}
+                        >
+                            Report Generated
+                        </p>{" "}
+                        <p style={{ fontSize: 12, color: "#6B7280" }}>
+                            Booking Fee Sales and Records ({reportPeriod}) have
+                            been generated and saved.
+                        </p>{" "}
+                    </div>{" "}
+                    <button
+                        className="btn-primary"
+                        style={{ fontSize: 12, padding: "6px 14px" }}
+                    >
+                        ⬇ Download PDF
+                    </button>{" "}
+                </div>
+            )}{" "}
+            {/* Payments Table */}{" "}
+            <div className="card" style={{ padding: 20 }}>
+                {" "}
+                <p className="section-label" style={{ marginBottom: 14 }}>
+                    Payment Records
+                </p>{" "}
+                <div style={{ overflowX: "auto" }}>
+                    {" "}
+                    <table
+                        style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                        {" "}
+                        <thead>
+                            {" "}
+                            <tr style={{ background: "#F5F7FA" }}>
+                                {" "}
+                                {[
+                                    "Booking ID",
+                                    "Client",
+                                    "Service",
+                                    "Amount Paid",
+                                    "Method",
+                                    "Status",
+                                    "Date",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        style={{
+                                            padding: "10px 12px",
+                                            textAlign: "left",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            letterSpacing: "0.05em",
+                                            textTransform: "uppercase",
+                                            color: "#6B7280",
+                                            whiteSpace: "nowrap",
+                                            borderBottom: "1px solid #EAECF0",
+                                        }}
+                                    >
+                                        {h}
+                                    </th>
+                                ))}{" "}
+                            </tr>{" "}
+                        </thead>{" "}
+                        <tbody>
+                            {" "}
+                            {bookings.map((b) => (
+                                <tr
+                                    key={b.booking_id}
+                                    style={{ borderTop: "1px solid #F5F7FA" }}
+                                    onMouseEnter={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "rgba(63,125,255,0.04)")
+                                    }
+                                    onMouseLeave={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "transparent")
+                                    }
+                                >
+                                    {" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            color: "#3F7DFF",
+                                        }}
+                                    >
+                                        #{b.booking_id}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 13,
+                                            color: "#1E2F5F",
+                                        }}
+                                    >
+                                        {b.client_name}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#6B7280",
+                                            maxWidth: 180,
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {b.service}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            color:
+                                                b.payment_status === "Paid"
+                                                    ? "#16A34A"
+                                                    : "#9CA3AF",
+                                        }}
+                                    >
+                                        {" "}
+                                        {b.payment_status === "Paid"
+                                            ? `\u20B1${b.amount_paid?.toLocaleString()}`
+                                            : "\u2014"}{" "}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#6B7280",
+                                        }}
+                                    >
+                                        {b.payment_method || "\u2014"}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        <StatusBadge
+                                            status={b.payment_status}
+                                        />
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 11,
+                                            color: "#9CA3AF",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {b.created_at}
+                                    </td>{" "}
+                                </tr>
+                            ))}{" "}
+                        </tbody>{" "}
+                    </table>{" "}
+                </div>{" "}
+            </div>{" "}
+            <Modal
+                open={reportModal}
+                title="Generate Sales Report"
+                confirmLabel="Generate & Save"
+                onConfirm={handleGenerateReport}
+                onCancel={() => setReportModal(false)}
+            >
+                {" "}
+                <div>
+                    {" "}
+                    <p className="section-label" style={{ marginBottom: 8 }}>
+                        Select Report Period
+                    </p>{" "}
+                    <div style={{ display: "flex", gap: 10 }}>
+                        {" "}
+                        {["Weekly", "Monthly", "Annually"].map((p) => (
+                            <button
+                                key={p}
+                                onClick={() => setReportPeriod(p)}
+                                style={{
+                                    flex: 1,
+                                    padding: "10px 8px",
+                                    borderRadius: 8,
+                                    cursor: "pointer",
+                                    background:
+                                        reportPeriod === p
+                                            ? "linear-gradient(135deg,#3F7DFF,#1E2F5F)"
+                                            : "#F5F7FA",
+                                    border:
+                                        reportPeriod === p
+                                            ? "none"
+                                            : "1px solid #E5E7EB",
+                                    color:
+                                        reportPeriod === p ? "#fff" : "#6B7280",
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                }}
+                            >
+                                {p}
+                            </button>
+                        ))}{" "}
+                    </div>{" "}
+                </div>{" "}
+            </Modal>{" "}
+        </div>
+    );
+}
+export { SalesRecords as default };

@@ -1,1 +1,613 @@
-﻿import { useState } from "react";import StatusBadge from "../Components/StatusBadge";import Modal from "../Components/Modal";import { inventoryItems as initialItems } from "../data/mockData";function MaterialsTools({ addToast }) {  const [items, setItems] = useState(initialItems);  const [subTab, setSubTab] = useState("materials");  const [qtyAction, setQtyAction] = useState(null);  const [qtyValue, setQtyValue] = useState("");  const [toolAction, setToolAction] = useState(null);  const [damageReport, setDamageReport] = useState("");  const [damagedModal, setDamagedModal] = useState(null);  const [confirmQty, setConfirmQty] = useState(false);  const materials = items.filter((i) => i.item_type !== "Tool");  const tools = items.filter((i) => i.item_type === "Tool");  const lowStockItems = materials.filter((i) => i.quantity_on_hand <= i.reorder_level);  const handleQtyUpdate = () => {    if (!qtyAction) return;    const amt = parseInt(qtyValue) || 0;    setItems((prev) => prev.map(      (i) => i.item_id === qtyAction.item.item_id ? { ...i, quantity_on_hand: Math.max(0, i.quantity_on_hand + (qtyAction.mode === "add" ? amt : -amt)) } : i    ));    addToast(`Inventory updated: ${qtyAction.item.item_name} ${qtyAction.mode === "add" ? "+" : "-"}${amt} ${qtyAction.item.unit}.`);    setQtyAction(null);    setQtyValue("");    setConfirmQty(false);  };  const handleToolAction = (mode) => {    if (!toolAction) return;    const newStatus = mode === "return" ? "Available" : "Checked Out";    setItems((prev) => prev.map(      (i) => i.item_id === toolAction.item.item_id ? { ...i, status: newStatus } : i    ));    addToast(`Inventory updated: ${toolAction.item.item_name} \u2014 ${mode === "get" ? "checked out" : mode === "return" ? "returned" : "in use"}.`);    setToolAction(null);  };  const handleDamageReport = () => {    if (!damagedModal) return;    setItems((prev) => prev.map(      (i) => i.item_id === damagedModal.item_id ? { ...i, status: "Lost/Damaged", quantity_on_hand: Math.max(0, i.quantity_on_hand - 1) } : i    ));    addToast(`Damaged/lost tool "${damagedModal.item_name}" has been logged in the database.`, "warning");    setDamagedModal(null);    setDamageReport("");  };  return <div style={{ animation: "fadeInUp 0.25s ease" }}>      <div className="page-header">        <div>          <h1 className="page-title font-display">Materials & Tools Inventory</h1>          <p className="page-subtitle">{items.length} items tracked · {lowStockItems.length} low stock alerts</p>        </div>      </div>      {lowStockItems.length > 0 && <div style={{    display: "flex",    alignItems: "center",    gap: 12,    padding: "12px 16px",    borderRadius: 10,    marginBottom: 20,    background: "rgba(245,138,7,0.08)",    border: "1px solid rgba(245,138,7,0.25)"  }}>          <span style={{ fontSize: 18 }}>⚠️</span>          <div>            <p style={{ fontSize: 13, fontWeight: 600, color: "#D97706" }}>Low Stock Alert</p>            <p style={{ fontSize: 12, color: "#6B7280" }}>              {lowStockItems.map((i) => i.item_name).join(" \xB7 ")} — below reorder level            </p>          </div>        </div>}      {    /* Sub Tabs */  }      <div className="tab-bar" style={{ marginBottom: 20, display: "inline-flex" }}>        <button className={`tab-item ${subTab === "materials" ? "active" : ""}`} onClick={() => setSubTab("materials")}>          Materials & Spare Parts ({materials.length})        </button>        <button className={`tab-item ${subTab === "tools" ? "active" : ""}`} onClick={() => setSubTab("tools")}>          Tools ({tools.length})        </button>      </div>      {subTab === "materials" && <div className="card" style={{ padding: 20 }}>          <table style={{ width: "100%", borderCollapse: "collapse" }}>            <thead>              <tr style={{ background: "#F5F7FA" }}>                {["ID", "Item Name", "Type", "Qty on Hand", "Reorder Level", "Unit", "Last Updated", "Actions"].map((h) => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "#6B7280", whiteSpace: "nowrap", borderBottom: "1px solid #EAECF0" }}>{h}</th>)}              </tr>            </thead>            <tbody>              {materials.map((item) => {    const isLow = item.quantity_on_hand <= item.reorder_level;    return <tr      key={item.item_id}      style={{ borderTop: "1px solid #F5F7FA" }}      onMouseEnter={(e) => e.currentTarget.style.background = "rgba(63,125,255,0.04)"}      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}    >                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#9CA3AF" }}>#{item.item_id}</td>                    <td style={{ padding: "10px 12px", fontSize: 13, color: "#1E2F5F" }}>{item.item_name}</td>                    <td style={{ padding: "10px 12px" }}><StatusBadge status={item.item_type} /></td>                    <td style={{ padding: "10px 12px" }}>                      <span style={{ fontSize: 14, fontWeight: 600, color: isLow ? "#D97706" : "#16A34A" }}>                        {item.quantity_on_hand}                      </span>                      {isLow && <span style={{ fontSize: 10, color: "#D97706", marginLeft: 6 }}>LOW</span>}                    </td>                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#9CA3AF" }}>{item.reorder_level}</td>                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280" }}>{item.unit}</td>                    <td style={{ padding: "10px 12px", fontSize: 11, color: "#9CA3AF" }}>{item.last_updated}</td>                    <td style={{ padding: "10px 12px" }}>                      <div style={{ display: "flex", gap: 6 }}>                        <button      className="btn-primary"      style={{ padding: "4px 10px", fontSize: 11 }}      onClick={() => {        setQtyAction({ item, mode: "add" });        setQtyValue("");      }}    >+ Add</button>                        <button      className="btn-secondary"      style={{ padding: "4px 10px", fontSize: 11 }}      onClick={() => {        setQtyAction({ item, mode: "reduce" });        setQtyValue("");      }}    >− Reduce</button>                      </div>                    </td>                  </tr>;  })}            </tbody>          </table>        </div>}      {subTab === "tools" && <div className="card" style={{ padding: 20 }}>          <table style={{ width: "100%", borderCollapse: "collapse" }}>            <thead>              <tr style={{ background: "#F5F7FA" }}>                {["ID", "Tool Name", "Qty", "Unit", "Status", "Last Updated", "Actions"].map((h) => <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "#6B7280", whiteSpace: "nowrap", borderBottom: "1px solid #EAECF0" }}>{h}</th>)}              </tr>            </thead>            <tbody>              {tools.map((item) => <tr    key={item.item_id}    style={{ borderTop: "1px solid #F5F7FA" }}    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(63,125,255,0.04)"}    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}  >                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#9CA3AF" }}>#{item.item_id}</td>                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1E2F5F" }}>{item.item_name}</td>                  <td style={{ padding: "10px 12px", fontSize: 14, fontWeight: 600, color: "#374151" }}>{item.quantity_on_hand}</td>                  <td style={{ padding: "10px 12px", fontSize: 12, color: "#6B7280" }}>{item.unit}</td>                  <td style={{ padding: "10px 12px" }}><StatusBadge status={item.status || "Available"} /></td>                  <td style={{ padding: "10px 12px", fontSize: 11, color: "#9CA3AF" }}>{item.last_updated}</td>                  <td style={{ padding: "10px 12px" }}>                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>                      {item.status !== "Lost/Damaged" && <>                          <button    className="btn-primary"    style={{ padding: "4px 8px", fontSize: 11 }}    onClick={() => setToolAction({ item, mode: "get" })}  >Get</button>                          <button    className="btn-secondary"    style={{ padding: "4px 8px", fontSize: 11 }}    onClick={() => setToolAction({ item, mode: "return" })}  >Return</button>                          <button    className="btn-secondary"    style={{ padding: "4px 8px", fontSize: 11 }}    onClick={() => setToolAction({ item, mode: "use" })}  >Use</button>                        </>}                      <button    className="btn-danger"    style={{ padding: "4px 8px", fontSize: 11 }}    onClick={() => setDamagedModal(item)}  >⚠️ Report</button>                    </div>                  </td>                </tr>)}            </tbody>          </table>        </div>}      {    /* Qty Modal */  }      <Modal    open={!!qtyAction && !confirmQty}    title={`${qtyAction?.mode === "add" ? "Add" : "Reduce"} Quantity \u2014 ${qtyAction?.item.item_name}`}    confirmLabel="Continue"    onConfirm={() => setConfirmQty(true)}    onCancel={() => setQtyAction(null)}  >        <div>          <p className="section-label" style={{ marginBottom: 6 }}>            {qtyAction?.mode === "add" ? "Quantity to Add" : "Quantity to Reduce"} (current: {qtyAction?.item.quantity_on_hand} {qtyAction?.item.unit})          </p>          <input type="number" min="1" className="input-field" placeholder="Enter quantity" value={qtyValue} onChange={(e) => setQtyValue(e.target.value)} />        </div>      </Modal>      <Modal    open={confirmQty}    title="Confirm Inventory Update?"    message={`This will ${qtyAction?.mode === "add" ? "add" : "reduce"} ${qtyValue || 0} ${qtyAction?.item.unit} of ${qtyAction?.item.item_name}.`}    confirmLabel="Yes, Update"    onConfirm={handleQtyUpdate}    onCancel={() => setConfirmQty(false)}  />      {    /* Tool Action Modal */  }      <Modal    open={!!toolAction && toolAction.mode !== "damaged"}    title={`${toolAction?.mode === "get" ? "Check Out" : toolAction?.mode === "return" ? "Return" : "Use"} Tool?`}    message={`${toolAction?.item.item_name} will be marked as ${toolAction?.mode === "return" ? "Available" : "Checked Out"}.`}    confirmLabel="Confirm"    onConfirm={() => handleToolAction(toolAction.mode)}    onCancel={() => setToolAction(null)}  />      {    /* Damage Report Modal */  }      <Modal    open={!!damagedModal}    title="Report Damaged / Lost Tool"    confirmLabel="Submit Report"    variant="danger"    onConfirm={handleDamageReport}    onCancel={() => {      setDamagedModal(null);      setDamageReport("");    }}  >        <div>          <p style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>            Tool: <strong style={{ color: "#EF4444" }}>{damagedModal?.item_name}</strong>          </p>          <p className="section-label" style={{ marginBottom: 6 }}>Damage / Loss Description</p>          <textarea    className="input-field"    style={{ height: 80, resize: "none" }}    placeholder="Describe what happened to the tool..."    value={damageReport}    onChange={(e) => setDamageReport(e.target.value)}  />        </div>      </Modal>    </div>;}export {  MaterialsTools as default};
+﻿import { useState } from "react";
+import StatusBadge from "../Components/StatusBadge";
+import Modal from "../Components/Modal";
+import { inventoryItems as initialItems } from "../data/mockData";
+function MaterialsTools({ addToast }) {
+    const [items, setItems] = useState(initialItems);
+    const [subTab, setSubTab] = useState("materials");
+    const [qtyAction, setQtyAction] = useState(null);
+    const [qtyValue, setQtyValue] = useState("");
+    const [toolAction, setToolAction] = useState(null);
+    const [damageReport, setDamageReport] = useState("");
+    const [damagedModal, setDamagedModal] = useState(null);
+    const [confirmQty, setConfirmQty] = useState(false);
+    const materials = items.filter((i) => i.item_type !== "Tool");
+    const tools = items.filter((i) => i.item_type === "Tool");
+    const lowStockItems = materials.filter(
+        (i) => i.quantity_on_hand <= i.reorder_level,
+    );
+    const handleQtyUpdate = () => {
+        if (!qtyAction) return;
+        const amt = parseInt(qtyValue) || 0;
+        setItems((prev) =>
+            prev.map((i) =>
+                i.item_id === qtyAction.item.item_id
+                    ? {
+                          ...i,
+                          quantity_on_hand: Math.max(
+                              0,
+                              i.quantity_on_hand +
+                                  (qtyAction.mode === "add" ? amt : -amt),
+                          ),
+                      }
+                    : i,
+            ),
+        );
+        addToast(
+            `Inventory updated: ${qtyAction.item.item_name} ${qtyAction.mode === "add" ? "+" : "-"}${amt} ${qtyAction.item.unit}.`,
+        );
+        setQtyAction(null);
+        setQtyValue("");
+        setConfirmQty(false);
+    };
+    const handleToolAction = (mode) => {
+        if (!toolAction) return;
+        const newStatus = mode === "return" ? "Available" : "Checked Out";
+        setItems((prev) =>
+            prev.map((i) =>
+                i.item_id === toolAction.item.item_id
+                    ? { ...i, status: newStatus }
+                    : i,
+            ),
+        );
+        addToast(
+            `Inventory updated: ${toolAction.item.item_name} \u2014 ${mode === "get" ? "checked out" : mode === "return" ? "returned" : "in use"}.`,
+        );
+        setToolAction(null);
+    };
+    const handleDamageReport = () => {
+        if (!damagedModal) return;
+        setItems((prev) =>
+            prev.map((i) =>
+                i.item_id === damagedModal.item_id
+                    ? {
+                          ...i,
+                          status: "Lost/Damaged",
+                          quantity_on_hand: Math.max(0, i.quantity_on_hand - 1),
+                      }
+                    : i,
+            ),
+        );
+        addToast(
+            `Damaged/lost tool "${damagedModal.item_name}" has been logged in the database.`,
+            "warning",
+        );
+        setDamagedModal(null);
+        setDamageReport("");
+    };
+    return (
+        <div style={{ animation: "fadeInUp 0.25s ease" }}>
+            {" "}
+            <div className="page-header">
+                {" "}
+                <div>
+                    {" "}
+                    <h1 className="page-title font-display">
+                        Materials & Tools Inventory
+                    </h1>{" "}
+                    <p className="page-subtitle">
+                        {items.length} items tracked · {lowStockItems.length}{" "}
+                        low stock alerts
+                    </p>{" "}
+                </div>{" "}
+            </div>{" "}
+            {lowStockItems.length > 0 && (
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "12px 16px",
+                        borderRadius: 10,
+                        marginBottom: 20,
+                        background: "rgba(245,138,7,0.08)",
+                        border: "1px solid rgba(245,138,7,0.25)",
+                    }}
+                >
+                    {" "}
+                    <span style={{ fontSize: 18 }}>⚠️</span>{" "}
+                    <div>
+                        {" "}
+                        <p
+                            style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "#D97706",
+                            }}
+                        >
+                            Low Stock Alert
+                        </p>{" "}
+                        <p style={{ fontSize: 12, color: "#6B7280" }}>
+                            {" "}
+                            {lowStockItems
+                                .map((i) => i.item_name)
+                                .join(" \xB7 ")}{" "}
+                            — below reorder level{" "}
+                        </p>{" "}
+                    </div>{" "}
+                </div>
+            )}{" "}
+            {/* Sub Tabs */}{" "}
+            <div
+                className="tab-bar"
+                style={{ marginBottom: 20, display: "inline-flex" }}
+            >
+                {" "}
+                <button
+                    className={`tab-item ${subTab === "materials" ? "active" : ""}`}
+                    onClick={() => setSubTab("materials")}
+                >
+                    {" "}
+                    Materials & Spare Parts ({materials.length}){" "}
+                </button>{" "}
+                <button
+                    className={`tab-item ${subTab === "tools" ? "active" : ""}`}
+                    onClick={() => setSubTab("tools")}
+                >
+                    {" "}
+                    Tools ({tools.length}){" "}
+                </button>{" "}
+            </div>{" "}
+            {subTab === "materials" && (
+                <div className="card" style={{ padding: 20 }}>
+                    {" "}
+                    <table
+                        style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                        {" "}
+                        <thead>
+                            {" "}
+                            <tr style={{ background: "#F5F7FA" }}>
+                                {" "}
+                                {[
+                                    "ID",
+                                    "Item Name",
+                                    "Type",
+                                    "Qty on Hand",
+                                    "Reorder Level",
+                                    "Unit",
+                                    "Last Updated",
+                                    "Actions",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        style={{
+                                            padding: "10px 12px",
+                                            textAlign: "left",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            letterSpacing: "0.05em",
+                                            textTransform: "uppercase",
+                                            color: "#6B7280",
+                                            whiteSpace: "nowrap",
+                                            borderBottom: "1px solid #EAECF0",
+                                        }}
+                                    >
+                                        {h}
+                                    </th>
+                                ))}{" "}
+                            </tr>{" "}
+                        </thead>{" "}
+                        <tbody>
+                            {" "}
+                            {materials.map((item) => {
+                                const isLow =
+                                    item.quantity_on_hand <= item.reorder_level;
+                                return (
+                                    <tr
+                                        key={item.item_id}
+                                        style={{
+                                            borderTop: "1px solid #F5F7FA",
+                                        }}
+                                        onMouseEnter={(e) =>
+                                            (e.currentTarget.style.background =
+                                                "rgba(63,125,255,0.04)")
+                                        }
+                                        onMouseLeave={(e) =>
+                                            (e.currentTarget.style.background =
+                                                "transparent")
+                                        }
+                                    >
+                                        {" "}
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#9CA3AF",
+                                            }}
+                                        >
+                                            #{item.item_id}
+                                        </td>{" "}
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 13,
+                                                color: "#1E2F5F",
+                                            }}
+                                        >
+                                            {item.item_name}
+                                        </td>{" "}
+                                        <td style={{ padding: "10px 12px" }}>
+                                            <StatusBadge
+                                                status={item.item_type}
+                                            />
+                                        </td>{" "}
+                                        <td style={{ padding: "10px 12px" }}>
+                                            {" "}
+                                            <span
+                                                style={{
+                                                    fontSize: 14,
+                                                    fontWeight: 600,
+                                                    color: isLow
+                                                        ? "#D97706"
+                                                        : "#16A34A",
+                                                }}
+                                            >
+                                                {" "}
+                                                {item.quantity_on_hand}{" "}
+                                            </span>{" "}
+                                            {isLow && (
+                                                <span
+                                                    style={{
+                                                        fontSize: 10,
+                                                        color: "#D97706",
+                                                        marginLeft: 6,
+                                                    }}
+                                                >
+                                                    LOW
+                                                </span>
+                                            )}{" "}
+                                        </td>{" "}
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#9CA3AF",
+                                            }}
+                                        >
+                                            {item.reorder_level}
+                                        </td>{" "}
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#6B7280",
+                                            }}
+                                        >
+                                            {item.unit}
+                                        </td>{" "}
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 11,
+                                                color: "#9CA3AF",
+                                            }}
+                                        >
+                                            {item.last_updated}
+                                        </td>{" "}
+                                        <td style={{ padding: "10px 12px" }}>
+                                            {" "}
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    gap: 6,
+                                                }}
+                                            >
+                                                {" "}
+                                                <button
+                                                    className="btn-primary"
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 11,
+                                                    }}
+                                                    onClick={() => {
+                                                        setQtyAction({
+                                                            item,
+                                                            mode: "add",
+                                                        });
+                                                        setQtyValue("");
+                                                    }}
+                                                >
+                                                    + Add
+                                                </button>{" "}
+                                                <button
+                                                    className="btn-secondary"
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 11,
+                                                    }}
+                                                    onClick={() => {
+                                                        setQtyAction({
+                                                            item,
+                                                            mode: "reduce",
+                                                        });
+                                                        setQtyValue("");
+                                                    }}
+                                                >
+                                                    − Reduce
+                                                </button>{" "}
+                                            </div>{" "}
+                                        </td>{" "}
+                                    </tr>
+                                );
+                            })}{" "}
+                        </tbody>{" "}
+                    </table>{" "}
+                </div>
+            )}{" "}
+            {subTab === "tools" && (
+                <div className="card" style={{ padding: 20 }}>
+                    {" "}
+                    <table
+                        style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                        {" "}
+                        <thead>
+                            {" "}
+                            <tr style={{ background: "#F5F7FA" }}>
+                                {" "}
+                                {[
+                                    "ID",
+                                    "Tool Name",
+                                    "Qty",
+                                    "Unit",
+                                    "Status",
+                                    "Last Updated",
+                                    "Actions",
+                                ].map((h) => (
+                                    <th
+                                        key={h}
+                                        style={{
+                                            padding: "10px 12px",
+                                            textAlign: "left",
+                                            fontSize: 11,
+                                            fontWeight: 600,
+                                            letterSpacing: "0.05em",
+                                            textTransform: "uppercase",
+                                            color: "#6B7280",
+                                            whiteSpace: "nowrap",
+                                            borderBottom: "1px solid #EAECF0",
+                                        }}
+                                    >
+                                        {h}
+                                    </th>
+                                ))}{" "}
+                            </tr>{" "}
+                        </thead>{" "}
+                        <tbody>
+                            {" "}
+                            {tools.map((item) => (
+                                <tr
+                                    key={item.item_id}
+                                    style={{ borderTop: "1px solid #F5F7FA" }}
+                                    onMouseEnter={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "rgba(63,125,255,0.04)")
+                                    }
+                                    onMouseLeave={(e) =>
+                                        (e.currentTarget.style.background =
+                                            "transparent")
+                                    }
+                                >
+                                    {" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#9CA3AF",
+                                        }}
+                                    >
+                                        #{item.item_id}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 13,
+                                            color: "#1E2F5F",
+                                        }}
+                                    >
+                                        {item.item_name}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 14,
+                                            fontWeight: 600,
+                                            color: "#374151",
+                                        }}
+                                    >
+                                        {item.quantity_on_hand}
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 12,
+                                            color: "#6B7280",
+                                        }}
+                                    >
+                                        {item.unit}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        <StatusBadge
+                                            status={item.status || "Available"}
+                                        />
+                                    </td>{" "}
+                                    <td
+                                        style={{
+                                            padding: "10px 12px",
+                                            fontSize: 11,
+                                            color: "#9CA3AF",
+                                        }}
+                                    >
+                                        {item.last_updated}
+                                    </td>{" "}
+                                    <td style={{ padding: "10px 12px" }}>
+                                        {" "}
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                gap: 5,
+                                                flexWrap: "wrap",
+                                            }}
+                                        >
+                                            {" "}
+                                            {item.status !== "Lost/Damaged" && (
+                                                <>
+                                                    {" "}
+                                                    <button
+                                                        className="btn-primary"
+                                                        style={{
+                                                            padding: "4px 8px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() =>
+                                                            setToolAction({
+                                                                item,
+                                                                mode: "get",
+                                                            })
+                                                        }
+                                                    >
+                                                        Get
+                                                    </button>{" "}
+                                                    <button
+                                                        className="btn-secondary"
+                                                        style={{
+                                                            padding: "4px 8px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() =>
+                                                            setToolAction({
+                                                                item,
+                                                                mode: "return",
+                                                            })
+                                                        }
+                                                    >
+                                                        Return
+                                                    </button>{" "}
+                                                    <button
+                                                        className="btn-secondary"
+                                                        style={{
+                                                            padding: "4px 8px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() =>
+                                                            setToolAction({
+                                                                item,
+                                                                mode: "use",
+                                                            })
+                                                        }
+                                                    >
+                                                        Use
+                                                    </button>{" "}
+                                                </>
+                                            )}{" "}
+                                            <button
+                                                className="btn-danger"
+                                                style={{
+                                                    padding: "4px 8px",
+                                                    fontSize: 11,
+                                                }}
+                                                onClick={() =>
+                                                    setDamagedModal(item)
+                                                }
+                                            >
+                                                ⚠️ Report
+                                            </button>{" "}
+                                        </div>{" "}
+                                    </td>{" "}
+                                </tr>
+                            ))}{" "}
+                        </tbody>{" "}
+                    </table>{" "}
+                </div>
+            )}{" "}
+            {/* Qty Modal */}{" "}
+            <Modal
+                open={!!qtyAction && !confirmQty}
+                title={`${qtyAction?.mode === "add" ? "Add" : "Reduce"} Quantity \u2014 ${qtyAction?.item.item_name}`}
+                confirmLabel="Continue"
+                onConfirm={() => setConfirmQty(true)}
+                onCancel={() => setQtyAction(null)}
+            >
+                {" "}
+                <div>
+                    {" "}
+                    <p className="section-label" style={{ marginBottom: 6 }}>
+                        {" "}
+                        {qtyAction?.mode === "add"
+                            ? "Quantity to Add"
+                            : "Quantity to Reduce"}{" "}
+                        (current: {qtyAction?.item.quantity_on_hand}{" "}
+                        {qtyAction?.item.unit}){" "}
+                    </p>{" "}
+                    <input
+                        type="number"
+                        min="1"
+                        className="input-field"
+                        placeholder="Enter quantity"
+                        value={qtyValue}
+                        onChange={(e) => setQtyValue(e.target.value)}
+                    />{" "}
+                </div>{" "}
+            </Modal>{" "}
+            <Modal
+                open={confirmQty}
+                title="Confirm Inventory Update?"
+                message={`This will ${qtyAction?.mode === "add" ? "add" : "reduce"} ${qtyValue || 0} ${qtyAction?.item.unit} of ${qtyAction?.item.item_name}.`}
+                confirmLabel="Yes, Update"
+                onConfirm={handleQtyUpdate}
+                onCancel={() => setConfirmQty(false)}
+            />{" "}
+            {/* Tool Action Modal */}{" "}
+            <Modal
+                open={!!toolAction && toolAction.mode !== "damaged"}
+                title={`${toolAction?.mode === "get" ? "Check Out" : toolAction?.mode === "return" ? "Return" : "Use"} Tool?`}
+                message={`${toolAction?.item.item_name} will be marked as ${toolAction?.mode === "return" ? "Available" : "Checked Out"}.`}
+                confirmLabel="Confirm"
+                onConfirm={() => handleToolAction(toolAction.mode)}
+                onCancel={() => setToolAction(null)}
+            />{" "}
+            {/* Damage Report Modal */}{" "}
+            <Modal
+                open={!!damagedModal}
+                title="Report Damaged / Lost Tool"
+                confirmLabel="Submit Report"
+                variant="danger"
+                onConfirm={handleDamageReport}
+                onCancel={() => {
+                    setDamagedModal(null);
+                    setDamageReport("");
+                }}
+            >
+                {" "}
+                <div>
+                    {" "}
+                    <p
+                        style={{
+                            fontSize: 13,
+                            color: "#6B7280",
+                            marginBottom: 12,
+                        }}
+                    >
+                        {" "}
+                        Tool:{" "}
+                        <strong style={{ color: "#EF4444" }}>
+                            {damagedModal?.item_name}
+                        </strong>{" "}
+                    </p>{" "}
+                    <p className="section-label" style={{ marginBottom: 6 }}>
+                        Damage / Loss Description
+                    </p>{" "}
+                    <textarea
+                        className="input-field"
+                        style={{ height: 80, resize: "none" }}
+                        placeholder="Describe what happened to the tool..."
+                        value={damageReport}
+                        onChange={(e) => setDamageReport(e.target.value)}
+                    />{" "}
+                </div>{" "}
+            </Modal>{" "}
+        </div>
+    );
+}
+export { MaterialsTools as default };
