@@ -1,97 +1,230 @@
-﻿import { useState } from "react";
-import StatusBadge from "../Components/StatusBadge";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "../Components/Modal";
-import { acUnits as initialUnits } from "../data/mockData";
-const acTypes = [
-    "Window",
-    "Split",
-    "Cassette",
-    "Floor Mounted",
-    "Ceiling Suspended",
-];
-function AcUnits({ addToast }) {
-    const [units, setUnits] = useState(initialUnits);
+import StatusBadge from "../Components/StatusBadge";
+import {
+    AC_STATUS_OPTIONS,
+    AC_TYPE_OPTIONS,
+    SUPER_ADMIN_ENDPOINTS,
+    extractErrorMessage,
+    formatCurrency,
+    formatDate,
+    normalizeAcUnit,
+    toInputDate,
+} from "../utils/superAdmin";
+
+const createEmptyForm = () => ({
+    brand: "",
+    model: "",
+    serial_number: "",
+    horsepower: "",
+    ac_type: "Split",
+    refrigerant_type: "R32",
+    supplier: "",
+    purchase_price: "",
+    selling_price: "",
+    purchase_date: toInputDate(new Date()),
+    warranty_period: "12",
+    status: "Available",
+});
+
+function AcUnits({ addToast, onDataChanged }) {
+    const [units, setUnits] = useState([]);
     const [subTab, setSubTab] = useState("all");
-    const [addModal, setAddModal] = useState(false);
-    const [confirmAdd, setConfirmAdd] = useState(false);
-    const [form, setForm] = useState({
-        brand: "",
-        model: "",
-        serial_number: "",
-        horsepower: "",
-        ac_type: "Split",
-        refrigerant_type: "R32",
-        supplier: "",
-        purchase_price: "",
-        selling_price: "",
-        purchase_date: "2026-08-10",
-        warranty_period: "12",
-        status: "Available",
-    });
-    const orderBaseUnits = units.filter((u) => u.status === "Order Base");
-    const isLowStock = orderBaseUnits.length >= 2;
-    const handleAdd = () => {
-        const newUnit = {
-            ac_unit_id: Math.max(...units.map((u) => u.ac_unit_id)) + 1,
-            brand: form.brand,
-            model: form.model,
-            serial_number: form.serial_number,
-            horsepower: parseFloat(form.horsepower) || 1,
+    const [loading, setLoading] = useState(true);
+    const [editorMode, setEditorMode] = useState(null);
+    const [editingUnit, setEditingUnit] = useState(null);
+    const [form, setForm] = useState(createEmptyForm());
+    const [saving, setSaving] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const fetchUnits = useCallback(
+        async (showLoader = true) => {
+            if (showLoader) {
+                setLoading(true);
+            }
+
+            try {
+                const { data } = await window.axios.get(
+                    SUPER_ADMIN_ENDPOINTS.acUnits,
+                );
+                setUnits(
+                    (Array.isArray(data?.data) ? data.data : []).map(
+                        normalizeAcUnit,
+                    ),
+                );
+            } catch (error) {
+                addToast(
+                    extractErrorMessage(error, "Unable to load AC units."),
+                    "error",
+                );
+            } finally {
+                setLoading(false);
+            }
+        },
+        [addToast],
+    );
+
+    useEffect(() => {
+        fetchUnits();
+    }, [fetchUnits]);
+
+    const orderBaseUnits = useMemo(
+        () => units.filter((unit) => unit.status === "Order Base"),
+        [units],
+    );
+    const displayUnits = subTab === "order" ? orderBaseUnits : units;
+
+    const openCreateModal = () => {
+        setEditingUnit(null);
+        setForm(createEmptyForm());
+        setEditorMode("create");
+    };
+
+    const openEditModal = (unit) => {
+        setEditingUnit(unit);
+        setForm({
+            brand: unit.brand ?? "",
+            model: unit.model ?? "",
+            serial_number: unit.serial_number ?? "",
+            horsepower: String(unit.horsepower ?? ""),
+            ac_type: unit.ac_type ?? "Split",
+            refrigerant_type: unit.refrigerant_type ?? "",
+            supplier: unit.supplier ?? "",
+            purchase_price: String(unit.purchase_price ?? ""),
+            selling_price:
+                unit.selling_price === null || unit.selling_price === undefined
+                    ? ""
+                    : String(unit.selling_price),
+            purchase_date: toInputDate(unit.purchase_date),
+            warranty_period: String(unit.warranty_period ?? ""),
+            status: unit.status ?? "Available",
+        });
+        setEditorMode("edit");
+    };
+
+    const closeEditor = () => {
+        if (saving) {
+            return;
+        }
+
+        setEditorMode(null);
+        setEditingUnit(null);
+        setForm(createEmptyForm());
+    };
+
+    const handleSave = async () => {
+        if (saving) {
+            return;
+        }
+
+        setSaving(true);
+
+        const payload = {
+            brand: form.brand.trim(),
+            model: form.model.trim(),
+            serial_number: form.serial_number.trim(),
+            horsepower: Number(form.horsepower),
             ac_type: form.ac_type,
-            refrigerant_type: form.refrigerant_type,
-            supplier: form.supplier,
-            purchase_price: parseFloat(form.purchase_price) || 0,
-            selling_price: parseFloat(form.selling_price) || 0,
+            refrigerant_type: form.refrigerant_type.trim() || null,
+            supplier: form.supplier.trim() || null,
+            purchase_price: Number(form.purchase_price),
+            selling_price:
+                form.selling_price === "" ? null : Number(form.selling_price),
             purchase_date: form.purchase_date,
-            warranty_period: parseInt(form.warranty_period) || 12,
+            warranty_period: Number(form.warranty_period),
             status: form.status,
         };
-        setUnits((prev) => [...prev, newUnit]);
-        addToast(
-            `AC unit ${form.brand} ${form.model} added. Inventory updated.`,
-        );
-        setAddModal(false);
-        setConfirmAdd(false);
-        setForm({
-            brand: "",
-            model: "",
-            serial_number: "",
-            horsepower: "",
-            ac_type: "Split",
-            refrigerant_type: "R32",
-            supplier: "",
-            purchase_price: "",
-            selling_price: "",
-            purchase_date: "2026-08-10",
-            warranty_period: "12",
-            status: "Available",
-        });
+
+        try {
+            const response =
+                editorMode === "edit" && editingUnit
+                    ? await window.axios.patch(
+                          SUPER_ADMIN_ENDPOINTS.updateAcUnit(
+                              editingUnit.ac_unit_id,
+                          ),
+                          payload,
+                      )
+                    : await window.axios.post(
+                          SUPER_ADMIN_ENDPOINTS.acUnits,
+                          payload,
+                      );
+
+            addToast(
+                response?.data?.message ||
+                    (editorMode === "edit"
+                        ? "AC unit updated successfully."
+                        : "AC unit created successfully."),
+            );
+            setEditorMode(null);
+            setEditingUnit(null);
+            setForm(createEmptyForm());
+            await fetchUnits(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(
+                    error,
+                    editorMode === "edit"
+                        ? "Unable to update the AC unit."
+                        : "Unable to create the AC unit.",
+                ),
+                "error",
+            );
+        } finally {
+            setSaving(false);
+        }
     };
-    const displayUnits = subTab === "order" ? orderBaseUnits : units;
+
+    const handleDelete = async () => {
+        if (deleting || !deleteTarget) {
+            return;
+        }
+
+        setDeleting(true);
+
+        try {
+            const { data } = await window.axios.delete(
+                SUPER_ADMIN_ENDPOINTS.deleteAcUnit(deleteTarget.ac_unit_id),
+            );
+            addToast(data?.message || "AC unit deleted successfully.");
+            setDeleteTarget(null);
+            await fetchUnits(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to delete the AC unit."),
+                "error",
+            );
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
-            {" "}
             <div className="page-header">
-                {" "}
                 <div>
-                    {" "}
                     <h1 className="page-title font-display">
                         AC Units Inventory
-                    </h1>{" "}
+                    </h1>
                     <p className="page-subtitle">
                         {units.length} units tracked ·{" "}
-                        {units.filter((u) => u.status === "Available").length}{" "}
+                        {units.filter((unit) => unit.status === "Available").length}{" "}
                         available
-                    </p>{" "}
-                </div>{" "}
-                <button
-                    className="btn-primary"
-                    onClick={() => setAddModal(true)}
-                >
-                    + Add AC Unit
-                </button>{" "}
-            </div>{" "}
-            {isLowStock && (
+                    </p>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button className="btn-secondary" onClick={() => fetchUnits()}>
+                        Refresh
+                    </button>
+                    <button className="btn-primary" onClick={openCreateModal}>
+                        + Add AC Unit
+                    </button>
+                </div>
+            </div>
+
+            {orderBaseUnits.length > 0 && (
                 <div
                     style={{
                         display: "flex",
@@ -104,10 +237,8 @@ function AcUnits({ addToast }) {
                         border: "1px solid rgba(245,138,7,0.3)",
                     }}
                 >
-                    {" "}
-                    <span style={{ fontSize: 20 }}>📦</span>{" "}
+                    <span style={{ fontSize: 20 }}>📦</span>
                     <div>
-                        {" "}
                         <p
                             style={{
                                 fontSize: 13,
@@ -115,420 +246,433 @@ function AcUnits({ addToast }) {
                                 color: "#D97706",
                             }}
                         >
-                            {" "}
-                            Stock Low / Order Base Required{" "}
-                        </p>{" "}
+                            Stock Low / Order Base Required
+                        </p>
                         <p style={{ fontSize: 12, color: "#6B7280" }}>
-                            {" "}
-                            {orderBaseUnits.length} unit(s) are on Order Base
-                            status. Consider restocking.{" "}
-                        </p>{" "}
-                    </div>{" "}
+                            {orderBaseUnits.length} unit(s) are currently marked as
+                            Order Base.
+                        </p>
+                    </div>
                 </div>
-            )}{" "}
+            )}
+
             <div
                 className="tab-bar"
                 style={{ marginBottom: 20, display: "inline-flex" }}
             >
-                {" "}
                 <button
                     className={`tab-item ${subTab === "all" ? "active" : ""}`}
                     onClick={() => setSubTab("all")}
                 >
-                    {" "}
-                    All Units ({units.length}){" "}
-                </button>{" "}
+                    All Units ({units.length})
+                </button>
                 <button
                     className={`tab-item ${subTab === "order" ? "active" : ""}`}
                     onClick={() => setSubTab("order")}
                 >
-                    {" "}
-                    Order Base ({orderBaseUnits.length}){" "}
-                </button>{" "}
-            </div>{" "}
+                    Order Base ({orderBaseUnits.length})
+                </button>
+            </div>
+
             <div className="card" style={{ padding: 20 }}>
-                {" "}
-                <div style={{ overflowX: "auto" }}>
-                    {" "}
-                    <table
-                        style={{
-                            width: "100%",
-                            borderCollapse: "collapse",
-                            minWidth: 900,
-                        }}
-                    >
-                        {" "}
-                        <thead>
-                            {" "}
-                            <tr style={{ background: "#F5F7FA" }}>
-                                {" "}
-                                {[
-                                    "Unit ID",
-                                    "Brand",
-                                    "Model",
-                                    "Serial No.",
-                                    "Type",
-                                    "HP",
-                                    "Refrigerant",
-                                    "Purchase Price",
-                                    "Selling Price",
-                                    "Warranty",
-                                    "Status",
-                                ].map((h) => (
-                                    <th
-                                        key={h}
-                                        style={{
-                                            padding: "10px 12px",
-                                            textAlign: "left",
-                                            fontSize: 11,
-                                            fontWeight: 600,
-                                            letterSpacing: "0.05em",
-                                            textTransform: "uppercase",
-                                            color: "#6B7280",
-                                            whiteSpace: "nowrap",
-                                            borderBottom: "1px solid #EAECF0",
-                                        }}
-                                    >
-                                        {h}
-                                    </th>
-                                ))}{" "}
-                            </tr>{" "}
-                        </thead>{" "}
-                        <tbody>
-                            {" "}
-                            {displayUnits.map((u) => (
-                                <tr
-                                    key={u.ac_unit_id}
-                                    style={{ borderTop: "1px solid #F5F7FA" }}
-                                    onMouseEnter={(e) =>
-                                        (e.currentTarget.style.background =
-                                            "rgba(63,125,255,0.04)")
-                                    }
-                                    onMouseLeave={(e) =>
-                                        (e.currentTarget.style.background =
-                                            "transparent")
-                                    }
-                                >
-                                    {" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            fontWeight: 600,
-                                            color: "#3F7DFF",
-                                        }}
-                                    >
-                                        #AC
-                                        {u.ac_unit_id
-                                            .toString()
-                                            .padStart(3, "0")}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 13,
-                                            fontWeight: 600,
-                                            color: "#1E2F5F",
-                                        }}
-                                    >
-                                        {u.brand}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#374151",
-                                        }}
-                                    >
-                                        {u.model}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 11,
-                                            color: "#9CA3AF",
-                                        }}
-                                    >
-                                        {u.serial_number}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#6B7280",
-                                        }}
-                                    >
-                                        {u.ac_type}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#374151",
-                                        }}
-                                    >
-                                        {u.horsepower}HP
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#6B7280",
-                                        }}
-                                    >
-                                        {u.refrigerant_type}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#374151",
-                                        }}
-                                    >
-                                        ₱{u.purchase_price.toLocaleString()}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            fontWeight: 600,
-                                            color: "#16A34A",
-                                        }}
-                                    >
-                                        ₱{u.selling_price.toLocaleString()}
-                                    </td>{" "}
-                                    <td
-                                        style={{
-                                            padding: "10px 12px",
-                                            fontSize: 12,
-                                            color: "#6B7280",
-                                        }}
-                                    >
-                                        {u.warranty_period}mo
-                                    </td>{" "}
-                                    <td style={{ padding: "10px 12px" }}>
-                                        <StatusBadge status={u.status} />
-                                    </td>{" "}
-                                </tr>
-                            ))}{" "}
-                        </tbody>{" "}
-                    </table>{" "}
-                </div>{" "}
-            </div>{" "}
-            {/* Add Modal */}{" "}
-            {addModal && !confirmAdd && (
-                <div
-                    style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 1e3,
-                        background: "rgba(0,0,0,0.4)",
-                        backdropFilter: "blur(4px)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                    }}
-                    onClick={() => setAddModal(false)}
-                >
-                    {" "}
+                {loading ? (
                     <div
                         style={{
-                            background: "#fff",
-                            border: "1px solid rgba(0,0,0,0.06)",
-                            borderRadius: 20,
-                            padding: "28px 32px",
-                            width: 560,
-                            maxHeight: "85vh",
-                            overflow: "auto",
-                            animation: "fadeIn 0.18s ease",
-                            boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
                         }}
-                        onClick={(e) => e.stopPropagation()}
                     >
-                        {" "}
-                        <h3
+                        Loading AC units...
+                    </div>
+                ) : displayUnits.length === 0 ? (
+                    <div
+                        style={{
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
+                        }}
+                    >
+                        No AC units are available in this view.
+                    </div>
+                ) : (
+                    <div style={{ overflowX: "auto" }}>
+                        <table
                             style={{
-                                fontSize: 16,
-                                fontWeight: 700,
-                                color: "#1E2F5F",
-                                marginBottom: 20,
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                minWidth: 1180,
                             }}
                         >
-                            {" "}
-                            Add New AC Unit — Enter Info & Payment Details{" "}
-                        </h3>{" "}
-                        <div
-                            style={{
-                                display: "grid",
-                                gridTemplateColumns: "1fr 1fr",
-                                gap: 14,
-                                marginBottom: 14,
-                            }}
-                        >
-                            {" "}
-                            {[
-                                {
-                                    label: "Brand",
-                                    key: "brand",
-                                    placeholder: "e.g. Daikin",
-                                },
-                                {
-                                    label: "Model",
-                                    key: "model",
-                                    placeholder: "e.g. FTKC25UVM",
-                                },
-                                {
-                                    label: "Serial Number",
-                                    key: "serial_number",
-                                    placeholder: "e.g. DK-2026-0009",
-                                },
-                                {
-                                    label: "Horsepower",
-                                    key: "horsepower",
-                                    placeholder: "e.g. 1.5",
-                                },
-                                {
-                                    label: "Refrigerant",
-                                    key: "refrigerant_type",
-                                    placeholder: "R32 / R410A",
-                                },
-                                {
-                                    label: "Supplier",
-                                    key: "supplier",
-                                    placeholder: "Supplier name",
-                                },
-                                {
-                                    label: "Purchase Price (\u20B1)",
-                                    key: "purchase_price",
-                                    placeholder: "0.00",
-                                },
-                                {
-                                    label: "Selling Price (\u20B1)",
-                                    key: "selling_price",
-                                    placeholder: "0.00",
-                                },
-                                {
-                                    label: "Purchase Date",
-                                    key: "purchase_date",
-                                    placeholder: "YYYY-MM-DD",
-                                },
-                                {
-                                    label: "Warranty (months)",
-                                    key: "warranty_period",
-                                    placeholder: "12",
-                                },
-                            ].map((f) => (
-                                <div key={f.key}>
-                                    {" "}
-                                    <p
-                                        className="section-label"
-                                        style={{ marginBottom: 5 }}
-                                    >
-                                        {f.label}
-                                    </p>{" "}
-                                    <input
-                                        className="input-field"
-                                        placeholder={f.placeholder}
-                                        value={form[f.key]}
-                                        onChange={(e) =>
-                                            setForm((prev) => ({
-                                                ...prev,
-                                                [f.key]: e.target.value,
-                                            }))
-                                        }
-                                    />{" "}
-                                </div>
-                            ))}{" "}
-                            <div>
-                                {" "}
-                                <p
-                                    className="section-label"
-                                    style={{ marginBottom: 5 }}
-                                >
-                                    AC Type
-                                </p>{" "}
-                                <select
-                                    className="input-field"
-                                    value={form.ac_type}
-                                    onChange={(e) =>
-                                        setForm((prev) => ({
-                                            ...prev,
-                                            ac_type: e.target.value,
-                                        }))
-                                    }
-                                >
-                                    {" "}
-                                    {acTypes.map((t) => (
-                                        <option key={t} value={t}>
-                                            {t}
-                                        </option>
-                                    ))}{" "}
-                                </select>{" "}
-                            </div>{" "}
-                            <div>
-                                {" "}
-                                <p
-                                    className="section-label"
-                                    style={{ marginBottom: 5 }}
-                                >
-                                    Status
-                                </p>{" "}
-                                <select
-                                    className="input-field"
-                                    value={form.status}
-                                    onChange={(e) =>
-                                        setForm((prev) => ({
-                                            ...prev,
-                                            status: e.target.value,
-                                        }))
-                                    }
-                                >
-                                    {" "}
+                            <thead>
+                                <tr style={{ background: "#F5F7FA" }}>
                                     {[
-                                        "Available",
-                                        "Reserved",
-                                        "Order Base",
-                                    ].map((s) => (
-                                        <option key={s} value={s}>
-                                            {s}
-                                        </option>
-                                    ))}{" "}
-                                </select>{" "}
-                            </div>{" "}
-                        </div>{" "}
-                        <div
-                            style={{
-                                display: "flex",
-                                gap: 10,
-                                justifyContent: "flex-end",
-                            }}
-                        >
-                            {" "}
-                            <button
-                                className="btn-secondary"
-                                onClick={() => setAddModal(false)}
-                            >
-                                Cancel
-                            </button>{" "}
-                            <button
-                                className="btn-primary"
-                                onClick={() => setConfirmAdd(true)}
-                            >
-                                Add Unit →
-                            </button>{" "}
-                        </div>{" "}
-                    </div>{" "}
-                </div>
-            )}{" "}
+                                        "Unit ID",
+                                        "Brand",
+                                        "Model",
+                                        "Serial No.",
+                                        "Type",
+                                        "HP",
+                                        "Refrigerant",
+                                        "Purchase Price",
+                                        "Selling Price",
+                                        "Purchase Date",
+                                        "Warranty",
+                                        "Status",
+                                        "Actions",
+                                    ].map((heading) => (
+                                        <th
+                                            key={heading}
+                                            style={{
+                                                padding: "10px 12px",
+                                                textAlign: "left",
+                                                fontSize: 11,
+                                                fontWeight: 600,
+                                                letterSpacing: "0.05em",
+                                                textTransform: "uppercase",
+                                                color: "#6B7280",
+                                                whiteSpace: "nowrap",
+                                                borderBottom:
+                                                    "1px solid #EAECF0",
+                                            }}
+                                        >
+                                            {heading}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {displayUnits.map((unit) => (
+                                    <tr
+                                        key={unit.ac_unit_id}
+                                        style={{ borderTop: "1px solid #F5F7FA" }}
+                                        onMouseEnter={(event) => {
+                                            event.currentTarget.style.background =
+                                                "rgba(63,125,255,0.04)";
+                                        }}
+                                        onMouseLeave={(event) => {
+                                            event.currentTarget.style.background =
+                                                "transparent";
+                                        }}
+                                    >
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                fontWeight: 600,
+                                                color: "#3F7DFF",
+                                            }}
+                                        >
+                                            #AC
+                                            {String(unit.ac_unit_id).padStart(
+                                                3,
+                                                "0",
+                                            )}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 13,
+                                                fontWeight: 600,
+                                                color: "#1E2F5F",
+                                            }}
+                                        >
+                                            {unit.brand}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#374151",
+                                            }}
+                                        >
+                                            {unit.model}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 11,
+                                                color: "#9CA3AF",
+                                            }}
+                                        >
+                                            {unit.serial_number}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#6B7280",
+                                            }}
+                                        >
+                                            {unit.ac_type}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#374151",
+                                            }}
+                                        >
+                                            {unit.horsepower}HP
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#6B7280",
+                                            }}
+                                        >
+                                            {unit.refrigerant_type || "—"}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#374151",
+                                            }}
+                                        >
+                                            {formatCurrency(unit.purchase_price)}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                fontWeight: 600,
+                                                color: "#16A34A",
+                                            }}
+                                        >
+                                            {unit.selling_price
+                                                ? formatCurrency(unit.selling_price)
+                                                : "—"}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#6B7280",
+                                            }}
+                                        >
+                                            {formatDate(unit.purchase_date)}
+                                        </td>
+                                        <td
+                                            style={{
+                                                padding: "10px 12px",
+                                                fontSize: 12,
+                                                color: "#6B7280",
+                                            }}
+                                        >
+                                            {unit.warranty_period} mo
+                                        </td>
+                                        <td style={{ padding: "10px 12px" }}>
+                                            <StatusBadge status={unit.status} />
+                                        </td>
+                                        <td style={{ padding: "10px 12px" }}>
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    gap: 6,
+                                                    flexWrap: "wrap",
+                                                }}
+                                            >
+                                                <button
+                                                    className="btn-secondary"
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 11,
+                                                    }}
+                                                    onClick={() => openEditModal(unit)}
+                                                >
+                                                    ✏️ Edit
+                                                </button>
+                                                <button
+                                                    className="btn-danger"
+                                                    style={{
+                                                        padding: "4px 10px",
+                                                        fontSize: 11,
+                                                    }}
+                                                    onClick={() =>
+                                                        setDeleteTarget(unit)
+                                                    }
+                                                >
+                                                    🗑 Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
             <Modal
-                open={confirmAdd}
-                title="Confirm: Add AC Unit?"
-                message={`Add ${form.brand} ${form.model} (${form.ac_type}) to inventory?`}
-                confirmLabel="Yes, Add Unit"
-                onConfirm={handleAdd}
-                onCancel={() => setConfirmAdd(false)}
-            />{" "}
+                open={!!editorMode}
+                title={
+                    editorMode === "edit" ? "Edit AC Unit" : "Add New AC Unit"
+                }
+                message={
+                    editorMode === "edit"
+                        ? "Update the saved AC unit details below."
+                        : "Enter the inventory and pricing details for the new AC unit."
+                }
+                confirmLabel={saving ? "Saving..." : "Save Unit"}
+                confirmDisabled={saving}
+                maxWidth={760}
+                onConfirm={handleSave}
+                onCancel={closeEditor}
+            >
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
+                        gap: 16,
+                    }}
+                >
+                    {[
+                        {
+                            label: "Brand",
+                            key: "brand",
+                            placeholder: "e.g. Daikin",
+                        },
+                        {
+                            label: "Model",
+                            key: "model",
+                            placeholder: "e.g. FTKC25UVM",
+                        },
+                        {
+                            label: "Serial Number",
+                            key: "serial_number",
+                            placeholder: "e.g. DK-2026-0009",
+                        },
+                        {
+                            label: "Horsepower",
+                            key: "horsepower",
+                            placeholder: "e.g. 1.5",
+                            type: "number",
+                            min: "0.5",
+                            step: "0.1",
+                        },
+                        {
+                            label: "Refrigerant Type",
+                            key: "refrigerant_type",
+                            placeholder: "R32 / R410A",
+                        },
+                        {
+                            label: "Supplier",
+                            key: "supplier",
+                            placeholder: "Supplier name",
+                        },
+                        {
+                            label: "Purchase Price",
+                            key: "purchase_price",
+                            placeholder: "0.00",
+                            type: "number",
+                            min: "0",
+                            step: "0.01",
+                        },
+                        {
+                            label: "Selling Price",
+                            key: "selling_price",
+                            placeholder: "0.00",
+                            type: "number",
+                            min: "0",
+                            step: "0.01",
+                        },
+                        {
+                            label: "Purchase Date",
+                            key: "purchase_date",
+                            type: "date",
+                        },
+                        {
+                            label: "Warranty Period (months)",
+                            key: "warranty_period",
+                            type: "number",
+                            min: "0",
+                            step: "1",
+                        },
+                    ].map((field) => (
+                        <div key={field.key}>
+                            <p className="section-label" style={{ marginBottom: 6 }}>
+                                {field.label}
+                            </p>
+                            <input
+                                type={field.type || "text"}
+                                min={field.min}
+                                step={field.step}
+                                className="input-field"
+                                placeholder={field.placeholder}
+                                value={form[field.key]}
+                                onChange={(event) =>
+                                    setForm((previous) => ({
+                                        ...previous,
+                                        [field.key]: event.target.value,
+                                    }))
+                                }
+                            />
+                        </div>
+                    ))}
+
+                    <div>
+                        <p className="section-label" style={{ marginBottom: 6 }}>
+                            AC Type
+                        </p>
+                        <select
+                            className="input-field"
+                            value={form.ac_type}
+                            onChange={(event) =>
+                                setForm((previous) => ({
+                                    ...previous,
+                                    ac_type: event.target.value,
+                                }))
+                            }
+                        >
+                            {AC_TYPE_OPTIONS.map((type) => (
+                                <option key={type} value={type}>
+                                    {type}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <p className="section-label" style={{ marginBottom: 6 }}>
+                            Status
+                        </p>
+                        <select
+                            className="input-field"
+                            value={form.status}
+                            onChange={(event) =>
+                                setForm((previous) => ({
+                                    ...previous,
+                                    status: event.target.value,
+                                }))
+                            }
+                        >
+                            {AC_STATUS_OPTIONS.map((status) => (
+                                <option key={status} value={status}>
+                                    {status}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                open={!!deleteTarget}
+                title="Delete AC Unit?"
+                message={`Remove ${deleteTarget?.brand || ""} ${deleteTarget?.model || ""} from inventory? This action cannot be undone.`}
+                confirmLabel={deleting ? "Deleting..." : "Yes, Delete"}
+                confirmDisabled={deleting}
+                variant="danger"
+                onConfirm={handleDelete}
+                onCancel={() => !deleting && setDeleteTarget(null)}
+            />
         </div>
     );
 }
-export { AcUnits as default };
+
+export default AcUnits;

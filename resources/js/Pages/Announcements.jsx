@@ -1,77 +1,148 @@
-﻿import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Modal from "../Components/Modal";
-import { announcements as initialAnnouncements } from "../data/mockData";
-const roleOptions = [
-    "All Staff",
-    "Super Admin",
-    "Manager",
-    "Admin Assistant",
-    "Tools Man",
-    "Technician",
-    "Customer",
-];
-const roleColors = {
-    "All Staff": "#3F7DFF",
-    "Super Admin": "#EF4444",
-    Manager: "#F58A07",
-    "Admin Assistant": "#59B7FF",
-    "Tools Man": "#22C55E",
-    Technician: "#8B5CF6",
-    Customer: "#9CA3AF",
-};
-function Announcements({ addToast }) {
-    const [announcements, setAnnouncements] = useState(initialAnnouncements);
+import {
+    ANNOUNCEMENT_ROLE_OPTIONS,
+    ROLE_COLORS,
+    SUPER_ADMIN_ENDPOINTS,
+    extractErrorMessage,
+    formatDateTime,
+} from "../utils/superAdmin";
+
+function Announcements({ addToast, onDataChanged }) {
+    const [announcements, setAnnouncements] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [composing, setComposing] = useState(false);
     const [confirmModal, setConfirmModal] = useState(false);
+    const [creating, setCreating] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleting, setDeleting] = useState(false);
     const [form, setForm] = useState({
         title: "",
         message: "",
         target_role: "All Staff",
     });
-    const handleSubmit = () => {
-        const newAnn = {
-            id: Math.max(...announcements.map((a) => a.id)) + 1,
-            created_by: "Super User",
-            title: form.title,
-            message: form.message,
-            target_role: form.target_role,
-            created_at:
-                "2026-08-10 " +
-                /* @__PURE__ */ new Date().toTimeString().slice(0, 5),
-        };
-        setAnnouncements((prev) => [newAnn, ...prev]);
-        addToast(
-            `The selected employees/staff (${form.target_role}) will be notified of your announcement.`,
-        );
-        setConfirmModal(false);
-        setComposing(false);
-        setForm({ title: "", message: "", target_role: "All Staff" });
+
+    const fetchAnnouncements = useCallback(
+        async (showLoader = true) => {
+            if (showLoader) {
+                setLoading(true);
+            }
+
+            try {
+                const { data } = await window.axios.get(
+                    SUPER_ADMIN_ENDPOINTS.announcements,
+                );
+                setAnnouncements(Array.isArray(data?.data) ? data.data : []);
+            } catch (error) {
+                addToast(
+                    extractErrorMessage(
+                        error,
+                        "Unable to load announcements.",
+                    ),
+                    "error",
+                );
+            } finally {
+                setLoading(false);
+            }
+        },
+        [addToast],
+    );
+
+    useEffect(() => {
+        fetchAnnouncements();
+    }, [fetchAnnouncements]);
+
+    const handleSubmit = async () => {
+        if (creating) {
+            return;
+        }
+
+        setCreating(true);
+
+        try {
+            const { data } = await window.axios.post(
+                SUPER_ADMIN_ENDPOINTS.announcements,
+                {
+                    title: form.title.trim(),
+                    message: form.message.trim(),
+                    target_role: form.target_role,
+                },
+            );
+
+            addToast(data?.message || "Announcement created successfully.");
+            setConfirmModal(false);
+            setComposing(false);
+            setForm({ title: "", message: "", target_role: "All Staff" });
+            await fetchAnnouncements(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(
+                    error,
+                    "Unable to create the announcement.",
+                ),
+                "error",
+            );
+        } finally {
+            setCreating(false);
+        }
     };
+
+    const handleDelete = async () => {
+        if (deleting || !deleteTarget) {
+            return;
+        }
+
+        setDeleting(true);
+
+        try {
+            const { data } = await window.axios.delete(
+                SUPER_ADMIN_ENDPOINTS.deleteAnnouncement(deleteTarget.id),
+            );
+            addToast(data?.message || "Announcement deleted successfully.");
+            setDeleteTarget(null);
+            await fetchAnnouncements(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(
+                    error,
+                    "Unable to delete the announcement.",
+                ),
+                "error",
+            );
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     return (
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
-            {" "}
             <div className="page-header">
-                {" "}
                 <div>
-                    {" "}
                     <h1 className="page-title font-display">
                         Announcements & Notifications
-                    </h1>{" "}
+                    </h1>
                     <p className="page-subtitle">
-                        {announcements.length} announcements · Reach staff and
-                        clients
-                    </p>{" "}
-                </div>{" "}
-                <button
-                    className="btn-primary"
-                    onClick={() => setComposing(!composing)}
-                >
-                    {" "}
-                    {composing
-                        ? "\u2190 Back to Feed"
-                        : "+ New Announcement"}{" "}
-                </button>{" "}
-            </div>{" "}
+                        {announcements.length} announcements · live broadcast feed
+                    </p>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <button
+                        className="btn-secondary"
+                        onClick={() => fetchAnnouncements()}
+                    >
+                        Refresh
+                    </button>
+                    <button
+                        className="btn-primary"
+                        onClick={() => setComposing((current) => !current)}
+                    >
+                        {composing ? "← Back to Feed" : "+ New Announcement"}
+                    </button>
+                </div>
+            </div>
+
             {composing && (
                 <div
                     className="card"
@@ -81,7 +152,6 @@ function Announcements({ addToast }) {
                         animation: "fadeInUp 0.2s ease",
                     }}
                 >
-                    {" "}
                     <h3
                         style={{
                             fontSize: 15,
@@ -90,9 +160,8 @@ function Announcements({ addToast }) {
                             marginBottom: 18,
                         }}
                     >
-                        {" "}
-                        Compose Announcement{" "}
-                    </h3>{" "}
+                        Compose Announcement
+                    </h3>
                     <div
                         style={{
                             display: "flex",
@@ -100,56 +169,54 @@ function Announcements({ addToast }) {
                             gap: 14,
                         }}
                     >
-                        {" "}
                         <div>
-                            {" "}
                             <p
                                 className="section-label"
                                 style={{ marginBottom: 6 }}
                             >
                                 Title
-                            </p>{" "}
+                            </p>
                             <input
                                 className="input-field"
                                 placeholder="Announcement title..."
                                 value={form.title}
-                                onChange={(e) =>
-                                    setForm((p) => ({
-                                        ...p,
-                                        title: e.target.value,
+                                onChange={(event) =>
+                                    setForm((previous) => ({
+                                        ...previous,
+                                        title: event.target.value,
                                     }))
                                 }
-                            />{" "}
-                        </div>{" "}
+                            />
+                        </div>
+
                         <div>
-                            {" "}
                             <p
                                 className="section-label"
                                 style={{ marginBottom: 6 }}
                             >
                                 Message
-                            </p>{" "}
+                            </p>
                             <textarea
                                 className="input-field"
-                                style={{ height: 100, resize: "none" }}
+                                style={{ minHeight: 120, resize: "vertical" }}
                                 placeholder="Write your announcement here..."
                                 value={form.message}
-                                onChange={(e) =>
-                                    setForm((p) => ({
-                                        ...p,
-                                        message: e.target.value,
+                                onChange={(event) =>
+                                    setForm((previous) => ({
+                                        ...previous,
+                                        message: event.target.value,
                                     }))
                                 }
-                            />{" "}
-                        </div>{" "}
+                            />
+                        </div>
+
                         <div>
-                            {" "}
                             <p
                                 className="section-label"
                                 style={{ marginBottom: 8 }}
                             >
                                 Recipients
-                            </p>{" "}
+                            </p>
                             <div
                                 style={{
                                     display: "flex",
@@ -157,179 +224,237 @@ function Announcements({ addToast }) {
                                     gap: 8,
                                 }}
                             >
-                                {" "}
-                                {roleOptions.map((role) => (
-                                    <button
-                                        key={role}
-                                        onClick={() =>
-                                            setForm((p) => ({
-                                                ...p,
-                                                target_role: role,
-                                            }))
-                                        }
-                                        style={{
-                                            padding: "6px 14px",
-                                            borderRadius: 20,
-                                            cursor: "pointer",
-                                            fontSize: 12,
-                                            fontFamily: "'DM Sans',sans-serif",
-                                            fontWeight: 600,
-                                            background:
-                                                form.target_role === role
-                                                    ? `${roleColors[role] || "#3F7DFF"}18`
+                                {ANNOUNCEMENT_ROLE_OPTIONS.map((option) => {
+                                    const selected =
+                                        form.target_role === option.role;
+                                    const color =
+                                        ROLE_COLORS[option.role] || "#3F7DFF";
+
+                                    return (
+                                        <button
+                                            key={option.role}
+                                            onClick={() =>
+                                                setForm((previous) => ({
+                                                    ...previous,
+                                                    target_role: option.role,
+                                                }))
+                                            }
+                                            style={{
+                                                padding: "6px 14px",
+                                                borderRadius: 20,
+                                                cursor: "pointer",
+                                                fontSize: 12,
+                                                fontFamily:
+                                                    "'DM Sans',sans-serif",
+                                                fontWeight: 600,
+                                                background: selected
+                                                    ? `${color}18`
                                                     : "#F5F7FA",
-                                            border:
-                                                form.target_role === role
-                                                    ? `1px solid ${roleColors[role] || "#3F7DFF"}`
+                                                border: selected
+                                                    ? `1px solid ${color}`
                                                     : "1px solid #E5E7EB",
-                                            color:
-                                                form.target_role === role
-                                                    ? roleColors[role] ||
-                                                      "#3F7DFF"
+                                                color: selected
+                                                    ? color
                                                     : "#6B7280",
-                                            transition: "all 0.15s",
-                                        }}
-                                    >
-                                        {" "}
-                                        {role}{" "}
-                                    </button>
-                                ))}{" "}
-                            </div>{" "}
-                        </div>{" "}
+                                                transition: "all 0.15s",
+                                            }}
+                                        >
+                                            {option.role}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
                         <div
                             style={{ display: "flex", gap: 10, paddingTop: 4 }}
                         >
-                            {" "}
                             <button
                                 className="btn-primary"
                                 onClick={() => setConfirmModal(true)}
-                                disabled={!form.title || !form.message}
+                                disabled={!form.title.trim() || !form.message.trim()}
                             >
-                                {" "}
-                                📢 Send Announcement{" "}
-                            </button>{" "}
+                                📢 Send Announcement
+                            </button>
                             <button
                                 className="btn-secondary"
                                 onClick={() => setComposing(false)}
                             >
                                 Cancel
-                            </button>{" "}
-                        </div>{" "}
-                    </div>{" "}
+                            </button>
+                        </div>
+                    </div>
                 </div>
-            )}{" "}
-            {/* Feed */}{" "}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {" "}
-                {announcements.map((ann) => (
-                    <div
-                        key={ann.id}
-                        className="card"
-                        style={{ padding: 20, animation: "fadeInUp 0.2s ease" }}
-                    >
-                        {" "}
-                        <div
-                            style={{
-                                display: "flex",
-                                alignItems: "flex-start",
-                                justifyContent: "space-between",
-                                gap: 16,
-                            }}
-                        >
-                            {" "}
-                            <div style={{ flex: 1 }}>
-                                {" "}
+            )}
+
+            {loading ? (
+                <div className="card" style={{ padding: 24, color: "#6B7280" }}>
+                    Loading announcements...
+                </div>
+            ) : announcements.length === 0 ? (
+                <div className="card" style={{ padding: 24, color: "#6B7280" }}>
+                    No announcements have been posted yet.
+                </div>
+            ) : (
+                <div
+                    style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 14,
+                    }}
+                >
+                    {announcements.map((announcement) => {
+                        const tagColor =
+                            ROLE_COLORS[announcement.target_role] || "#3F7DFF";
+
+                        return (
+                            <div
+                                key={announcement.id}
+                                className="card"
+                                style={{
+                                    padding: 20,
+                                    animation: "fadeInUp 0.2s ease",
+                                }}
+                            >
                                 <div
                                     style={{
                                         display: "flex",
-                                        alignItems: "center",
-                                        gap: 10,
-                                        marginBottom: 8,
+                                        alignItems: "flex-start",
+                                        justifyContent: "space-between",
+                                        gap: 16,
+                                        flexWrap: "wrap",
                                     }}
                                 >
-                                    {" "}
-                                    <div
-                                        style={{
-                                            width: 36,
-                                            height: 36,
-                                            borderRadius: 9,
-                                            background:
-                                                "linear-gradient(135deg,#F58A07,#D97706)",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            fontSize: 17,
-                                            flexShrink: 0,
-                                        }}
-                                    >
-                                        📢
-                                    </div>{" "}
-                                    <div>
-                                        {" "}
-                                        <h4
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
                                             style={{
-                                                fontSize: 14,
-                                                fontWeight: 700,
-                                                color: "#1E2F5F",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 10,
+                                                marginBottom: 8,
                                             }}
                                         >
-                                            {ann.title}
-                                        </h4>{" "}
+                                            <div
+                                                style={{
+                                                    width: 36,
+                                                    height: 36,
+                                                    borderRadius: 9,
+                                                    background:
+                                                        "linear-gradient(135deg,#F58A07,#D97706)",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "center",
+                                                    fontSize: 17,
+                                                    flexShrink: 0,
+                                                }}
+                                            >
+                                                📢
+                                            </div>
+                                            <div>
+                                                <h4
+                                                    style={{
+                                                        fontSize: 14,
+                                                        fontWeight: 700,
+                                                        color: "#1E2F5F",
+                                                        margin: 0,
+                                                    }}
+                                                >
+                                                    {announcement.title}
+                                                </h4>
+                                                <p
+                                                    style={{
+                                                        fontSize: 11,
+                                                        color: "#9CA3AF",
+                                                        margin: "2px 0 0",
+                                                    }}
+                                                >
+                                                    By{" "}
+                                                    {announcement.created_by_name ||
+                                                        "Unknown"}{" "}
+                                                    ·{" "}
+                                                    {formatDateTime(
+                                                        announcement.created_at,
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
                                         <p
                                             style={{
-                                                fontSize: 11,
-                                                color: "#9CA3AF",
+                                                fontSize: 13,
+                                                color: "#6B7280",
+                                                lineHeight: 1.6,
+                                                paddingLeft: 46,
+                                                margin: 0,
                                             }}
                                         >
-                                            By {ann.created_by} ·{" "}
-                                            {ann.created_at}
-                                        </p>{" "}
-                                    </div>{" "}
-                                </div>{" "}
-                                <p
-                                    style={{
-                                        fontSize: 13,
-                                        color: "#6B7280",
-                                        lineHeight: 1.6,
-                                        paddingLeft: 46,
-                                    }}
-                                >
-                                    {ann.message}
-                                </p>{" "}
-                            </div>{" "}
-                            <div>
-                                {" "}
-                                <span
-                                    style={{
-                                        fontSize: 11,
-                                        padding: "3px 10px",
-                                        borderRadius: 20,
-                                        background: `${roleColors[ann.target_role] || "#3F7DFF"}15`,
-                                        color:
-                                            roleColors[ann.target_role] ||
-                                            "#3F7DFF",
-                                        border: `1px solid ${roleColors[ann.target_role] || "#3F7DFF"}30`,
-                                        fontWeight: 600,
-                                        whiteSpace: "nowrap",
-                                    }}
-                                >
-                                    {" "}
-                                    → {ann.target_role}{" "}
-                                </span>{" "}
-                            </div>{" "}
-                        </div>{" "}
-                    </div>
-                ))}{" "}
-            </div>{" "}
+                                            {announcement.message}
+                                        </p>
+                                    </div>
+
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 10,
+                                            flexWrap: "wrap",
+                                        }}
+                                    >
+                                        <span
+                                            style={{
+                                                fontSize: 11,
+                                                padding: "3px 10px",
+                                                borderRadius: 20,
+                                                background: `${tagColor}15`,
+                                                color: tagColor,
+                                                border: `1px solid ${tagColor}30`,
+                                                fontWeight: 600,
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            → {announcement.target_role}
+                                        </span>
+                                        <button
+                                            className="btn-danger"
+                                            style={{
+                                                padding: "5px 10px",
+                                                fontSize: 11,
+                                            }}
+                                            onClick={() =>
+                                                setDeleteTarget(announcement)
+                                            }
+                                        >
+                                            🗑 Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
             <Modal
                 open={confirmModal}
-                title="Confirm Action?"
-                message={`Send announcement "${form.title}" to: ${form.target_role}?`}
-                confirmLabel="Yes, Notify"
+                title="Send Announcement?"
+                message={`Notify ${form.target_role} with "${form.title}"?`}
+                confirmLabel={creating ? "Sending..." : "Yes, Notify"}
+                confirmDisabled={creating}
                 onConfirm={handleSubmit}
-                onCancel={() => setConfirmModal(false)}
-            />{" "}
+                onCancel={() => !creating && setConfirmModal(false)}
+            />
+
+            <Modal
+                open={!!deleteTarget}
+                title="Delete Announcement?"
+                message={`Delete "${deleteTarget?.title}" from the announcement feed?`}
+                confirmLabel={deleting ? "Deleting..." : "Yes, Delete"}
+                confirmDisabled={deleting}
+                variant="danger"
+                onConfirm={handleDelete}
+                onCancel={() => !deleting && setDeleteTarget(null)}
+            />
         </div>
     );
 }
-export { Announcements as default };
+
+export default Announcements;

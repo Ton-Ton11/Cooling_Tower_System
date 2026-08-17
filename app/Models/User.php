@@ -28,6 +28,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'contact_number',
         'email',
         'password',
+        'is_active',
     ];
 
     protected $hidden = [
@@ -39,6 +40,7 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
         'birthdate' => 'date',
         'role_id' => 'integer',
+        'is_active' => 'boolean',
     ];
 
     public function role()

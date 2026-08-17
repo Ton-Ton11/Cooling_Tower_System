@@ -10,13 +10,13 @@ return new class extends Migration
     {
         // Roles table first (users depends on it)
         Schema::create('roles', function (Blueprint $table) {
-            $table->integer('role_id')->autoIncrement()->primary();
+            $table->integer('role_id')->autoIncrement();
             $table->string('role_name', 50);
         });
 
         // Modified users table
         Schema::create('users', function (Blueprint $table) {
-            $table->integer('user_id')->autoIncrement()->primary();
+            $table->integer('user_id')->autoIncrement();
             $table->integer('role_id');
             $table->string('given_name', 100);
             $table->string('middle_name', 100)->nullable();
@@ -54,13 +54,13 @@ return new class extends Migration
 
         // Specialties table
         Schema::create('specialties', function (Blueprint $table) {
-            $table->integer('specialty_id')->autoIncrement()->primary();
+            $table->integer('specialty_id')->autoIncrement();
             $table->string('specialty_name', 50);
         });
 
         // Services table
         Schema::create('services', function (Blueprint $table) {
-            $table->integer('service_id')->autoIncrement()->primary();
+            $table->integer('service_id')->autoIncrement();
             $table->string('service_name', 100);
             $table->text('description')->nullable();
             $table->decimal('base_price', 10, 2)->nullable();
@@ -68,7 +68,7 @@ return new class extends Migration
 
         // AC Units Inventory
         Schema::create('ac_units_inventory', function (Blueprint $table) {
-            $table->integer('ac_unit_id')->autoIncrement()->primary();
+            $table->integer('ac_unit_id')->autoIncrement();
             $table->string('brand', 100);
             $table->string('model', 100);
             $table->string('serial_number', 100)->unique();
@@ -86,7 +86,7 @@ return new class extends Migration
 
         // Inventory Items
         Schema::create('inventory_items', function (Blueprint $table) {
-            $table->integer('item_id')->autoIncrement()->primary();
+            $table->integer('item_id')->autoIncrement();
             $table->string('item_name', 100);
             $table->enum('item_type', ['Tool', 'Material', 'Spare Part']);
             $table->integer('quantity_on_hand')->default(0);
@@ -133,7 +133,7 @@ return new class extends Migration
 
         // Bookings
         Schema::create('bookings', function (Blueprint $table) {
-            $table->integer('booking_id')->autoIncrement()->primary();
+            $table->integer('booking_id')->autoIncrement();
             $table->integer('client_id');
             $table->integer('service_id');
             $table->integer('assigned_tech_id')->nullable();
@@ -148,7 +148,7 @@ return new class extends Migration
 
         // Customer Complaints
         Schema::create('customer_complaints', function (Blueprint $table) {
-            $table->integer('complaint_id')->autoIncrement()->primary();
+            $table->integer('complaint_id')->autoIncrement();
             $table->integer('customer_id');
             $table->integer('booking_id')->nullable();
             $table->text('complaint_details');
@@ -161,7 +161,7 @@ return new class extends Migration
 
         // Customer Feedback and Ratings
         Schema::create('customer_feedback_and_ratings', function (Blueprint $table) {
-            $table->integer('feedback_id')->autoIncrement()->primary();
+            $table->integer('feedback_id')->autoIncrement();
             $table->integer('booking_id');
             $table->tinyInteger('rating');
             $table->text('feedback')->nullable();
@@ -172,7 +172,7 @@ return new class extends Migration
 
         // Payment
         Schema::create('payment', function (Blueprint $table) {
-            $table->integer('payment_id')->autoIncrement()->primary();
+            $table->integer('payment_id')->autoIncrement();
             $table->integer('booking_id');
             $table->decimal('booking_price', 10, 2)->nullable();
             $table->decimal('unit_price', 6, 2)->nullable();
@@ -187,7 +187,7 @@ return new class extends Migration
 
         // Booking Materials
         Schema::create('booking_materials', function (Blueprint $table) {
-            $table->integer('usage_id')->autoIncrement()->primary();
+            $table->integer('usage_id')->autoIncrement();
             $table->integer('booking_id');
             $table->integer('item_id');
             $table->integer('quantity_used');
@@ -199,7 +199,7 @@ return new class extends Migration
 
         // Schedule
         Schema::create('schedule', function (Blueprint $table) {
-            $table->integer('schedule_id')->autoIncrement()->primary();
+            $table->integer('schedule_id')->autoIncrement();
             $table->integer('technician_id');
             $table->integer('scheduled_booking_id');
             $table->dateTime('start_time');
@@ -211,7 +211,7 @@ return new class extends Migration
 
         // Tool Checkouts
         Schema::create('tool_checkouts', function (Blueprint $table) {
-            $table->integer('checkout_id')->autoIncrement()->primary();
+            $table->integer('checkout_id')->autoIncrement();
             $table->integer('item_id');
             $table->integer('technician_id');
             $table->dateTime('checkout_date')->useCurrent();

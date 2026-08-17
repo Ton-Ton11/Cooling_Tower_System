@@ -2,9 +2,13 @@
     open,
     title,
     message,
+    children,
     confirmLabel = "Confirm",
     cancelLabel = "Cancel",
     variant = "default",
+    confirmDisabled = false,
+    cancelDisabled = false,
+    maxWidth = 420,
     onConfirm,
     onCancel,
 }) {
@@ -29,8 +33,10 @@
                     background: "#fff",
                     borderRadius: 20,
                     padding: "28px 28px 24px",
-                    maxWidth: 420,
+                    maxWidth,
                     width: "100%",
+                    maxHeight: "90vh",
+                    overflowY: "auto",
                     boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
                     border: "1px solid rgba(0,0,0,0.06)",
                     animation: "fadeIn 0.18s ease",
@@ -47,16 +53,19 @@
                 >
                     {title}
                 </h2>{" "}
-                <p
-                    style={{
-                        fontSize: 13,
-                        color: "#6B7280",
-                        lineHeight: 1.6,
-                        margin: "0 0 24px",
-                    }}
-                >
-                    {message}
-                </p>{" "}
+                {message && (
+                    <p
+                        style={{
+                            fontSize: 13,
+                            color: "#6B7280",
+                            lineHeight: 1.6,
+                            margin: children ? "0 0 18px" : "0 0 24px",
+                        }}
+                    >
+                        {message}
+                    </p>
+                )}{" "}
+                {children && <div style={{ marginBottom: 24 }}>{children}</div>}{" "}
                 <div
                     style={{
                         display: "flex",
@@ -67,6 +76,7 @@
                     {" "}
                     <button
                         onClick={onCancel}
+                        disabled={cancelDisabled}
                         style={{
                             padding: "9px 18px",
                             borderRadius: 10,
@@ -75,10 +85,12 @@
                             color: "#6B7280",
                             fontSize: 13,
                             fontWeight: 600,
-                            cursor: "pointer",
+                            cursor: cancelDisabled ? "not-allowed" : "pointer",
                             fontFamily: "inherit",
+                            opacity: cancelDisabled ? 0.6 : 1,
                         }}
                         onMouseEnter={(e) =>
+                            !cancelDisabled &&
                             (e.currentTarget.style.background = "#F9FAFB")
                         }
                         onMouseLeave={(e) =>
@@ -90,6 +102,7 @@
                     </button>{" "}
                     <button
                         onClick={onConfirm}
+                        disabled={confirmDisabled}
                         style={{
                             padding: "9px 18px",
                             borderRadius: 10,
@@ -101,9 +114,10 @@
                             color: "#fff",
                             fontSize: 13,
                             fontWeight: 600,
-                            cursor: "pointer",
+                            cursor: confirmDisabled ? "not-allowed" : "pointer",
                             fontFamily: "inherit",
                             boxShadow: "0 4px 12px rgba(63,125,255,0.3)",
+                            opacity: confirmDisabled ? 0.6 : 1,
                         }}
                     >
                         {" "}

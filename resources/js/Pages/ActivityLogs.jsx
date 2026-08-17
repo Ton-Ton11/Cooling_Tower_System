@@ -1,84 +1,116 @@
-﻿import { useState } from "react";
-import { activityLogs } from "../data/mockData";
-const actionColors = {
-    CREATE: "#22C55E",
-    APPROVE: "#3F7DFF",
-    UPDATE: "#59B7FF",
-    ARCHIVE: "#9CA3AF",
-    RESTORE: "#22C55E",
-    REPORT: "#F58A07",
-    CHECKOUT: "#F58A07",
-    DAMAGE_REPORT: "#EF4444",
-    ANNOUNCE: "#F58A07",
-    CANCEL: "#EF4444",
-    COMPLETE: "#22C55E",
-    INVENTORY: "#3F7DFF",
-    PROMOTE: "#8B5CF6",
-};
-const roleColors = {
-    "Super Admin": "#EF4444",
-    Manager: "#F58A07",
-    "Admin Assistant": "#3F7DFF",
-    "Tools Man": "#22C55E",
-    Technician: "#8B5CF6",
-    Customer: "#9CA3AF",
-};
-function ActivityLogs() {
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+    ACTION_COLORS,
+    ROLE_COLORS,
+    SUPER_ADMIN_ENDPOINTS,
+    extractErrorMessage,
+    formatDateTime,
+    getInitials,
+} from "../utils/superAdmin";
+
+function ActivityLogs({ addToast }) {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [filterAction, setFilterAction] = useState("All");
     const [filterRole, setFilterRole] = useState("All");
-    const actionTypes = [
-        "All",
-        ...Array.from(new Set(activityLogs.map((l) => l.action_type))),
-    ];
-    const roles = [
-        "All",
-        "Super Admin",
-        "Manager",
-        "Admin Assistant",
-        "Tools Man",
-        "Technician",
-    ];
-    const filtered = activityLogs.filter((log) => {
-        const matchSearch =
-            !search ||
-            log.user_name.toLowerCase().includes(search.toLowerCase()) ||
-            log.description.toLowerCase().includes(search.toLowerCase()) ||
-            log.action_type.toLowerCase().includes(search.toLowerCase());
-        const matchAction =
-            filterAction === "All" || log.action_type === filterAction;
-        const matchRole = filterRole === "All" || log.role === filterRole;
-        return matchSearch && matchAction && matchRole;
-    });
+    const [actionTypes, setActionTypes] = useState(["All"]);
+
+    const roleOptions = useMemo(
+        () => [
+            "All",
+            ...Object.keys(ROLE_COLORS).filter((role) => role !== "All Staff"),
+        ],
+        [],
+    );
+
+    const fetchLogs = useCallback(async () => {
+        setLoading(true);
+
+        try {
+            const params = { limit: 200 };
+
+            if (search.trim()) {
+                params.search = search.trim();
+            }
+
+            if (filterAction !== "All") {
+                params.action_type = filterAction;
+            }
+
+            if (filterRole !== "All") {
+                params.role = filterRole;
+            }
+
+            const { data } = await window.axios.get(
+                SUPER_ADMIN_ENDPOINTS.activityLogs,
+                { params },
+            );
+            const rows = Array.isArray(data?.data) ? data.data : [];
+
+            setLogs(rows);
+            setActionTypes((previous) => {
+                const next = Array.from(
+                    new Set([
+                        ...previous.filter((value) => value !== "All"),
+                        ...rows
+                            .map((row) => row.action_type)
+                            .filter(Boolean),
+                    ]),
+                ).sort();
+
+                return ["All", ...next];
+            });
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to load activity logs."),
+                "error",
+            );
+        } finally {
+            setLoading(false);
+        }
+    }, [addToast, filterAction, filterRole, search]);
+
+    useEffect(() => {
+        const timeout = setTimeout(
+            () => {
+                fetchLogs();
+            },
+            search.trim() ? 250 : 0,
+        );
+
+        return () => clearTimeout(timeout);
+    }, [fetchLogs, search]);
+
     return (
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
-            {" "}
             <div className="page-header">
-                {" "}
                 <div>
-                    {" "}
-                    <h1 className="page-title font-display">
-                        Activity Logs
-                    </h1>{" "}
+                    <h1 className="page-title font-display">Activity Logs</h1>
                     <p className="page-subtitle">
-                        Audit trail of all employee actions
-                    </p>{" "}
-                </div>{" "}
-                <span
-                    style={{
-                        fontSize: 12,
-                        color: "#9CA3AF",
-                        background: "#F5F7FA",
-                        border: "1px solid #E5E7EB",
-                        padding: "5px 12px",
-                        borderRadius: 8,
-                    }}
-                >
-                    {" "}
-                    {filtered.length} log{filtered.length !== 1 ? "s" : ""}{" "}
-                </span>{" "}
-            </div>{" "}
-            {/* Filters */}{" "}
+                        Audit trail of recent employee and system actions
+                    </p>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span
+                        style={{
+                            fontSize: 12,
+                            color: "#9CA3AF",
+                            background: "#F5F7FA",
+                            border: "1px solid #E5E7EB",
+                            padding: "5px 12px",
+                            borderRadius: 8,
+                        }}
+                    >
+                        {logs.length} matching log
+                        {logs.length === 1 ? "" : "s"}
+                    </span>
+                    <button className="btn-secondary" onClick={fetchLogs}>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
             <div
                 style={{
                     display: "flex",
@@ -87,9 +119,7 @@ function ActivityLogs() {
                     flexWrap: "wrap",
                 }}
             >
-                {" "}
                 <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
-                    {" "}
                     <span
                         style={{
                             position: "absolute",
@@ -101,58 +131,54 @@ function ActivityLogs() {
                         }}
                     >
                         🔍
-                    </span>{" "}
+                    </span>
                     <input
                         className="input-field"
                         style={{ paddingLeft: 32 }}
                         placeholder="Search logs..."
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                    />{" "}
-                </div>{" "}
+                        onChange={(event) => setSearch(event.target.value)}
+                    />
+                </div>
+
                 <select
                     className="input-field"
-                    style={{ width: "auto", minWidth: 150 }}
+                    style={{ width: "auto", minWidth: 160 }}
                     value={filterAction}
-                    onChange={(e) => setFilterAction(e.target.value)}
+                    onChange={(event) => setFilterAction(event.target.value)}
                 >
-                    {" "}
-                    {actionTypes.map((a) => (
-                        <option key={a} value={a}>
-                            {a === "All" ? "All Actions" : a}
+                    {actionTypes.map((action) => (
+                        <option key={action} value={action}>
+                            {action === "All" ? "All Actions" : action}
                         </option>
-                    ))}{" "}
-                </select>{" "}
+                    ))}
+                </select>
+
                 <select
                     className="input-field"
-                    style={{ width: "auto", minWidth: 150 }}
+                    style={{ width: "auto", minWidth: 160 }}
                     value={filterRole}
-                    onChange={(e) => setFilterRole(e.target.value)}
+                    onChange={(event) => setFilterRole(event.target.value)}
                 >
-                    {" "}
-                    {roles.map((r) => (
-                        <option key={r} value={r}>
-                            {r === "All" ? "All Roles" : r}
+                    {roleOptions.map((role) => (
+                        <option key={role} value={role}>
+                            {role === "All" ? "All Roles" : role}
                         </option>
-                    ))}{" "}
-                </select>{" "}
-            </div>{" "}
+                    ))}
+                </select>
+            </div>
+
             <div className="card" style={{ padding: 20 }}>
-                {" "}
                 <div style={{ overflowX: "auto" }}>
-                    {" "}
                     <table
                         style={{
                             width: "100%",
                             borderCollapse: "collapse",
-                            minWidth: 750,
+                            minWidth: 820,
                         }}
                     >
-                        {" "}
                         <thead>
-                            {" "}
                             <tr style={{ background: "#F5F7FA" }}>
-                                {" "}
                                 {[
                                     "Log ID",
                                     "User",
@@ -160,9 +186,9 @@ function ActivityLogs() {
                                     "Action",
                                     "Description",
                                     "Timestamp",
-                                ].map((h) => (
+                                ].map((heading) => (
                                     <th
-                                        key={h}
+                                        key={heading}
                                         style={{
                                             padding: "10px 12px",
                                             textAlign: "left",
@@ -172,188 +198,179 @@ function ActivityLogs() {
                                             textTransform: "uppercase",
                                             color: "#6B7280",
                                             whiteSpace: "nowrap",
-                                            borderBottom: "1px solid #EAECF0",
+                                            borderBottom:
+                                                "1px solid #EAECF0",
                                         }}
                                     >
-                                        {h}
+                                        {heading}
                                     </th>
-                                ))}{" "}
-                            </tr>{" "}
-                        </thead>{" "}
+                                ))}
+                            </tr>
+                        </thead>
                         <tbody>
-                            {" "}
-                            {filtered.length === 0 ? (
+                            {loading ? (
                                 <tr>
-                                    {" "}
                                     <td
                                         colSpan={6}
                                         style={{
-                                            padding: "32px",
+                                            padding: 32,
+                                            textAlign: "center",
+                                            color: "#9CA3AF",
+                                            fontSize: 13,
+                                        }}
+                                    >
+                                        Loading activity logs...
+                                    </td>
+                                </tr>
+                            ) : logs.length === 0 ? (
+                                <tr>
+                                    <td
+                                        colSpan={6}
+                                        style={{
+                                            padding: 32,
                                             textAlign: "center",
                                             color: "#9CA3AF",
                                             fontSize: 13,
                                         }}
                                     >
                                         No logs matching your filters.
-                                    </td>{" "}
+                                    </td>
                                 </tr>
                             ) : (
-                                filtered.map((log) => (
-                                    <tr
-                                        key={log.id}
-                                        style={{
-                                            borderTop: "1px solid #F5F7FA",
-                                        }}
-                                        onMouseEnter={(e) =>
-                                            (e.currentTarget.style.background =
-                                                "rgba(63,125,255,0.04)")
-                                        }
-                                        onMouseLeave={(e) =>
-                                            (e.currentTarget.style.background =
-                                                "transparent")
-                                        }
-                                    >
-                                        {" "}
-                                        <td
+                                logs.map((log) => {
+                                    const roleColor =
+                                        ROLE_COLORS[log.role] || "#8A93A6";
+                                    const actionColor =
+                                        ACTION_COLORS[log.action_type] ||
+                                        "#8A93A6";
+
+                                    return (
+                                        <tr
+                                            key={log.id}
                                             style={{
-                                                padding: "10px 12px",
-                                                fontSize: 11,
-                                                color: "#9CA3AF",
-                                                fontVariantNumeric:
-                                                    "tabular-nums",
+                                                borderTop:
+                                                    "1px solid #F5F7FA",
+                                            }}
+                                            onMouseEnter={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "rgba(63,125,255,0.04)";
+                                            }}
+                                            onMouseLeave={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "transparent";
                                             }}
                                         >
-                                            {" "}
-                                            #
-                                            {log.id
-                                                .toString()
-                                                .padStart(5, "0")}{" "}
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            {" "}
-                                            <div
+                                            <td
                                                 style={{
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: 8,
+                                                    padding: "10px 12px",
+                                                    fontSize: 11,
+                                                    color: "#9CA3AF",
+                                                    fontVariantNumeric:
+                                                        "tabular-nums",
                                                 }}
                                             >
-                                                {" "}
+                                                #{String(log.id).padStart(5, "0")}
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
                                                 <div
                                                     style={{
-                                                        width: 26,
-                                                        height: 26,
-                                                        borderRadius: "50%",
-                                                        flexShrink: 0,
-                                                        background: `${roleColors[log.role] || "#8A93A6"}18`,
-                                                        border: `1px solid ${roleColors[log.role] || "#8A93A6"}30`,
                                                         display: "flex",
                                                         alignItems: "center",
-                                                        justifyContent:
-                                                            "center",
-                                                        fontSize: 10,
-                                                        color:
-                                                            roleColors[
-                                                                log.role
-                                                            ] || "#8A93A6",
-                                                        fontWeight: 700,
+                                                        gap: 8,
                                                     }}
                                                 >
-                                                    {" "}
-                                                    {log.user_name
-                                                        .split(" ")
-                                                        .map((n) => n[0])
-                                                        .join("")
-                                                        .slice(0, 2)}{" "}
-                                                </div>{" "}
+                                                    <div
+                                                        style={{
+                                                            width: 28,
+                                                            height: 28,
+                                                            borderRadius: "50%",
+                                                            flexShrink: 0,
+                                                            background: `${roleColor}18`,
+                                                            border: `1px solid ${roleColor}30`,
+                                                            display: "flex",
+                                                            alignItems:
+                                                                "center",
+                                                            justifyContent:
+                                                                "center",
+                                                            fontSize: 10,
+                                                            color: roleColor,
+                                                            fontWeight: 700,
+                                                        }}
+                                                    >
+                                                        {getInitials(log.user_name)}
+                                                    </div>
+                                                    <span
+                                                        style={{
+                                                            fontSize: 13,
+                                                            color: "#1E2F5F",
+                                                        }}
+                                                    >
+                                                        {log.user_name}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
                                                 <span
                                                     style={{
-                                                        fontSize: 13,
-                                                        color: "#1E2F5F",
+                                                        fontSize: 11,
+                                                        padding: "2px 8px",
+                                                        borderRadius: 20,
+                                                        background: `${roleColor}18`,
+                                                        color: roleColor,
+                                                        border: `1px solid ${roleColor}30`,
+                                                        fontWeight: 600,
+                                                        whiteSpace: "nowrap",
                                                     }}
                                                 >
-                                                    {log.user_name}
-                                                </span>{" "}
-                                            </div>{" "}
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            {" "}
-                                            <span
+                                                    {log.role}
+                                                </span>
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
+                                                <span
+                                                    style={{
+                                                        fontSize: 11,
+                                                        padding: "2px 8px",
+                                                        borderRadius: 4,
+                                                        background: `${actionColor}18`,
+                                                        color: actionColor,
+                                                        fontWeight: 600,
+                                                        whiteSpace: "nowrap",
+                                                        letterSpacing: "0.05em",
+                                                    }}
+                                                >
+                                                    {log.action_type}
+                                                </span>
+                                            </td>
+                                            <td
                                                 style={{
-                                                    fontSize: 11,
-                                                    padding: "2px 8px",
-                                                    borderRadius: 20,
-                                                    background: `${roleColors[log.role] || "#8A93A6"}18`,
-                                                    color:
-                                                        roleColors[log.role] ||
-                                                        "#8A93A6",
-                                                    border: `1px solid ${roleColors[log.role] || "#8A93A6"}30`,
-                                                    fontFamily:
-                                                        "'DM Sans',sans-serif",
-                                                    fontWeight: 600,
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#6B7280",
+                                                    maxWidth: 360,
+                                                }}
+                                            >
+                                                {log.description}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#9CA3AF",
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {" "}
-                                                {log.role}{" "}
-                                            </span>{" "}
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            {" "}
-                                            <span
-                                                style={{
-                                                    fontSize: 11,
-                                                    padding: "2px 8px",
-                                                    borderRadius: 4,
-                                                    background: `${actionColors[log.action_type] || "#8A93A6"}18`,
-                                                    color:
-                                                        actionColors[
-                                                            log.action_type
-                                                        ] || "#8A93A6",
-                                                    fontFamily:
-                                                        "'JetBrains Mono',monospace",
-                                                    fontWeight: 600,
-                                                    whiteSpace: "nowrap",
-                                                    letterSpacing: "0.05em",
-                                                }}
-                                            >
-                                                {" "}
-                                                {log.action_type}{" "}
-                                            </span>{" "}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 12,
-                                                color: "#6B7280",
-                                                maxWidth: 320,
-                                                overflow: "hidden",
-                                                textOverflow: "ellipsis",
-                                                whiteSpace: "nowrap",
-                                            }}
-                                        >
-                                            {" "}
-                                            {log.description}{" "}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 11,
-                                                color: "#9CA3AF",
-                                                whiteSpace: "nowrap",
-                                            }}
-                                        >
-                                            {" "}
-                                            {log.created_at}{" "}
-                                        </td>{" "}
-                                    </tr>
-                                ))
-                            )}{" "}
-                        </tbody>{" "}
-                    </table>{" "}
-                </div>{" "}
-            </div>{" "}
+                                                {formatDateTime(log.created_at)}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     );
 }
-export { ActivityLogs as default };
+
+export default ActivityLogs;

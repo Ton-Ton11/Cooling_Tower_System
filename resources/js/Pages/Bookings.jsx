@@ -1,118 +1,145 @@
-﻿import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Modal from "../Components/Modal";
 import StatusBadge from "../Components/StatusBadge";
-import { bookings as initialBookings, technicians } from "../data/mockData";
-function Bookings({ addToast }) {
+import {
+    SUPER_ADMIN_ENDPOINTS,
+    extractErrorMessage,
+    formatCurrency,
+    formatDateTime,
+} from "../utils/superAdmin";
+
+const tabs = [
+    "Pending",
+    "Approved",
+    "Dispatched",
+    "Completed",
+    "Cancelled",
+    "All",
+];
+
+function Bookings({ addToast, onDataChanged }) {
     const [tab, setTab] = useState("Pending");
-    const [bookings, setBookings] = useState(initialBookings);
-    const [selectedBooking, setSelectedBooking] = useState(null);
+    const [bookings, setBookings] = useState([]);
+    const [technicians, setTechnicians] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [assigning, setAssigning] = useState(false);
     const [approveModal, setApproveModal] = useState(null);
-    const [selectedTech, setSelectedTech] = useState(
-        technicians[0]?.user_id.toString() || "",
-    );
+    const [assignment, setAssignment] = useState({
+        assigned_tech_id: "",
+        booking_status: "Approved",
+    });
     const [clientPanel, setClientPanel] = useState(null);
-    const filtered =
-        tab === "All"
-            ? bookings
-            : bookings.filter((b) => b.booking_status === tab);
-    const handleApprove = () => {
-        if (!approveModal) return;
-        const tech = technicians.find(
-            (t) => t.user_id.toString() === selectedTech,
-        );
-        setBookings((prev) =>
-            prev.map((b) =>
-                b.booking_id === approveModal.booking_id
-                    ? {
-                          ...b,
-                          booking_status: "Approved",
-                          assigned_tech_id: tech?.user_id,
-                          assigned_tech_name: tech
-                              ? `${tech.given_name} ${tech.last_name}`
-                              : b.assigned_tech_name,
-                      }
-                    : b,
-            ),
-        );
-        addToast(
-            `Booking #${approveModal.booking_id} approved. ${tech?.given_name || "Technician"} has been assigned and will be notified.`,
-        );
-        setApproveModal(null);
-    };
-    const cols = [
-        {
-            key: "booking_id",
-            label: "ID",
-            mono: true,
-            render: (r) => (
-                <span style={{ color: "#3F7DFF", fontWeight: 600 }}>
-                    #{r.booking_id}
-                </span>
-            ),
+
+    const fetchBookings = useCallback(
+        async (showLoader = true) => {
+            if (showLoader) {
+                setLoading(true);
+            }
+
+            try {
+                const { data } = await window.axios.get(
+                    SUPER_ADMIN_ENDPOINTS.bookings,
+                );
+                setBookings(Array.isArray(data?.data) ? data.data : []);
+                setTechnicians(
+                    Array.isArray(data?.technicians) ? data.technicians : [],
+                );
+            } catch (error) {
+                addToast(
+                    extractErrorMessage(error, "Unable to load bookings."),
+                    "error",
+                );
+            } finally {
+                setLoading(false);
+            }
         },
-        { key: "client_name", label: "Client" },
-        { key: "service", label: "Service", sortable: false },
-        { key: "scheduled_date", label: "Scheduled", mono: true },
-        {
-            key: "assigned_tech_name",
-            label: "Technician",
-            render: (r) =>
-                r.assigned_tech_name || (
-                    <span style={{ color: "#9CA3AF" }}>—</span>
-                ),
-        },
-        {
-            key: "booking_status",
-            label: "Status",
-            render: (r) => <StatusBadge status={r.booking_status} />,
-        },
-        {
-            key: "payment_status",
-            label: "Payment",
-            render: (r) => <StatusBadge status={r.payment_status} />,
-        },
-    ];
-    const getActions = (row) => {
-        const acts = [
-            {
-                label: "\u{1F464} View Client Details",
-                onClick: (r) => setClientPanel(r),
-            },
-        ];
-        if (row.booking_status === "Pending") {
-            acts.unshift({
-                label: "\u2705 Approve & Assign",
-                onClick: (r) => {
-                    setApproveModal(r);
-                    setSelectedTech(technicians[0]?.user_id.toString() || "");
-                },
-            });
+        [addToast],
+    );
+
+    useEffect(() => {
+        fetchBookings();
+    }, [fetchBookings]);
+
+    const filtered = useMemo(
+        () =>
+            tab === "All"
+                ? bookings
+                : bookings.filter((booking) => booking.booking_status === tab),
+        [bookings, tab],
+    );
+
+    const clientHistory = useMemo(() => {
+        if (!clientPanel) {
+            return [];
         }
-        return acts;
+
+        return bookings.filter(
+            (booking) =>
+                booking.client_id === clientPanel.client_id &&
+                booking.booking_id !== clientPanel.booking_id,
+        );
+    }, [bookings, clientPanel]);
+
+    const openAssignmentModal = (booking) => {
+        setApproveModal(booking);
+        setAssignment({
+            assigned_tech_id: String(
+                booking.assigned_tech_id ?? technicians[0]?.user_id ?? "",
+            ),
+            booking_status:
+                booking.booking_status === "Dispatched"
+                    ? "Dispatched"
+                    : "Approved",
+        });
     };
-    const clientHistory = clientPanel
-        ? bookings.filter(
-              (b) =>
-                  b.client_id === clientPanel.client_id &&
-                  b.booking_id !== clientPanel.booking_id,
-          )
-        : [];
-    const tabs = ["Pending", "Approved", "Completed", "Cancelled", "All"];
+
+    const handleAssign = async () => {
+        if (assigning || !approveModal) {
+            return;
+        }
+
+        if (!assignment.assigned_tech_id) {
+            addToast("Select a technician before saving.", "error");
+            return;
+        }
+
+        setAssigning(true);
+
+        try {
+            const { data } = await window.axios.patch(
+                SUPER_ADMIN_ENDPOINTS.approveBooking(approveModal.booking_id),
+                {
+                    assigned_tech_id: Number(assignment.assigned_tech_id),
+                    booking_status: assignment.booking_status,
+                },
+            );
+
+            addToast(data?.message || "Booking updated successfully.");
+            setApproveModal(null);
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to update the booking."),
+                "error",
+            );
+        } finally {
+            setAssigning(false);
+        }
+    };
+
     return (
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
-            {" "}
             <div className="page-header">
-                {" "}
                 <div>
-                    {" "}
                     <h1 className="page-title font-display">
                         Bookings Management
-                    </h1>{" "}
+                    </h1>
                     <p className="page-subtitle">
-                        Review, approve, and track all service bookings
-                    </p>{" "}
-                </div>{" "}
+                        Review, approve, assign, and track live service bookings
+                    </p>
+                </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    {" "}
                     <span
                         style={{
                             fontSize: 12,
@@ -123,67 +150,94 @@ function Bookings({ addToast }) {
                             borderRadius: 8,
                         }}
                     >
-                        {" "}
                         {
                             bookings.filter(
-                                (b) => b.booking_status === "Pending",
+                                (booking) => booking.booking_status === "Pending",
                             ).length
                         }{" "}
-                        pending{" "}
-                    </span>{" "}
-                </div>{" "}
-            </div>{" "}
-            {/* Tab bar */}{" "}
+                        pending
+                    </span>
+                    <button className="btn-secondary" onClick={() => fetchBookings()}>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
             <div
                 className="tab-bar"
                 style={{ marginBottom: 20, display: "inline-flex" }}
             >
-                {" "}
-                {tabs.map((t) => (
-                    <button
-                        key={t}
-                        className={`tab-item ${tab === t ? "active" : ""}`}
-                        onClick={() => setTab(t)}
-                    >
-                        {" "}
-                        {t}{" "}
-                        <span
-                            style={{
-                                marginLeft: 6,
-                                fontSize: 10,
-                                color: tab === t ? "#3F7DFF" : "#9CA3AF",
-                            }}
+                {tabs.map((currentTab) => {
+                    const count =
+                        currentTab === "All"
+                            ? bookings.length
+                            : bookings.filter(
+                                  (booking) =>
+                                      booking.booking_status === currentTab,
+                              ).length;
+
+                    return (
+                        <button
+                            key={currentTab}
+                            className={`tab-item ${tab === currentTab ? "active" : ""}`}
+                            onClick={() => setTab(currentTab)}
                         >
-                            {" "}
-                            {t === "All"
-                                ? bookings.length
-                                : bookings.filter((b) => b.booking_status === t)
-                                      .length}{" "}
-                        </span>{" "}
-                    </button>
-                ))}{" "}
-            </div>{" "}
-            {/* Note: DataTable actions are per-row. Wrapping properly: */}{" "}
-            {filtered.length > 0 && (
-                <div className="card" style={{ padding: 20, marginTop: 16 }}>
-                    {" "}
-                    <p className="section-label" style={{ marginBottom: 12 }}>
-                        Booking Details — Click ⋯ on any row to take action
-                    </p>{" "}
+                            {currentTab}
+                            <span
+                                style={{
+                                    marginLeft: 6,
+                                    fontSize: 10,
+                                    color:
+                                        tab === currentTab
+                                            ? "#3F7DFF"
+                                            : "#9CA3AF",
+                                }}
+                            >
+                                {count}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="card" style={{ padding: 20, marginTop: 16 }}>
+                <p className="section-label" style={{ marginBottom: 12 }}>
+                    Booking Details — manage assignments and view client records
+                </p>
+
+                {loading ? (
+                    <div
+                        style={{
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
+                        }}
+                    >
+                        Loading bookings...
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div
+                        style={{
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
+                        }}
+                    >
+                        No bookings match the selected tab.
+                    </div>
+                ) : (
                     <div style={{ overflowX: "auto" }}>
-                        {" "}
                         <table
                             style={{
                                 width: "100%",
                                 borderCollapse: "collapse",
-                                minWidth: 800,
+                                minWidth: 860,
                             }}
                         >
-                            {" "}
                             <thead>
-                                {" "}
                                 <tr style={{ background: "#F5F7FA" }}>
-                                    {" "}
                                     {[
                                         "ID",
                                         "Client",
@@ -193,9 +247,9 @@ function Bookings({ addToast }) {
                                         "Status",
                                         "Payment",
                                         "Action",
-                                    ].map((h) => (
+                                    ].map((heading) => (
                                         <th
-                                            key={h}
+                                            key={heading}
                                             style={{
                                                 padding: "10px 12px",
                                                 textAlign: "left",
@@ -209,248 +263,253 @@ function Bookings({ addToast }) {
                                                     "1px solid #EAECF0",
                                             }}
                                         >
-                                            {h}
+                                            {heading}
                                         </th>
-                                    ))}{" "}
-                                </tr>{" "}
-                            </thead>{" "}
+                                    ))}
+                                </tr>
+                            </thead>
                             <tbody>
-                                {" "}
-                                {filtered.map((b) => (
-                                    <tr
-                                        key={b.booking_id}
-                                        style={{
-                                            borderTop: "1px solid #F5F7FA",
-                                        }}
-                                        onMouseEnter={(e) =>
-                                            (e.currentTarget.style.background =
-                                                "rgba(63,125,255,0.04)")
-                                        }
-                                        onMouseLeave={(e) =>
-                                            (e.currentTarget.style.background =
-                                                "transparent")
-                                        }
-                                    >
-                                        {" "}
-                                        <td
+                                {filtered.map((booking) => {
+                                    const canAssign = [
+                                        "Pending",
+                                        "Approved",
+                                        "Dispatched",
+                                    ].includes(booking.booking_status);
+
+                                    return (
+                                        <tr
+                                            key={booking.booking_id}
                                             style={{
-                                                padding: "10px 12px",
-                                                fontSize: 12,
-                                                fontWeight: 600,
-                                                color: "#3F7DFF",
+                                                borderTop: "1px solid #F5F7FA",
+                                            }}
+                                            onMouseEnter={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "rgba(63,125,255,0.04)";
+                                            }}
+                                            onMouseLeave={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "transparent";
                                             }}
                                         >
-                                            #{b.booking_id}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 13,
-                                                color: "#1E2F5F",
-                                            }}
-                                        >
-                                            {b.client_name}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 12,
-                                                color: "#6B7280",
-                                                maxWidth: 200,
-                                                overflow: "hidden",
-                                                textOverflow: "ellipsis",
-                                                whiteSpace: "nowrap",
-                                            }}
-                                        >
-                                            {b.service}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 11,
-                                                color: "#9CA3AF",
-                                                whiteSpace: "nowrap",
-                                            }}
-                                        >
-                                            {b.scheduled_date}
-                                        </td>{" "}
-                                        <td
-                                            style={{
-                                                padding: "10px 12px",
-                                                fontSize: 13,
-                                                color: b.assigned_tech_name
-                                                    ? "#374151"
-                                                    : "#9CA3AF",
-                                            }}
-                                        >
-                                            {b.assigned_tech_name || "\u2014"}
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            <StatusBadge
-                                                status={b.booking_status}
-                                            />
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            <StatusBadge
-                                                status={b.payment_status}
-                                            />
-                                        </td>{" "}
-                                        <td style={{ padding: "10px 12px" }}>
-                                            {" "}
-                                            <div
+                                            <td
                                                 style={{
-                                                    display: "flex",
-                                                    gap: 6,
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    fontWeight: 600,
+                                                    color: "#3F7DFF",
                                                 }}
                                             >
-                                                {" "}
-                                                {b.booking_status ===
-                                                    "Pending" && (
+                                                #{booking.booking_id}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 13,
+                                                    color: "#1E2F5F",
+                                                }}
+                                            >
+                                                {booking.client_name}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#6B7280",
+                                                    maxWidth: 220,
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                {booking.service}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#9CA3AF",
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                {formatDateTime(
+                                                    booking.scheduled_date,
+                                                )}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 13,
+                                                    color: booking.assigned_tech_name
+                                                        ? "#374151"
+                                                        : "#9CA3AF",
+                                                }}
+                                            >
+                                                {booking.assigned_tech_name ||
+                                                    "Unassigned"}
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
+                                                <StatusBadge
+                                                    status={booking.booking_status}
+                                                />
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
+                                                <StatusBadge
+                                                    status={booking.payment_status}
+                                                />
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        gap: 6,
+                                                        flexWrap: "wrap",
+                                                    }}
+                                                >
+                                                    {canAssign && (
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{
+                                                                padding:
+                                                                    "5px 10px",
+                                                                fontSize: 11,
+                                                            }}
+                                                            onClick={() =>
+                                                                openAssignmentModal(
+                                                                    booking,
+                                                                )
+                                                            }
+                                                        >
+                                                            {booking.booking_status ===
+                                                            "Pending"
+                                                                ? "✅ Approve"
+                                                                : "🛠 Reassign"}
+                                                        </button>
+                                                    )}
                                                     <button
-                                                        className="btn-primary"
+                                                        className="btn-secondary"
                                                         style={{
                                                             padding: "5px 10px",
                                                             fontSize: 11,
                                                         }}
-                                                        onClick={() => {
-                                                            setApproveModal(b);
-                                                            setSelectedTech(
-                                                                technicians[0]?.user_id.toString() ||
-                                                                    "",
-                                                            );
-                                                        }}
+                                                        onClick={() =>
+                                                            setClientPanel(booking)
+                                                        }
                                                     >
-                                                        {" "}
-                                                        ✅ Approve{" "}
+                                                        👤 Client
                                                     </button>
-                                                )}{" "}
-                                                <button
-                                                    className="btn-secondary"
-                                                    style={{
-                                                        padding: "5px 10px",
-                                                        fontSize: 11,
-                                                    }}
-                                                    onClick={() =>
-                                                        setClientPanel(b)
-                                                    }
-                                                >
-                                                    {" "}
-                                                    👤 Client{" "}
-                                                </button>{" "}
-                                            </div>{" "}
-                                        </td>{" "}
-                                    </tr>
-                                ))}{" "}
-                            </tbody>{" "}
-                        </table>{" "}
-                    </div>{" "}
-                </div>
-            )}{" "}
-            {/* Approve Modal */}{" "}
-            {approveModal && (
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            <Modal
+                open={!!approveModal}
+                title={
+                    approveModal?.booking_status === "Pending"
+                        ? `Approve Booking #${approveModal?.booking_id}`
+                        : `Update Booking #${approveModal?.booking_id}`
+                }
+                message={
+                    approveModal
+                        ? `Assign a technician and update the live status for ${approveModal.client_name}.`
+                        : ""
+                }
+                confirmLabel={assigning ? "Saving..." : "Save Changes"}
+                confirmDisabled={
+                    assigning ||
+                    technicians.length === 0 ||
+                    !assignment.assigned_tech_id
+                }
+                maxWidth={560}
+                onConfirm={handleAssign}
+                onCancel={() => !assigning && setApproveModal(null)}
+            >
                 <div
                     style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 1e3,
-                        background: "rgba(0,0,0,0.4)",
-                        backdropFilter: "blur(4px)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: 16,
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 16,
                     }}
                 >
-                    {" "}
-                    <div
-                        style={{
-                            background: "#fff",
-                            borderRadius: 20,
-                            padding: "28px",
-                            maxWidth: 420,
-                            width: "100%",
-                            boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-                            border: "1px solid rgba(0,0,0,0.06)",
-                        }}
-                    >
-                        {" "}
-                        <h2
-                            style={{
-                                fontSize: 16,
-                                fontWeight: 700,
-                                color: "#1E2F5F",
-                                margin: "0 0 8px",
-                            }}
-                        >
-                            Approve Booking #{approveModal.booking_id}?
-                        </h2>{" "}
-                        <p
-                            style={{
-                                fontSize: 13,
-                                color: "#6B7280",
-                                marginBottom: 16,
-                            }}
-                        >
-                            {" "}
-                            Service:{" "}
-                            <strong style={{ color: "#1E2F5F" }}>
-                                {approveModal.service}
-                            </strong>
-                            <br /> Client:{" "}
-                            <strong style={{ color: "#1E2F5F" }}>
-                                {approveModal.client_name}
-                            </strong>{" "}
-                        </p>{" "}
-                        <p
-                            style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: "#6B7280",
-                                textTransform: "uppercase",
-                                letterSpacing: "0.04em",
-                                marginBottom: 6,
-                            }}
-                        >
-                            Assign Technician
-                        </p>{" "}
+                    <div style={{ gridColumn: "1 / -1" }}>
+                        <p className="section-label" style={{ marginBottom: 6 }}>
+                            Technician
+                        </p>
                         <select
                             className="input-field"
-                            value={selectedTech}
-                            onChange={(e) => setSelectedTech(e.target.value)}
-                            style={{ marginBottom: 20 }}
+                            value={assignment.assigned_tech_id}
+                            onChange={(event) =>
+                                setAssignment((previous) => ({
+                                    ...previous,
+                                    assigned_tech_id: event.target.value,
+                                }))
+                            }
                         >
-                            {" "}
-                            {technicians.map((t) => (
-                                <option key={t.user_id} value={t.user_id}>
-                                    {t.given_name} {t.last_name} — {t.specialty}
+                            {technicians.length === 0 ? (
+                                <option value="">
+                                    No active technicians available
                                 </option>
-                            ))}{" "}
-                        </select>{" "}
+                            ) : (
+                                technicians.map((technician) => (
+                                    <option
+                                        key={technician.user_id}
+                                        value={technician.user_id}
+                                    >
+                                        {technician.full_name}
+                                        {technician.certificate_expiry
+                                            ? ` · Expires ${technician.certificate_expiry}`
+                                            : ""}
+                                    </option>
+                                ))
+                            )}
+                        </select>
+                    </div>
+
+                    <div>
+                        <p className="section-label" style={{ marginBottom: 6 }}>
+                            Booking Status
+                        </p>
+                        <select
+                            className="input-field"
+                            value={assignment.booking_status}
+                            onChange={(event) =>
+                                setAssignment((previous) => ({
+                                    ...previous,
+                                    booking_status: event.target.value,
+                                }))
+                            }
+                        >
+                            <option value="Approved">Approved</option>
+                            <option value="Dispatched">Dispatched</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <p className="section-label" style={{ marginBottom: 6 }}>
+                            Service
+                        </p>
                         <div
                             style={{
-                                display: "flex",
-                                gap: 10,
-                                justifyContent: "flex-end",
+                                padding: "10px 12px",
+                                borderRadius: 10,
+                                background: "#F5F7FA",
+                                border: "1px solid #E5E7EB",
+                                fontSize: 13,
+                                color: "#374151",
                             }}
                         >
-                            {" "}
-                            <button
-                                onClick={() => setApproveModal(null)}
-                                className="btn-secondary"
-                            >
-                                Cancel
-                            </button>{" "}
-                            <button
-                                onClick={handleApprove}
-                                className="btn-primary"
-                            >
-                                Approve & Assign
-                            </button>{" "}
-                        </div>{" "}
-                    </div>{" "}
+                            {approveModal?.service}
+                        </div>
+                    </div>
                 </div>
-            )}{" "}
-            {/* Client Details Panel */}{" "}
+            </Modal>
+
             {clientPanel && (
                 <div
                     style={{
@@ -465,10 +524,9 @@ function Bookings({ addToast }) {
                     }}
                     onClick={() => setClientPanel(null)}
                 >
-                    {" "}
                     <div
                         style={{
-                            width: 400,
+                            width: 420,
                             height: "100vh",
                             background: "#fff",
                             borderLeft: "1px solid #E5E7EB",
@@ -477,9 +535,8 @@ function Bookings({ addToast }) {
                             animation: "slideInRight 0.25s ease",
                             boxShadow: "-8px 0 32px rgba(0,0,0,0.12)",
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}
                     >
-                        {" "}
                         <div
                             style={{
                                 display: "flex",
@@ -488,7 +545,6 @@ function Bookings({ addToast }) {
                                 marginBottom: 20,
                             }}
                         >
-                            {" "}
                             <h3
                                 style={{
                                     fontSize: 16,
@@ -498,7 +554,7 @@ function Bookings({ addToast }) {
                                 }}
                             >
                                 Client Details
-                            </h3>{" "}
+                            </h3>
                             <button
                                 onClick={() => setClientPanel(null)}
                                 style={{
@@ -510,8 +566,9 @@ function Bookings({ addToast }) {
                                 }}
                             >
                                 ✕
-                            </button>{" "}
-                        </div>{" "}
+                            </button>
+                        </div>
+
                         <div
                             style={{
                                 background: "#F5F7FA",
@@ -520,7 +577,6 @@ function Bookings({ addToast }) {
                                 marginBottom: 16,
                             }}
                         >
-                            {" "}
                             <div
                                 style={{
                                     display: "flex",
@@ -529,7 +585,6 @@ function Bookings({ addToast }) {
                                     marginBottom: 12,
                                 }}
                             >
-                                {" "}
                                 <div
                                     style={{
                                         width: 44,
@@ -545,9 +600,8 @@ function Bookings({ addToast }) {
                                     }}
                                 >
                                     👤
-                                </div>{" "}
+                                </div>
                                 <div>
-                                    {" "}
                                     <p
                                         style={{
                                             fontSize: 15,
@@ -557,7 +611,7 @@ function Bookings({ addToast }) {
                                         }}
                                     >
                                         {clientPanel.client_name}
-                                    </p>{" "}
+                                    </p>
                                     <p
                                         style={{
                                             fontSize: 12,
@@ -566,9 +620,9 @@ function Bookings({ addToast }) {
                                         }}
                                     >
                                         Client ID #{clientPanel.client_id}
-                                    </p>{" "}
-                                </div>{" "}
-                            </div>{" "}
+                                    </p>
+                                </div>
+                            </div>
                             <div
                                 style={{
                                     fontSize: 13,
@@ -576,70 +630,60 @@ function Bookings({ addToast }) {
                                     lineHeight: 1.9,
                                 }}
                             >
-                                {" "}
                                 <p style={{ margin: 0 }}>
                                     📋 Service:{" "}
-                                    <span
-                                        style={{
-                                            color: "#1E2F5F",
-                                            fontWeight: 500,
-                                        }}
-                                    >
+                                    <strong style={{ color: "#1E2F5F" }}>
                                         {clientPanel.service}
-                                    </span>
-                                </p>{" "}
+                                    </strong>
+                                </p>
                                 <p style={{ margin: 0 }}>
                                     📅 Scheduled:{" "}
-                                    <span
-                                        style={{
-                                            color: "#1E2F5F",
-                                            fontWeight: 500,
-                                        }}
-                                    >
-                                        {clientPanel.scheduled_date}
-                                    </span>
-                                </p>{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {formatDateTime(clientPanel.scheduled_date)}
+                                    </strong>
+                                </p>
+                                <p style={{ margin: 0 }}>
+                                    📞 Contact:{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {clientPanel.client_contact_number ||
+                                            "Not provided"}
+                                    </strong>
+                                </p>
+                                <p style={{ margin: 0 }}>
+                                    ✉️ Email:{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {clientPanel.client_email ||
+                                            "Not provided"}
+                                    </strong>
+                                </p>
+                                <p style={{ margin: 0 }}>
+                                    📍 Address:{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {clientPanel.client_address ||
+                                            "Not provided"}
+                                    </strong>
+                                </p>
                                 <p style={{ margin: 0 }}>
                                     💳 Payment:{" "}
-                                    <span
-                                        style={{
-                                            color: "#1E2F5F",
-                                            fontWeight: 500,
-                                        }}
-                                    >
-                                        {clientPanel.payment_method ||
-                                            "Not yet specified"}
-                                    </span>
-                                </p>{" "}
-                                {clientPanel.rating && (
-                                    <p style={{ margin: 0 }}>
-                                        ⭐ Rating:{" "}
-                                        <span style={{ color: "#F58A07" }}>
-                                            {"\u2605".repeat(
-                                                clientPanel.rating,
-                                            )}
-                                            {"\u2606".repeat(
-                                                5 - clientPanel.rating,
-                                            )}
-                                        </span>
-                                    </p>
-                                )}{" "}
-                                {clientPanel.feedback && (
-                                    <p
-                                        style={{
-                                            marginTop: 8,
-                                            fontStyle: "italic",
-                                            color: "#9CA3AF",
-                                        }}
-                                    >
-                                        &ldquo;{clientPanel.feedback}&rdquo;
-                                    </p>
-                                )}{" "}
-                            </div>{" "}
-                        </div>{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {clientPanel.payment_status}
+                                        {clientPanel.amount_paid
+                                            ? ` · ${formatCurrency(clientPanel.amount_paid)}`
+                                            : ""}
+                                    </strong>
+                                </p>
+                                <p style={{ margin: 0 }}>
+                                    🧑‍🔧 Assigned Tech:{" "}
+                                    <strong style={{ color: "#1E2F5F" }}>
+                                        {clientPanel.assigned_tech_name ||
+                                            "Unassigned"}
+                                    </strong>
+                                </p>
+                            </div>
+                        </div>
+
                         {clientHistory.length > 0 && (
                             <div>
-                                {" "}
                                 <p
                                     style={{
                                         fontSize: 11,
@@ -651,10 +695,10 @@ function Bookings({ addToast }) {
                                     }}
                                 >
                                     Booking History
-                                </p>{" "}
-                                {clientHistory.map((b) => (
+                                </p>
+                                {clientHistory.map((booking) => (
                                     <div
-                                        key={b.booking_id}
+                                        key={booking.booking_id}
                                         style={{
                                             background: "#F5F7FA",
                                             borderRadius: 12,
@@ -662,17 +706,15 @@ function Bookings({ addToast }) {
                                             marginBottom: 8,
                                         }}
                                     >
-                                        {" "}
                                         <div
                                             style={{
                                                 display: "flex",
                                                 justifyContent: "space-between",
                                                 alignItems: "flex-start",
+                                                gap: 8,
                                             }}
                                         >
-                                            {" "}
                                             <div>
-                                                {" "}
                                                 <p
                                                     style={{
                                                         fontSize: 11,
@@ -681,8 +723,8 @@ function Bookings({ addToast }) {
                                                         margin: 0,
                                                     }}
                                                 >
-                                                    #{b.booking_id}
-                                                </p>{" "}
+                                                    #{booking.booking_id}
+                                                </p>
                                                 <p
                                                     style={{
                                                         fontSize: 12,
@@ -690,8 +732,8 @@ function Bookings({ addToast }) {
                                                         marginTop: 2,
                                                     }}
                                                 >
-                                                    {b.service}
-                                                </p>{" "}
+                                                    {booking.service}
+                                                </p>
                                                 <p
                                                     style={{
                                                         fontSize: 11,
@@ -699,21 +741,24 @@ function Bookings({ addToast }) {
                                                         marginTop: 2,
                                                     }}
                                                 >
-                                                    {b.scheduled_date}
-                                                </p>{" "}
-                                            </div>{" "}
+                                                    {formatDateTime(
+                                                        booking.scheduled_date,
+                                                    )}
+                                                </p>
+                                            </div>
                                             <StatusBadge
-                                                status={b.booking_status}
-                                            />{" "}
-                                        </div>{" "}
+                                                status={booking.booking_status}
+                                            />
+                                        </div>
                                     </div>
-                                ))}{" "}
+                                ))}
                             </div>
-                        )}{" "}
-                    </div>{" "}
+                        )}
+                    </div>
                 </div>
-            )}{" "}
+            )}
         </div>
     );
 }
-export { Bookings as default };
+
+export default Bookings;
