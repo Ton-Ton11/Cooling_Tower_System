@@ -1,7 +1,10 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, usePage } from '@inertiajs/react';
 
-export default function ManagerDashboard() {
+// TODO: Link role-specific pages here once moved into resources/js/Pages/Manager/
+// (AcUnits, Bookings, MaterialsTools, SalesRecords, StaffAccounts, Documents,
+// Announcements, ActivityLogs).
+export default function Dashboard() {
     const { auth } = usePage().props;
     const roleName = auth?.role_name ?? 'Manager';
 

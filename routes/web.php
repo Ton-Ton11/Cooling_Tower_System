@@ -74,23 +74,23 @@ Route::prefix('super-admin')
     });
 
 Route::get('/manager/dashboard', function () {
-    return Inertia::render('ManagerDashboard');
+    return Inertia::render('Manager/Dashboard');
 })->middleware(['auth', 'verified', 'role:2'])->name('manager.dashboard');
 
 Route::get('/admin-assistant/dashboard', function () {
-    return Inertia::render('AdminAssistantDashboard');
+    return Inertia::render('AdminAssistant/Dashboard');
 })->middleware(['auth', 'verified', 'role:3'])->name('admin-assistant.dashboard');
 
 Route::get('/tools-man/dashboard', function () {
-    return Inertia::render('ToolsManDashboard');
+    return Inertia::render('ToolsMan/Dashboard');
 })->middleware(['auth', 'verified', 'role:4'])->name('tools-man.dashboard');
 
 Route::get('/technician/dashboard', function () {
-    return Inertia::render('TechnicianDashboard');
+    return Inertia::render('Technician/Dashboard');
 })->middleware(['auth', 'verified', 'role:5'])->name('technician.dashboard');
 
 Route::get('/customer/dashboard', function () {
-    return Inertia::render('CustomerDashboard');
+    return Inertia::render('Customer/Dashboard');
 })->middleware(['auth', 'verified', 'role:6'])->name('customer.dashboard');
 
 Route::middleware('auth')->group(function () {
