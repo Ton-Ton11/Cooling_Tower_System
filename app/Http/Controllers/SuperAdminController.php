@@ -38,7 +38,7 @@ class SuperAdminController extends Controller
 
     public function dashboard(): Response
     {
-        return Inertia::render('SuperAdminDashboard');
+        return Inertia::render('SuperAdmin/Dashboard');
     }
 
     public function dashboardData(Request $request): JsonResponse
