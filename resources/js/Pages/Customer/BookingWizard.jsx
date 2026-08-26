@@ -280,7 +280,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                             <p className="text-xs text-gray-500 mt-1">Select from our certified airconditioning maintenance, cleaning, repair, and installation packages.</p>
                         </div>
 
-                        {loadingServices ? (
+                        {loadingCatalog ? (
                             <div className="py-12 text-center text-gray-400">Loading available services...</div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

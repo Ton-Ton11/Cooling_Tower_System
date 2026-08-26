@@ -21,6 +21,7 @@ use App\Http\Controllers\Manager\ManagerAnnouncementController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantDashboardController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantStaffController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantAcUnitController;
+use App\Http\Controllers\AdminAssistant\AdminAssistantSparePartController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantSalesController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantAnnouncementController;
 
@@ -121,6 +122,16 @@ Route::prefix('super-admin')
             Route::post('/inventory', 'storeInventoryItem')->name('inventory.store.enhanced');
             Route::patch('/inventory/{itemId}', 'updateInventoryItem')->name('inventory.update.enhanced');
             Route::delete('/inventory/{itemId}', 'destroyInventoryItem')->name('inventory.destroy.enhanced');
+
+            // Checkout & Usage Tracking routes
+            Route::post('/inventory-items/checkout', 'checkoutItem')->name('inventory.checkout');
+            Route::post('/inventory/checkout', 'checkoutItem')->name('inventory.checkout.enhanced');
+            Route::post('/inventory-items/return', 'returnItem')->name('inventory.return');
+            Route::post('/inventory/return', 'returnItem')->name('inventory.return.enhanced');
+            Route::get('/inventory-checkouts', 'checkoutsIndex')->name('inventory.checkouts.index');
+            Route::get('/inventory/checkouts', 'checkoutsIndex')->name('inventory.checkouts.enhanced');
+            Route::get('/inventory-checkouts/options', 'checkoutOptions')->name('inventory.checkouts.options');
+            Route::get('/inventory/checkout-options', 'checkoutOptions')->name('inventory.checkouts.options.enhanced');
         });
 
         // ─── Inventory Sub-folders ───
@@ -319,6 +330,13 @@ Route::prefix('admin-assistant')
             Route::delete('/ac-units/{acUnitId}', 'destroyAcUnit')->name('ac-units.destroy');
         });
 
+        Route::controller(AdminAssistantSparePartController::class)->group(function () {
+            Route::get('/spare-parts', 'sparePartsIndex')->name('spare-parts.index');
+            Route::post('/spare-parts', 'storeSparePart')->name('spare-parts.store');
+            Route::patch('/spare-parts/{itemId}', 'updateSparePart')->name('spare-parts.update');
+            Route::delete('/spare-parts/{itemId}', 'destroySparePart')->name('spare-parts.destroy');
+        });
+
         Route::controller(AdminAssistantSalesController::class)->group(function () {
             Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
         });
@@ -348,6 +366,12 @@ Route::prefix('tools-man')
             Route::post('/inventory', 'storeInventoryItem')->name('inventory.store');
             Route::patch('/inventory/{itemId}', 'updateInventoryItem')->name('inventory.update');
             Route::delete('/inventory/{itemId}', 'destroyInventoryItem')->name('inventory.destroy');
+
+            // Checkout & Usage Tracking routes
+            Route::post('/inventory/checkout', 'checkoutItem')->name('inventory.checkout');
+            Route::post('/inventory/return', 'returnItem')->name('inventory.return');
+            Route::get('/inventory/checkouts', 'checkoutsIndex')->name('inventory.checkouts.index');
+            Route::get('/inventory/checkout-options', 'checkoutOptions')->name('inventory.checkouts.options');
         });
 
         // ─── Inventory Sub-folders ───

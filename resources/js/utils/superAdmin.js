@@ -28,6 +28,12 @@ export const SUPER_ADMIN_ENDPOINTS = {
     updateInventoryEnhanced: (itemId) => `/super-admin/inventory/${itemId}`,
     deleteInventoryEnhanced: (itemId) => `/super-admin/inventory/${itemId}`,
 
+    // Inventory Checkout & Usage Tracking
+    checkoutInventory: "/super-admin/inventory/checkout",
+    returnInventory: "/super-admin/inventory/return",
+    inventoryCheckouts: "/super-admin/inventory/checkouts",
+    inventoryCheckoutOptions: "/super-admin/inventory/checkout-options",
+
     // Inventory Sub-folders
     inventoryFolders: "/super-admin/inventory/folders",
     storeInventoryFolder: "/super-admin/inventory/folders",
@@ -124,9 +130,13 @@ export const ADMIN_ASSISTANT_ENDPOINTS = {
     acUnits: "/admin-assistant/ac-units",
     updateAcUnit: (id) => `/admin-assistant/ac-units/${id}`,
     deleteAcUnit: (id) => `/admin-assistant/ac-units/${id}`,
-    spareParts: "/super-admin/spare-parts",
-    updateSparePart: (id) => `/super-admin/spare-parts/${id}`,
-    deleteSparePart: (id) => `/super-admin/spare-parts/${id}`,
+    spareParts: "/admin-assistant/spare-parts",
+    updateSparePart: (id) => `/admin-assistant/spare-parts/${id}`,
+    deleteSparePart: (id) => `/admin-assistant/spare-parts/${id}`,
+    checkoutInventory: "/super-admin/inventory/checkout",
+    returnInventory: "/super-admin/inventory/return",
+    inventoryCheckouts: "/super-admin/inventory/checkouts",
+    inventoryCheckoutOptions: "/super-admin/inventory/checkout-options",
     salesRecords: "/admin-assistant/sales-records",
     announcements: "/admin-assistant/announcements",
     deleteAnnouncement: (id) => `/admin-assistant/announcements/${id}`,
@@ -159,6 +169,12 @@ export const TOOLS_MAN_ENDPOINTS = {
     inventoryGrouped: "/tools-man/inventory",
     updateInventoryEnhanced: (id) => `/tools-man/inventory/${id}`,
     deleteInventoryEnhanced: (id) => `/tools-man/inventory/${id}`,
+
+    // Inventory Checkout & Usage Tracking
+    checkoutInventory: "/tools-man/inventory/checkout",
+    returnInventory: "/tools-man/inventory/return",
+    inventoryCheckouts: "/tools-man/inventory/checkouts",
+    inventoryCheckoutOptions: "/tools-man/inventory/checkout-options",
 
     // Inventory Sub-folders
     inventoryFolders: "/tools-man/inventory/folders",
@@ -278,6 +294,14 @@ export const AC_STATUS_OPTIONS = [
     "Sold",
     "Order Base",
     "Defect",
+];
+
+export const SPARE_PART_STATUS_OPTIONS = [
+    "Available / On Hand",
+    "Order Base",
+    "Defect",
+    "Warranty Reserved",
+    "Sold",
 ];
 
 export const ROLE_COLORS = {
@@ -466,6 +490,9 @@ export function normalizeInventoryItem(item) {
         item_type: item.item_type || 'Material',
         inventory_mode: item.inventory_mode || 'worker',
         tool_subtype: item.tool_subtype || null,
+        folder_id: item.folder_id ? Number(item.folder_id) : null,
+        sub_category: item.sub_category || item.category || '',
+        category: item.sub_category || item.category || '',
         compatible_brands: brands,
         serial_number: item.serial_number || null,
         quantity_on_hand: quantityOnHand,
@@ -511,9 +538,10 @@ export function normalizeSparePart(part) {
         }
     }
 
-    const status = quantityOnHand === 0 
-        ? 'Out of Stock' 
-        : (quantityOnHand <= reorderLevel ? 'Low Stock' : (part?.status || 'Available'));
+    const explicitStatus = part?.status;
+    const status = explicitStatus 
+        ? explicitStatus 
+        : (quantityOnHand === 0 ? 'Out of Stock' : (quantityOnHand <= reorderLevel ? 'Low Stock' : 'Available / On Hand'));
 
     return {
         part_id: part.item_id || part.part_id,
@@ -521,6 +549,9 @@ export function normalizeSparePart(part) {
         part_name: part.part_name || part.item_name || '',
         item_name: part.item_name || part.part_name || '',
         item_type: 'Spare Part',
+        folder_id: part.folder_id ? Number(part.folder_id) : null,
+        sub_category: part.sub_category || part.category || '',
+        category: part.sub_category || part.category || '',
         compatible_brands: brands,
         quantity_on_hand: quantityOnHand,
         initial_stock: initialStock,

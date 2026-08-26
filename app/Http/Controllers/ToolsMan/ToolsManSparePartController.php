@@ -30,6 +30,9 @@ class ToolsManSparePartController extends ToolsManBaseController
         $validated = validator($payload, [
             'item_name'        => ['required', 'string', 'max:100'],
             'compatible_brands' => ['nullable'],
+            'folder_id'        => ['nullable', 'integer'],
+            'sub_category'     => ['nullable', 'string', 'max:100'],
+            'category'         => ['nullable', 'string', 'max:100'],
             'quantity_on_hand' => ['required', 'integer', 'min:0'],
             'initial_stock'    => ['sometimes', 'integer', 'min:0'],
             'reorder_level'    => ['required', 'integer', 'min:0'],
@@ -56,13 +59,30 @@ class ToolsManSparePartController extends ToolsManBaseController
 
         $qty     = (int) $validated['quantity_on_hand'];
         $reorder = (int) $validated['reorder_level'];
-        $status  = $validated['status'] ?? ($qty === 0 ? 'Out of Stock' : ($qty <= $reorder ? 'Low Stock' : 'Available'));
+        $subCat  = $validated['sub_category'] ?? ($validated['category'] ?? null);
+        $folderId = $validated['folder_id'] ?? null;
+
+        if (empty($folderId) && !empty($subCat)) {
+            $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCat)->first();
+            if ($matched) {
+                $folderId = $matched->id;
+            }
+        } elseif (!empty($folderId) && empty($subCat)) {
+            $matched = DB::table('inventory_folders')->where('id', $folderId)->first();
+            if ($matched) {
+                $subCat = $matched->name;
+            }
+        }
+
+        $status  = $validated['status'] ?? ($qty === 0 ? 'Out of Stock' : ($qty <= $reorder ? 'Low Stock' : 'Available / On Hand'));
 
         $itemId = DB::table('inventory_items')->insertGetId([
             'item_name'        => $validated['item_name'],
             'item_type'        => 'Spare Part',
             'inventory_mode'   => 'spare_part',
             'compatible_brands' => $brands,
+            'folder_id'        => $folderId,
+            'sub_category'     => $subCat,
             'quantity_on_hand' => $qty,
             'initial_stock'    => $validated['initial_stock'] ?? $qty,
             'reorder_level'    => $reorder,
@@ -97,6 +117,9 @@ class ToolsManSparePartController extends ToolsManBaseController
         $validated = validator($payload, [
             'item_name'        => ['sometimes', 'string', 'max:100'],
             'compatible_brands' => ['nullable'],
+            'folder_id'        => ['nullable', 'integer'],
+            'sub_category'     => ['nullable', 'string', 'max:100'],
+            'category'         => ['nullable', 'string', 'max:100'],
             'quantity_on_hand' => ['sometimes', 'integer', 'min:0'],
             'initial_stock'    => ['sometimes', 'integer', 'min:0'],
             'reorder_level'    => ['sometimes', 'integer', 'min:0'],
@@ -110,6 +133,30 @@ class ToolsManSparePartController extends ToolsManBaseController
 
         if (array_key_exists('compatible_brands', $validated) && is_array($validated['compatible_brands'])) {
             $validated['compatible_brands'] = implode(', ', array_filter(array_map('trim', $validated['compatible_brands'])));
+        }
+
+        $subCat = $validated['sub_category'] ?? ($validated['category'] ?? null);
+        $folderId = $validated['folder_id'] ?? null;
+
+        if (array_key_exists('sub_category', $validated) || array_key_exists('category', $validated)) {
+            $validated['sub_category'] = $subCat;
+            unset($validated['category']);
+            if (empty($folderId) && !empty($subCat)) {
+                $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCat)->first();
+                if ($matched) {
+                    $validated['folder_id'] = $matched->id;
+                }
+            }
+        }
+
+        if (array_key_exists('folder_id', $validated)) {
+            $validated['folder_id'] = $folderId;
+            if (!empty($folderId) && empty($subCat)) {
+                $matched = DB::table('inventory_folders')->where('id', $folderId)->first();
+                if ($matched) {
+                    $validated['sub_category'] = $matched->name;
+                }
+            }
         }
 
         if (! empty($validated)) {

@@ -1,16 +1,16 @@
 <?php
 
-namespace App\Http\Controllers\SuperAdmin;
+namespace App\Http\Controllers\AdminAssistant;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
-class SuperAdminSparePartController extends SuperAdminBaseController
+class AdminAssistantSparePartController extends AdminAssistantBaseController
 {
     public function sparePartsIndex(Request $request): JsonResponse
     {
-        $this->authorizeSuperAdmin($request);
+        $this->authorizeRole($request);
 
         $items = DB::table('inventory_items')
             ->where('item_type', 'Spare Part')
@@ -18,15 +18,13 @@ class SuperAdminSparePartController extends SuperAdminBaseController
             ->get();
 
         return response()->json([
-            'data' => $items->map(function ($item) {
-                return $this->formatSparePart($item);
-            })->values(),
+            'data' => $items->map(fn ($item) => $this->formatSparePart($item))->values(),
         ]);
     }
 
     public function storeSparePart(Request $request): JsonResponse
     {
-        $this->authorizeSuperAdmin($request);
+        $this->authorizeRole($request);
 
         $payload = $this->normalizeSparePartPayload($request);
 
@@ -64,18 +62,18 @@ class SuperAdminSparePartController extends SuperAdminBaseController
 
         $qty = (int) $validated['quantity_on_hand'];
         $reorder = (int) $validated['reorder_level'];
-        $subCategory = $validated['sub_category'] ?? ($validated['category'] ?? null);
+        $subCat = $validated['sub_category'] ?? ($validated['category'] ?? null);
         $folderId = $validated['folder_id'] ?? null;
 
-        if (empty($folderId) && !empty($subCategory)) {
-            $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCategory)->first();
+        if (empty($folderId) && !empty($subCat)) {
+            $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCat)->first();
             if ($matched) {
                 $folderId = $matched->id;
             }
-        } elseif (!empty($folderId) && empty($subCategory)) {
+        } elseif (!empty($folderId) && empty($subCat)) {
             $matched = DB::table('inventory_folders')->where('id', $folderId)->first();
             if ($matched) {
-                $subCategory = $matched->name;
+                $subCat = $matched->name;
             }
         }
 
@@ -87,7 +85,7 @@ class SuperAdminSparePartController extends SuperAdminBaseController
             'inventory_mode' => 'spare_part',
             'compatible_brands' => $brands,
             'folder_id' => $folderId,
-            'sub_category' => $subCategory,
+            'sub_category' => $subCat,
             'quantity_on_hand' => $qty,
             'initial_stock' => $validated['initial_stock'] ?? $qty,
             'reorder_level' => $reorder,
@@ -119,9 +117,9 @@ class SuperAdminSparePartController extends SuperAdminBaseController
 
     public function updateSparePart(Request $request, int $itemId): JsonResponse
     {
-        $this->authorizeSuperAdmin($request);
+        $this->authorizeRole($request);
 
-        $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
+        $item = DB::table('inventory_items')->where('item_id', $itemId)->where('item_type', 'Spare Part')->first();
 
         if (! $item) {
             abort(404);
@@ -154,18 +152,19 @@ class SuperAdminSparePartController extends SuperAdminBaseController
 
         if (array_key_exists('compatible_brands', $validated)) {
             $brands = $validated['compatible_brands'];
-            $updateData['compatible_brands'] = is_array($brands)
-                ? implode(', ', array_filter(array_map('trim', $brands)))
-                : $brands;
+            if (is_array($brands)) {
+                $brands = implode(', ', array_filter(array_map('trim', $brands)));
+            }
+            $updateData['compatible_brands'] = $brands;
         }
 
-        $subCategory = $validated['sub_category'] ?? ($validated['category'] ?? null);
+        $subCat = $validated['sub_category'] ?? ($validated['category'] ?? null);
         $folderId = $validated['folder_id'] ?? null;
 
         if (array_key_exists('sub_category', $validated) || array_key_exists('category', $validated)) {
-            $updateData['sub_category'] = $subCategory;
-            if (empty($folderId) && !empty($subCategory)) {
-                $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCategory)->first();
+            $updateData['sub_category'] = $subCat;
+            if (empty($folderId) && !empty($subCat)) {
+                $matched = DB::table('inventory_folders')->where('field_type', 'spare_parts')->where('name', $subCat)->first();
                 if ($matched) {
                     $updateData['folder_id'] = $matched->id;
                 }
@@ -174,7 +173,7 @@ class SuperAdminSparePartController extends SuperAdminBaseController
 
         if (array_key_exists('folder_id', $validated)) {
             $updateData['folder_id'] = $folderId;
-            if (!empty($folderId) && empty($subCategory)) {
+            if (!empty($folderId) && empty($subCat)) {
                 $matched = DB::table('inventory_folders')->where('id', $folderId)->first();
                 if ($matched) {
                     $updateData['sub_category'] = $matched->name;
@@ -242,9 +241,9 @@ class SuperAdminSparePartController extends SuperAdminBaseController
 
     public function destroySparePart(Request $request, int $itemId): JsonResponse
     {
-        $this->authorizeSuperAdmin($request);
+        $this->authorizeRole($request);
 
-        $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
+        $item = DB::table('inventory_items')->where('item_id', $itemId)->where('item_type', 'Spare Part')->first();
 
         if (! $item) {
             abort(404);

@@ -262,7 +262,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">GCash Booking Fee</span>
                                         <span className="text-xs font-mono font-bold text-emerald-700 mt-1 block">
-                                            ₱{b.booking_fee_paid.toFixed(2)} (Ref: {b.reference_number || "N/A"})
+                                            ₱{Number(b.booking_fee_paid || 0).toFixed(2)} (Ref: {b.reference_number || "N/A"})
                                         </span>
                                     </div>
 

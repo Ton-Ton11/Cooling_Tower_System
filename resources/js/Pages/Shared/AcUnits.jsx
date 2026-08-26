@@ -4,6 +4,7 @@ import StatusBadge from "../../Components/StatusBadge";
 import {
     AC_STATUS_OPTIONS,
     AC_TYPE_OPTIONS,
+    SPARE_PART_STATUS_OPTIONS,
     SUPER_ADMIN_ENDPOINTS,
     extractErrorMessage,
     normalizeAcUnit,
@@ -19,16 +20,15 @@ const PART_NAMES = [
 const UNIT_OPTIONS = ['pc', 'set', 'unit', 'pair', 'box', 'roll', 'm'];
 const REFRIGERANT_OPTIONS = ['R32', 'R410A', 'R134a', 'R22', 'R290', 'R407C'];
 
+const DEFAULT_SPARE_PART_CATEGORIES = [
+    'Capacitors', 'Contactors & Relays', 'Fan Motors', 'PCBs & Controls',
+    'Valves & Coils', 'Sensors & Thermistors', 'Filters & Driers', 'Hardware & Accessories'
+];
+
 // Helper functions
 function toDateStr(date) {
     const d = new Date(date);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function daysUntil(dateStr) {
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    const target = new Date(dateStr); target.setHours(0, 0, 0, 0);
-    return Math.ceil((target.getTime() - now.getTime()) / 86400000);
 }
 
 // Combobox Component
@@ -106,15 +106,18 @@ const createEmptyForm = (defaultBrand = '', defaultType = '') => ({
     status: "Available",
 });
 
-const createEmptyPartForm = () => ({
+const createEmptyPartForm = (defaultBrand = '', defaultCategory = '') => ({
     part_name: '',
-    compatible_brands: '',
-    qty: '',
-    reorder_level: '',
-    unit: '',
+    compatible_brands: defaultBrand || 'Universal',
+    sub_category: defaultCategory || 'Capacitors',
+    unit: 'pc',
+    initial_stock: '10',
+    quantity_on_hand: '10',
+    reorder_level: '2',
     capital: '',
     selling_price: '',
-    supplier: ''
+    supplier_name: '',
+    status: 'Available / On Hand',
 });
 
 const createEmptySellForm = (warrantyPeriod = 12) => ({
@@ -125,6 +128,19 @@ const createEmptySellForm = (warrantyPeriod = 12) => ({
     warranty_period: warrantyPeriod,
 });
 
+const createEmptyPartSellForm = (part = null) => ({
+    part_id: part?.part_id || part?.item_id || null,
+    part_name: part?.part_name || part?.item_name || '',
+    compatible_brands: Array.isArray(part?.compatible_brands) ? part.compatible_brands.join(', ') : (part?.compatible_brands || 'Universal'),
+    unit: part?.unit || 'pc',
+    quantity_on_hand: part?.quantity_on_hand || 1,
+    quantity_to_sell: 1,
+    selling_price: part?.selling_price || part?.capital || 0,
+    customer_name: '',
+    customer_contact: '',
+    payment_method: 'Cash',
+});
+
 function AcUnits({ addToast, onDataChanged, endpoints }) {
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
 
@@ -133,18 +149,26 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     const [brands, setBrands] = useState([]);
     const [unitTypes, setUnitTypes] = useState([]);
     const [parts, setParts] = useState([]);
+    const [sparePartFolders, setSparePartFolders] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // Main View Navigation: 'brands' (in stock), 'order', 'sold', 'defects', 'spareparts'
+    // Main View Navigation: 'brands' (in stock AC units), 'order', 'sold', 'defects', 'spareparts'
     const [mainTab, setMainTab] = useState("brands");
     const [selectedBrand, setSelectedBrand] = useState(null); // Brand string or null (grid view)
     const [selectedCategory, setSelectedCategory] = useState("all"); // Category string or 'all'
 
+    // Spare Parts Sub-Tab: 'in_stock', 'order', 'sold', 'defects', 'warranty_reserved'
+    const [partSubTab, setPartSubTab] = useState("in_stock");
+    const [selectedPartBrand, setSelectedPartBrand] = useState(null);
+    const [selectedPartCategory, setSelectedPartCategory] = useState("all");
+
     // Searches
     const [brandCardSearch, setBrandCardSearch] = useState('');
     const [unitTableSearch, setUnitTableSearch] = useState('');
+    const [partCardSearch, setPartCardSearch] = useState('');
+    const [partTableSearch, setPartTableSearch] = useState('');
 
-    // Brand Card CRUD states (ONLY available in mainTab === 'brands')
+    // Brand Card CRUD states (ONLY available in mainTab === 'brands' or partSubTab === 'in_stock')
     const [addBrandModal, setAddBrandModal] = useState(false);
     const [brandForm, setBrandForm] = useState({ name: '', country_of_origin: '', description: '' });
     const [editBrandTarget, setEditBrandTarget] = useState(null);
@@ -153,7 +177,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     const [savingBrand, setSavingBrand] = useState(false);
     const [deletingBrand, setDeletingBrand] = useState(false);
 
-    // Category / Unit Type CRUD states
+    // Category / Unit Type CRUD states (for AC Units)
     const [addCategoryModal, setAddCategoryModal] = useState(false);
     const [categoryForm, setCategoryForm] = useState({ name: '', code: '', description: '' });
     const [manageCategoriesModal, setManageCategoriesModal] = useState(false);
@@ -162,6 +186,16 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     const [deleteCategoryTarget, setDeleteCategoryTarget] = useState(null);
     const [savingCategory, setSavingCategory] = useState(false);
     const [deletingCategory, setDeletingCategory] = useState(false);
+
+    // Category / Folder CRUD states (for Spare Parts)
+    const [addPartCategoryModal, setAddPartCategoryModal] = useState(false);
+    const [partCategoryForm, setPartCategoryForm] = useState({ name: '', description: '' });
+    const [managePartCategoriesModal, setManagePartCategoriesModal] = useState(false);
+    const [editPartCategoryTarget, setEditPartCategoryTarget] = useState(null);
+    const [editPartCategoryForm, setEditPartCategoryForm] = useState({ name: '', description: '' });
+    const [deletePartCategoryTarget, setDeletePartCategoryTarget] = useState(null);
+    const [savingPartCategory, setSavingPartCategory] = useState(false);
+    const [deletingPartCategory, setDeletingPartCategory] = useState(false);
 
     // AC Unit CRUD states
     const [addUnitModal, setAddUnitModal] = useState(false);
@@ -173,7 +207,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     const [deleteUnitTarget, setDeleteUnitTarget] = useState(null);
     const [deletingUnit, setDeletingUnit] = useState(false);
 
-    // Sold action states
+    // AC Unit Sold action states
     const [soldModal, setSoldModal] = useState(null);
     const [soldForm, setSoldForm] = useState(createEmptySellForm());
     const [confirmMarkSold, setConfirmMarkSold] = useState(false);
@@ -183,14 +217,24 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     const [editingArrival, setEditingArrival] = useState(null);
     const [arrivalInput, setArrivalInput] = useState('');
 
-    // Spare parts state
+    // ── Spare Parts CRUD & Sold states ──
     const [addPartModal, setAddPartModal] = useState(false);
-    const [confirmAddPart, setConfirmAddPart] = useState(false);
     const [partForm, setPartForm] = useState(createEmptyPartForm());
+    const [confirmAddPart, setConfirmAddPart] = useState(false);
+    const [savingPart, setSavingPart] = useState(false);
+
     const [editPartTarget, setEditPartTarget] = useState(null);
     const [editPartForm, setEditPartForm] = useState(createEmptyPartForm());
     const [confirmEditPart, setConfirmEditPart] = useState(false);
+    const [savingEditPart, setSavingEditPart] = useState(false);
+
     const [deletePartTarget, setDeletePartTarget] = useState(null);
+    const [deletingPart, setDeletingPart] = useState(false);
+
+    const [partSoldModal, setPartSoldModal] = useState(null);
+    const [partSoldForm, setPartSoldForm] = useState(createEmptyPartSellForm());
+    const [confirmPartSold, setConfirmPartSold] = useState(false);
+    const [processingPartSold, setProcessingPartSold] = useState(false);
 
     // ── Fetch Catalog Data (Brands & Unit Types) ──
     const fetchCatalog = useCallback(async () => {
@@ -218,22 +262,28 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         }
     }, [ep.acUnits, addToast, fetchCatalog]);
 
-    // ── Fetch Spare Parts ──
+    // ── Fetch Spare Parts & Folders ──
     const fetchParts = useCallback(async () => {
         try {
             const { data } = await window.axios.get(ep.spareParts ?? SUPER_ADMIN_ENDPOINTS.spareParts);
             setParts((Array.isArray(data?.data) ? data.data : []).map(normalizeSparePart));
+
+            // Fetch spare parts categories / folders
+            const foldersUrl = ep.inventoryFolders ?? SUPER_ADMIN_ENDPOINTS.inventoryFolders;
+            const res = await window.axios.get(foldersUrl, { params: { field_type: 'spare_parts' } });
+            const folderList = Array.isArray(res.data?.data) ? res.data.data : [];
+            setSparePartFolders(folderList);
         } catch (error) {
             console.error("Unable to load spare parts", error);
         }
-    }, [ep.spareParts]);
+    }, [ep.spareParts, ep.inventoryFolders]);
 
     useEffect(() => {
         fetchUnits();
         fetchParts();
     }, [fetchUnits, fetchParts]);
 
-    // Available Brand List (merging catalog brands with any distinct brands in ac_units_inventory)
+    // Available Brand List for AC Units
     const allBrandCards = useMemo(() => {
         const brandMap = new Map();
         brands.forEach(b => {
@@ -259,48 +309,125 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         return Array.from(brandMap.values());
     }, [brands, units]);
 
-    // Available Categories / Unit Types
+    // Available Brands for Spare Parts
+    const allPartBrandCards = useMemo(() => {
+        const brandMap = new Map();
+        // Include catalog brands
+        brands.forEach(b => {
+            brandMap.set(b.name.toLowerCase(), {
+                id: b.id,
+                name: b.name,
+                country_of_origin: b.country_of_origin,
+                description: b.description,
+                is_catalog: true,
+            });
+        });
+        // Include 'Universal' brand card
+        if (!brandMap.has('universal')) {
+            brandMap.set('universal', {
+                id: null,
+                name: 'Universal',
+                country_of_origin: 'Multi-Brand',
+                description: 'Universal & cross-brand compatible spare parts',
+                is_catalog: false,
+            });
+        }
+        // Include brands mentioned in parts
+        parts.forEach(p => {
+            const partBrands = Array.isArray(p.compatible_brands) ? p.compatible_brands : [p.compatible_brands];
+            partBrands.forEach(b => {
+                if (b && !brandMap.has(b.toLowerCase())) {
+                    brandMap.set(b.toLowerCase(), {
+                        id: null,
+                        name: b,
+                        country_of_origin: null,
+                        description: null,
+                        is_catalog: false,
+                    });
+                }
+            });
+        });
+        return Array.from(brandMap.values());
+    }, [brands, parts]);
+
+    // Available Categories for AC Units
     const allCategories = useMemo(() => {
         if (unitTypes.length > 0) return unitTypes;
         return AC_TYPE_OPTIONS.map((t, idx) => ({ id: idx + 1, name: t, code: t, description: `${t} airconditioners` }));
     }, [unitTypes]);
 
-    // ── Context-filtered units depending on current mainTab ──
+    // Available Categories for Spare Parts
+    const allPartCategories = useMemo(() => {
+        if (sparePartFolders.length > 0) return sparePartFolders;
+        return DEFAULT_SPARE_PART_CATEGORIES.map((cat, idx) => ({
+            id: idx + 1,
+            name: cat,
+            description: `${cat} components`,
+        }));
+    }, [sparePartFolders]);
+
+    // ── Context-filtered AC units depending on current mainTab ──
     const currentTabUnits = useMemo(() => {
         if (mainTab === 'order') return units.filter(u => u.status === 'Order Base');
         if (mainTab === 'sold') return units.filter(u => u.status === 'Sold');
         if (mainTab === 'defects') return units.filter(u => u.status === 'Defect');
-        // mainTab === 'brands' (active inventory: Available or Reserved)
         return units.filter(u => u.status !== 'Sold');
     }, [units, mainTab]);
 
-    // Tab counts
+    // AC Unit Tab counts
     const inStockUnits = useMemo(() => units.filter(u => u.status !== 'Sold'), [units]);
     const availableUnits = useMemo(() => units.filter(u => u.status === 'Available'), [units]);
     const orderBaseUnits = useMemo(() => units.filter(u => u.status === 'Order Base'), [units]);
     const soldUnits = useMemo(() => units.filter(u => u.status === 'Sold'), [units]);
     const defectUnits = useMemo(() => units.filter(u => u.status === 'Defect'), [units]);
-    const lowParts = useMemo(() => parts.filter(p => p.quantity_on_hand <= p.reorder_level), [parts]);
 
-    // Filtered brand cards by search & whether they have matching items for non-brands tabs
+    // ── Context-filtered Spare Parts depending on partSubTab ──
+    const currentPartSubTabItems = useMemo(() => {
+        if (partSubTab === 'order') return parts.filter(p => p.status === 'Order Base');
+        if (partSubTab === 'sold') return parts.filter(p => p.status === 'Sold');
+        if (partSubTab === 'defects') return parts.filter(p => p.status === 'Defect');
+        if (partSubTab === 'warranty_reserved') return parts.filter(p => p.status === 'Warranty Reserved');
+        // 'in_stock': Available, Available / On Hand, Low Stock, etc.
+        return parts.filter(p => p.status !== 'Sold');
+    }, [parts, partSubTab]);
+
+    // Spare Parts counts
+    const inStockParts = useMemo(() => parts.filter(p => p.status !== 'Sold'), [parts]);
+    const orderBaseParts = useMemo(() => parts.filter(p => p.status === 'Order Base'), [parts]);
+    const soldParts = useMemo(() => parts.filter(p => p.status === 'Sold'), [parts]);
+    const defectParts = useMemo(() => parts.filter(p => p.status === 'Defect'), [parts]);
+    const warrantyReservedParts = useMemo(() => parts.filter(p => p.status === 'Warranty Reserved'), [parts]);
+    const lowParts = useMemo(() => parts.filter(p => p.quantity_on_hand <= p.reorder_level && p.status !== 'Sold'), [parts]);
+
+    // Filtered Brand Cards for AC Units
     const filteredBrandCards = useMemo(() => {
         const q = brandCardSearch.toLowerCase().trim();
         return allBrandCards.filter(b => {
             const matchesSearch = !q || b.name.toLowerCase().includes(q) ||
                 (b.country_of_origin || '').toLowerCase().includes(q) ||
                 (b.description || '').toLowerCase().includes(q);
-            if (!matchesSearch) return false;
-            return true;
+            return matchesSearch;
         });
     }, [allBrandCards, brandCardSearch]);
 
-    // Units under currently selected brand in the active tab context
+    // Filtered Brand Cards for Spare Parts
+    const filteredPartBrandCards = useMemo(() => {
+        const q = partCardSearch.toLowerCase().trim();
+        return allPartBrandCards.filter(b => {
+            const matchesSearch = !q || b.name.toLowerCase().includes(q) ||
+                (b.country_of_origin || '').toLowerCase().includes(q) ||
+                (b.description || '').toLowerCase().includes(q);
+            return matchesSearch;
+        });
+    }, [allPartBrandCards, partCardSearch]);
+
+    // AC units under selected brand in active tab
     const activeBrandUnits = useMemo(() => {
         if (!selectedBrand) return currentTabUnits;
         return currentTabUnits.filter(u => (u.brand || '').toLowerCase() === selectedBrand.toLowerCase());
     }, [currentTabUnits, selectedBrand]);
 
-    // Filtered units by active category and table search
+    // Filtered AC units by category and search
     const filteredBrandUnits = useMemo(() => {
         return activeBrandUnits.filter(u => {
             if (selectedCategory !== 'all') {
@@ -322,7 +449,46 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         });
     }, [activeBrandUnits, selectedCategory, unitTableSearch, allCategories]);
 
-    // Tab change handler
+    // Spare parts under selected brand in active sub-tab
+    const activeBrandParts = useMemo(() => {
+        if (!selectedPartBrand) return currentPartSubTabItems;
+        return currentPartSubTabItems.filter(p => {
+            const bList = Array.isArray(p.compatible_brands) ? p.compatible_brands : [p.compatible_brands];
+            if (selectedPartBrand.toLowerCase() === 'universal') {
+                return bList.some(b => (b || '').toLowerCase().includes('universal')) || bList.length === 0;
+            }
+            return bList.some(b => (b || '').toLowerCase().includes(selectedPartBrand.toLowerCase()));
+        });
+    }, [currentPartSubTabItems, selectedPartBrand]);
+
+    // Filtered spare parts by category and search
+    const filteredBrandParts = useMemo(() => {
+        const activeCategoryObj = allPartCategories.find(c => c.name.toLowerCase() === selectedPartCategory.toLowerCase());
+        return activeBrandParts.filter(p => {
+            if (selectedPartCategory !== 'all') {
+                const pCat = p.sub_category || p.category || '';
+                const matchesCat = pCat.toLowerCase() === selectedPartCategory.toLowerCase() ||
+                    (activeCategoryObj && p.folder_id === activeCategoryObj.id);
+                if (!matchesCat) {
+                    // Check if part name or category matches
+                    const matchesName = (p.part_name || p.item_name || '').toLowerCase().includes(selectedPartCategory.toLowerCase());
+                    if (!matchesName) return false;
+                }
+            }
+            if (partTableSearch.trim()) {
+                const q = partTableSearch.toLowerCase();
+                const matches = (p.part_name || p.item_name || '').toLowerCase().includes(q) ||
+                    (Array.isArray(p.compatible_brands) ? p.compatible_brands.join(' ') : (p.compatible_brands || '')).toLowerCase().includes(q) ||
+                    (p.sub_category || p.category || '').toLowerCase().includes(q) ||
+                    (p.supplier || p.supplier_name || '').toLowerCase().includes(q) ||
+                    (p.status || '').toLowerCase().includes(q);
+                if (!matches) return false;
+            }
+            return true;
+        });
+    }, [activeBrandParts, selectedPartCategory, allPartCategories, partTableSearch]);
+
+    // Tab change handlers
     const handleTabChange = (tabKey) => {
         setMainTab(tabKey);
         setSelectedBrand(null);
@@ -331,8 +497,16 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         setUnitTableSearch('');
     };
 
+    const handlePartSubTabChange = (subKey) => {
+        setPartSubTab(subKey);
+        setSelectedPartBrand(null);
+        setSelectedPartCategory('all');
+        setPartCardSearch('');
+        setPartTableSearch('');
+    };
+
     // ══════════════════════════════════════════════════════════════════
-    // BRAND CARD CRUD HANDLERS (Only in mainTab === 'brands')
+    // BRAND CARD CRUD HANDLERS (Only in mainTab === 'brands' or partSubTab === 'in_stock')
     // ══════════════════════════════════════════════════════════════════
     const handleCreateBrand = async (e) => {
         e?.preventDefault();
@@ -352,8 +526,13 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             setAddBrandModal(false);
             setBrandForm({ name: '', country_of_origin: '', description: '' });
             await fetchCatalog();
-            setSelectedBrand(brandForm.name.trim());
-            setSelectedCategory('all');
+            if (mainTab === 'spareparts') {
+                setSelectedPartBrand(brandForm.name.trim());
+                setSelectedPartCategory('all');
+            } else {
+                setSelectedBrand(brandForm.name.trim());
+                setSelectedCategory('all');
+            }
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to create brand."), "error");
         } finally {
@@ -378,9 +557,13 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             if (selectedBrand === editBrandTarget.name) {
                 setSelectedBrand(editBrandForm.name.trim());
             }
+            if (selectedPartBrand === editBrandTarget.name) {
+                setSelectedPartBrand(editBrandForm.name.trim());
+            }
             setEditBrandTarget(null);
             await fetchCatalog();
             await fetchUnits(false);
+            await fetchParts();
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to update brand."), "error");
         } finally {
@@ -400,9 +583,13 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             if (selectedBrand === deleteBrandTarget.name) {
                 setSelectedBrand(null);
             }
+            if (selectedPartBrand === deleteBrandTarget.name) {
+                setSelectedPartBrand(null);
+            }
             setDeleteBrandTarget(null);
             await fetchCatalog();
             await fetchUnits(false);
+            await fetchParts();
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to delete brand."), "error");
         } finally {
@@ -411,7 +598,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
     };
 
     // ══════════════════════════════════════════════════════════════════
-    // CATEGORY / UNIT TYPE CRUD HANDLERS
+    // AC CATEGORY / UNIT TYPE CRUD HANDLERS
     // ══════════════════════════════════════════════════════════════════
     const handleCreateCategory = async (e) => {
         e?.preventDefault();
@@ -481,6 +668,77 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             addToast(extractErrorMessage(error, "Unable to delete category."), "error");
         } finally {
             setDeletingCategory(false);
+        }
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // SPARE PARTS CATEGORY / FOLDER CRUD HANDLERS
+    // ══════════════════════════════════════════════════════════════════
+    const handleCreatePartCategory = async (e) => {
+        e?.preventDefault();
+        if (!partCategoryForm.name.trim()) {
+            addToast("Please enter a category name.", "error");
+            return;
+        }
+        setSavingPartCategory(true);
+        try {
+            const storeUrl = ep.storeInventoryFolder ?? SUPER_ADMIN_ENDPOINTS.storeInventoryFolder;
+            await window.axios.post(storeUrl, {
+                field_type: 'spare_parts',
+                name: partCategoryForm.name.trim(),
+                description: partCategoryForm.description?.trim() || null,
+            });
+            addToast(`Spare part category "${partCategoryForm.name.trim()}" created.`);
+            setAddPartCategoryModal(false);
+            setPartCategoryForm({ name: '', description: '' });
+            await fetchParts();
+            setSelectedPartCategory(partCategoryForm.name.trim());
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to create category."), "error");
+        } finally {
+            setSavingPartCategory(false);
+        }
+    };
+
+    const handleUpdatePartCategory = async (e) => {
+        e?.preventDefault();
+        if (!editPartCategoryTarget || !editPartCategoryForm.name.trim()) return;
+        setSavingPartCategory(true);
+        try {
+            const updateUrl = ep.updateInventoryFolder ? ep.updateInventoryFolder(editPartCategoryTarget.id) : `/super-admin/inventory/folders/${editPartCategoryTarget.id}`;
+            await window.axios.patch(updateUrl, {
+                name: editPartCategoryForm.name.trim(),
+                description: editPartCategoryForm.description?.trim() || null,
+            });
+            addToast(`Category updated to "${editPartCategoryForm.name.trim()}".`);
+            if (selectedPartCategory === editPartCategoryTarget.name) {
+                setSelectedPartCategory(editPartCategoryForm.name.trim());
+            }
+            setEditPartCategoryTarget(null);
+            await fetchParts();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to update category."), "error");
+        } finally {
+            setSavingPartCategory(false);
+        }
+    };
+
+    const handleDeletePartCategory = async () => {
+        if (!deletePartCategoryTarget) return;
+        setDeletingPartCategory(true);
+        try {
+            const deleteUrl = ep.deleteInventoryFolder ? ep.deleteInventoryFolder(deletePartCategoryTarget.id) : `/super-admin/inventory/folders/${deletePartCategoryTarget.id}`;
+            await window.axios.delete(deleteUrl);
+            addToast(`Category "${deletePartCategoryTarget.name}" deleted.`);
+            if (selectedPartCategory === deletePartCategoryTarget.name) {
+                setSelectedPartCategory('all');
+            }
+            setDeletePartCategoryTarget(null);
+            await fetchParts();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to delete category."), "error");
+        } finally {
+            setDeletingPartCategory(false);
         }
     };
 
@@ -569,7 +827,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         }
     };
 
-    // ── Sold Button Handler ──
+    // ── AC Unit Sold Handler ──
     const handleMarkAsSold = async () => {
         if (!soldModal || processingSold) return;
         setProcessingSold(true);
@@ -596,6 +854,169 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         addToast('Arrival date updated.');
         setEditingArrival(null);
         setArrivalInput('');
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // SPARE PARTS CRUD & SOLD HANDLERS
+    // ══════════════════════════════════════════════════════════════════
+    const handleOpenAddPart = (prefillBrand = null, prefillCategory = null) => {
+        const targetBrand = prefillBrand || selectedPartBrand || (allPartBrandCards[0]?.name || 'Universal');
+        const targetCategory = prefillCategory || (selectedPartCategory !== 'all' ? selectedPartCategory : (allPartCategories[0]?.name || 'Capacitors'));
+        const defaultStatus = partSubTab === 'order' ? 'Order Base' : partSubTab === 'defects' ? 'Defect' : partSubTab === 'warranty_reserved' ? 'Warranty Reserved' : 'Available / On Hand';
+        const newForm = createEmptyPartForm(targetBrand, targetCategory);
+        newForm.status = defaultStatus;
+        setPartForm(newForm);
+        setAddPartModal(true);
+    };
+
+    const handleAddPart = async () => {
+        if (!partForm.part_name.trim()) {
+            addToast("Please enter a part name.", "error");
+            return;
+        }
+        setSavingPart(true);
+        try {
+            const brandsList = partForm.compatible_brands.split(',').map(b => b.trim()).filter(Boolean);
+            const qty = parseInt(partForm.quantity_on_hand) || 0;
+            const initStock = parseInt(partForm.initial_stock) || qty;
+            const reorder = parseInt(partForm.reorder_level) || 2;
+            const capital = parseFloat(partForm.capital) || 0;
+            const sellingPrice = parseFloat(partForm.selling_price) || 0;
+
+            const subCatName = partForm.sub_category?.trim() || 'Capacitors';
+            const catObj = allPartCategories.find(c => c.name.toLowerCase() === subCatName.toLowerCase());
+
+            const payload = {
+                item_name: partForm.part_name.trim(),
+                item_type: 'Spare Part',
+                inventory_mode: 'spare_part',
+                compatible_brands: brandsList,
+                sub_category: subCatName,
+                folder_id: catObj?.id || null,
+                unit: partForm.unit?.trim() || 'pc',
+                initial_stock: initStock,
+                quantity_on_hand: qty,
+                reorder_level: reorder,
+                capital: capital,
+                selling_price: sellingPrice,
+                profit: Math.max(0, sellingPrice - capital),
+                supplier_name: partForm.supplier_name?.trim() || null,
+                status: partForm.status || (qty === 0 ? 'Out of Stock' : (qty <= reorder ? 'Low Stock' : 'Available / On Hand')),
+            };
+
+            const storeUrl = ep.spareParts ?? SUPER_ADMIN_ENDPOINTS.spareParts;
+            await window.axios.post(storeUrl, payload);
+            addToast(`Spare part "${partForm.part_name}" added successfully.`);
+            setAddPartModal(false);
+            setConfirmAddPart(false);
+            setPartForm(createEmptyPartForm());
+            await fetchParts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to add spare part."), "error");
+        } finally {
+            setSavingPart(false);
+        }
+    };
+
+    const handleEditPart = async () => {
+        if (!editPartTarget) return;
+        setSavingEditPart(true);
+        try {
+            const brandsList = editPartForm.compatible_brands.split(',').map(b => b.trim()).filter(Boolean);
+            const qty = parseInt(editPartForm.quantity_on_hand) || 0;
+            const initStock = parseInt(editPartForm.initial_stock) || qty;
+            const reorder = parseInt(editPartForm.reorder_level) || 2;
+            const capital = parseFloat(editPartForm.capital) || 0;
+            const sellingPrice = parseFloat(editPartForm.selling_price) || 0;
+            const subCatName = editPartForm.sub_category?.trim() || 'Capacitors';
+            const catObj = allPartCategories.find(c => c.name.toLowerCase() === subCatName.toLowerCase());
+
+            const payload = {
+                item_name: editPartForm.part_name.trim(),
+                compatible_brands: brandsList,
+                sub_category: subCatName,
+                folder_id: catObj?.id || null,
+                unit: editPartForm.unit?.trim() || 'pc',
+                initial_stock: initStock,
+                quantity_on_hand: qty,
+                reorder_level: reorder,
+                capital: capital,
+                selling_price: sellingPrice,
+                profit: Math.max(0, sellingPrice - capital),
+                supplier_name: editPartForm.supplier_name?.trim() || null,
+                status: editPartForm.status || (qty === 0 ? 'Out of Stock' : (qty <= reorder ? 'Low Stock' : 'Available / On Hand')),
+            };
+
+            const itemId = editPartTarget.part_id || editPartTarget.item_id;
+            const updateUrl = ep.updateSparePart ? ep.updateSparePart(itemId) : `/super-admin/spare-parts/${itemId}`;
+            await window.axios.patch(updateUrl, payload);
+            addToast(`Spare part "${editPartForm.part_name}" updated successfully.`);
+            setEditPartTarget(null);
+            setConfirmEditPart(false);
+            await fetchParts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to update spare part."), "error");
+        } finally {
+            setSavingEditPart(false);
+        }
+    };
+
+    const handleDeletePart = async () => {
+        if (!deletePartTarget || deletingPart) return;
+        setDeletingPart(true);
+        try {
+            const itemId = deletePartTarget.part_id || deletePartTarget.item_id;
+            const deleteUrl = ep.deleteSparePart ? ep.deleteSparePart(itemId) : `/super-admin/spare-parts/${itemId}`;
+            await window.axios.delete(deleteUrl);
+            addToast(`Spare part "${deletePartTarget.part_name || deletePartTarget.item_name}" deleted.`);
+            setDeletePartTarget(null);
+            await fetchParts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to delete spare part."), "error");
+        } finally {
+            setDeletingPart(false);
+        }
+    };
+
+    // ── Spare Part Sold Handler ──
+    const handlePartSoldConfirm = async () => {
+        if (!partSoldModal || processingPartSold) return;
+        const sellQty = parseInt(partSoldForm.quantity_to_sell) || 1;
+        if (sellQty <= 0) {
+            addToast("Please enter a valid quantity to sell.", "error");
+            return;
+        }
+        if (sellQty > partSoldModal.quantity_on_hand) {
+            addToast(`Cannot sell ${sellQty}. Only ${partSoldModal.quantity_on_hand} available in stock.`, "error");
+            return;
+        }
+
+        setProcessingPartSold(true);
+        try {
+            const itemId = partSoldModal.part_id || partSoldModal.item_id;
+            const newQty = Math.max(0, partSoldModal.quantity_on_hand - sellQty);
+            const newStatus = newQty === 0 ? 'Sold' : (newQty <= partSoldModal.reorder_level ? 'Low Stock' : 'Available / On Hand');
+
+            const updateUrl = ep.updateSparePart ? ep.updateSparePart(itemId) : `/super-admin/spare-parts/${itemId}`;
+            await window.axios.patch(updateUrl, {
+                quantity_on_hand: newQty,
+                status: newStatus,
+            });
+
+            addToast(`Sold ${sellQty} ${partSoldModal.unit} of "${partSoldModal.part_name || partSoldModal.item_name}".`);
+            setPartSoldModal(null);
+            setConfirmPartSold(false);
+            setPartSoldForm(createEmptyPartSellForm());
+            await fetchParts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to process spare part sale."), "error");
+        } finally {
+            setProcessingPartSold(false);
+        }
     };
 
     // ── Render Modal Wrapper ──
@@ -626,14 +1047,16 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
         if (mainTab === 'order') return `${orderBaseUnits.length} units ordered awaiting supplier delivery`;
         if (mainTab === 'sold') return `${soldUnits.length} AC units sold to customers`;
         if (mainTab === 'defects') return `${defectUnits.length} defective units flagged for inspection or return`;
-        if (mainTab === 'spareparts') return `${parts.length} parts tracked · ${lowParts.length} low stock alerts`;
+        if (mainTab === 'spareparts') {
+            return `Organized in clickable Brands & Categories · ${inStockParts.length} in stock · ${orderBaseParts.length} order base · ${soldParts.length} sold · ${defectParts.length} defect · ${warrantyReservedParts.length} warranty reserved`;
+        }
         return `Organized in clickable Brands & Categories · ${inStockUnits.length} in stock · ${availableUnits.length} available · ${soldUnits.length} sold · ${defectUnits.length} defect`;
     };
 
     if (loading) {
         return (
             <div style={{ padding: 32, borderRadius: 12, background: '#F8FAFC', color: '#64748B', textAlign: 'center', border: '1px solid #E2E8F0' }}>
-                <p style={{ fontWeight: 600, margin: 0 }}>Loading AC Units...</p>
+                <p style={{ fontWeight: 600, margin: 0 }}>Loading AC Units & Spare Parts...</p>
             </div>
         );
     }
@@ -647,21 +1070,30 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                     <p className="page-subtitle">{getTabSubtitle()}</p>
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button className="btn-secondary" onClick={() => fetchUnits()}>Refresh</button>
-                    {/* ONLY the main "Brands" tab allows adding new Brand Cards */}
+                    <button className="btn-secondary" onClick={() => { fetchUnits(); fetchParts(); }}>Refresh</button>
+
+                    {/* ONLY the main "Brands" tab (or Spare Parts In Stock tab) allows adding new Brand Cards */}
                     {mainTab === 'brands' && !selectedBrand && (
                         <button className="btn-primary" onClick={() => { setBrandForm({ name: '', country_of_origin: '', description: '' }); setAddBrandModal(true); }}>
                             + Add Brand
                         </button>
                     )}
+                    {mainTab === 'spareparts' && partSubTab === 'in_stock' && !selectedPartBrand && (
+                        <button className="btn-primary" onClick={() => { setBrandForm({ name: '', country_of_origin: '', description: '' }); setAddBrandModal(true); }}>
+                            + Add Brand
+                        </button>
+                    )}
+
                     {/* Add AC Unit button inside drill-down */}
                     {mainTab !== 'spareparts' && selectedBrand && (
                         <button className="btn-primary" onClick={() => handleOpenAddUnit(selectedBrand, selectedCategory !== 'all' ? selectedCategory : null)}>
                             + Add AC Unit
                         </button>
                     )}
-                    {mainTab === 'spareparts' && (
-                        <button className="btn-primary" onClick={() => setAddPartModal(true)}>
+
+                    {/* Add Spare Part button inside drill-down */}
+                    {mainTab === 'spareparts' && selectedPartBrand && (
+                        <button className="btn-primary" onClick={() => handleOpenAddPart(selectedPartBrand, selectedPartCategory !== 'all' ? selectedPartCategory : null)}>
                             + Add Spare Part
                         </button>
                     )}
@@ -689,13 +1121,13 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             </div>
 
             {/* ══════════════════════════════════════════════════════════════
-                SHARED BRAND CARDS & CATEGORIES ARCHITECTURE
+                SHARED BRAND CARDS & CATEGORIES ARCHITECTURE: AC UNITS
                 (Applies to Brands, Order Base, Sold Units, and Defects)
                ══════════════════════════════════════════════════════════════ */}
             {mainTab !== 'spareparts' && (
                 <div>
                     {/* ──────────────────────────────────────────────────────────
-                        A. TOP LEVEL: CLICKABLE BRAND CARDS GRID
+                        A. TOP LEVEL: CLICKABLE BRAND CARDS GRID (AC UNITS)
                        ────────────────────────────────────────────────────────── */}
                     {!selectedBrand ? (
                         <div>
@@ -858,7 +1290,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                         </div>
                     ) : (
                         /* ──────────────────────────────────────────────────────────
-                            B. INSIDE BRAND CARD: DYNAMIC CATEGORIES & UNITS LIST
+                            B. INSIDE BRAND CARD: DYNAMIC CATEGORIES & AC UNITS TABLE
                            ────────────────────────────────────────────────────────── */
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                             {/* Brand Header Banner with Back Button */}
@@ -1110,81 +1542,444 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             )}
 
             {/* ══════════════════════════════════════════════════════════════
-                5. SPARE PARTS TAB
+                SHARED BRAND CARDS & CATEGORIES ARCHITECTURE: SPARE PARTS
+                (Applies to In Stock, Order Base, Sold, Defects, Warranty Reserved)
                ══════════════════════════════════════════════════════════════ */}
             {mainTab === 'spareparts' && (
-                <div className="card" style={{ padding: 20 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <div>
+                    {/* Spare Parts Sub-tab filter bar */}
+                    <div className="tab-bar" style={{ marginBottom: 18, display: 'inline-flex', background: '#F8FAFC', padding: 4, borderRadius: 10, border: '1px solid #E2E8F0' }}>
+                        <button className={`tab-item ${partSubTab === 'in_stock' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('in_stock')}>
+                            In Stock ({inStockParts.length})
+                        </button>
+                        <button className={`tab-item ${partSubTab === 'order' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('order')}>
+                            Order Base ({orderBaseParts.length})
+                        </button>
+                        <button className={`tab-item ${partSubTab === 'sold' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('sold')}>
+                            Sold Parts ({soldParts.length})
+                        </button>
+                        <button className={`tab-item ${partSubTab === 'defects' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('defects')}>
+                            Defects ({defectParts.length})
+                        </button>
+                        <button className={`tab-item ${partSubTab === 'warranty_reserved' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('warranty_reserved')}>
+                            Warranty Reserved ({warrantyReservedParts.length})
+                        </button>
+                    </div>
+
+                    {/* ──────────────────────────────────────────────────────────
+                        A. TOP LEVEL: CLICKABLE BRAND CARDS GRID (SPARE PARTS)
+                       ────────────────────────────────────────────────────────── */}
+                    {!selectedPartBrand ? (
                         <div>
-                            <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>AC Spare Parts & Components</h2>
-                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Motors, PCBs, capacitors, contactors, and replacement parts</p>
-                        </div>
-                        <button className="btn-primary" onClick={() => setAddPartModal(true)}>+ Add Spare Part</button>
-                    </div>
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
-                            <thead>
-                                <tr style={{ background: '#F8FAFC' }}>
-                                    {['Part ID', 'Part Name', 'Compatible Brands', 'Qty', 'Reorder', 'Unit', 'Capital', 'Selling Price', 'Supplier', 'Status', 'Actions'].map(h => (
-                                        <th key={h} style={thStyle}>{h}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {parts.map(p => (
-                                    <tr key={p.part_id || p.item_id} style={{ borderTop: '1px solid #F1F5F9' }}>
-                                        <td style={{ ...tdStyle, fontSize: 12, color: '#2563EB', fontWeight: 600 }}>#{p.part_id || p.item_id}</td>
-                                        <td style={{ ...tdStyle, fontWeight: 600 }}>{p.part_name || p.item_name}</td>
-                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || 'Universal')}</td>
-                                        <td style={{ ...tdStyle, fontWeight: 700 }}>{p.quantity_on_hand}</td>
-                                        <td style={{ ...tdStyle, color: '#94A3B8' }}>{p.reorder_level}</td>
-                                        <td style={{ ...tdStyle }}>{p.unit}</td>
-                                        <td style={{ ...tdStyle }}>₱{(p.capital || 0).toLocaleString()}</td>
-                                        <td style={{ ...tdStyle, fontWeight: 600, color: '#16A34A' }}>₱{(p.selling_price || 0).toLocaleString()}</td>
-                                        <td style={{ ...tdStyle }}>{p.supplier_name || p.supplier || '—'}</td>
-                                        <td style={{ padding: '10px 12px' }}><StatusBadge status={p.status} /></td>
-                                        <td style={{ padding: '10px 12px' }}>
-                                            <div style={{ display: 'flex', gap: 5 }}>
-                                                <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: 11 }}
-                                                    onClick={() => {
-                                                        setEditPartTarget(p);
-                                                        setEditPartForm({
-                                                            part_name: p.part_name || p.item_name,
-                                                            compatible_brands: Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || ''),
-                                                            qty: String(p.quantity_on_hand),
-                                                            reorder_level: String(p.reorder_level),
-                                                            unit: p.unit,
-                                                            capital: String(p.capital || 0),
-                                                            selling_price: String(p.selling_price || 0),
-                                                            supplier: p.supplier_name || p.supplier || '',
-                                                        });
-                                                    }}>
-                                                    Edit
-                                                </button>
-                                                <button className="btn-danger" style={{ padding: '4px 8px', fontSize: 11 }}
-                                                    onClick={() => setDeletePartTarget(p)}>
-                                                    Delete
-                                                </button>
+                            {/* Search & Top Action Bar */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <p style={{ fontSize: 15, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                        Select Compatible AC Brand
+                                    </p>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        Click on any brand to view and manage spare parts {partSubTab === 'order' ? 'on order' : partSubTab === 'sold' ? 'sold' : partSubTab === 'defects' ? 'defects' : partSubTab === 'warranty_reserved' ? 'warranty reserved' : 'in stock'}
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                    <SearchBar value={partCardSearch} onChange={setPartCardSearch} placeholder="Search brand..." />
+                                    {/* Only in_stock tab allows adding new brand card */}
+                                    {partSubTab === 'in_stock' && (
+                                        <button
+                                            className="btn-primary"
+                                            style={{ fontSize: 12, padding: '7px 16px', fontWeight: 600 }}
+                                            onClick={() => { setBrandForm({ name: '', country_of_origin: '', description: '' }); setAddBrandModal(true); }}>
+                                            + New Brand
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Cards Grid */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                                {filteredPartBrandCards.length === 0 ? (
+                                    <div style={{ gridColumn: '1 / -1', padding: 36, textAlign: 'center', background: '#F8FAFC', borderRadius: 12, border: '1px solid #E2E8F0', color: '#64748B' }}>
+                                        No Brand found.
+                                        {partSubTab === 'in_stock' && (
+                                            <div style={{ marginTop: 10 }}>
+                                                <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setAddBrandModal(true)}>+ Add First Brand</button>
                                             </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                        )}
+                                    </div>
+                                ) : filteredPartBrandCards.map(brand => {
+                                    const bParts = currentPartSubTabItems.filter(p => {
+                                        const bList = Array.isArray(p.compatible_brands) ? p.compatible_brands : [p.compatible_brands];
+                                        if (brand.name.toLowerCase() === 'universal') {
+                                            return bList.some(b => (b || '').toLowerCase().includes('universal')) || bList.length === 0;
+                                        }
+                                        return bList.some(b => (b || '').toLowerCase().includes(brand.name.toLowerCase()));
+                                    });
+                                    const count = bParts.length;
+                                    const totalQty = bParts.reduce((sum, p) => sum + (p.quantity_on_hand || 0), 0);
+
+                                    // Category breakdown
+                                    const catCounts = {};
+                                    bParts.forEach(p => {
+                                        const c = p.sub_category || p.category || 'General';
+                                        catCounts[c] = (catCounts[c] || 0) + (p.quantity_on_hand || 1);
+                                    });
+
+                                    return (
+                                        <div
+                                            key={brand.name}
+                                            onClick={() => {
+                                                setSelectedPartBrand(brand.name);
+                                                setSelectedPartCategory('all');
+                                            }}
+                                            style={{
+                                                background: '#fff',
+                                                borderRadius: 14,
+                                                padding: '20px',
+                                                border: '1px solid #E2E8F0',
+                                                boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s ease',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                justifyContent: 'space-between',
+                                            }}
+                                            onMouseEnter={e => {
+                                                e.currentTarget.style.transform = 'translateY(-3px)';
+                                                e.currentTarget.style.boxShadow = '0 12px 24px rgba(59,130,246,0.12)';
+                                                e.currentTarget.style.borderColor = '#93C5FD';
+                                            }}
+                                            onMouseLeave={e => {
+                                                e.currentTarget.style.transform = 'translateY(0)';
+                                                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
+                                                e.currentTarget.style.borderColor = '#E2E8F0';
+                                            }}>
+                                            <div>
+                                                {/* Top Row: Brand Name & Action Buttons */}
+                                                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 6 }}>
+                                                    <div>
+                                                        <h3 style={{ fontSize: 18, fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                                                            {brand.name}
+                                                        </h3>
+                                                        {brand.country_of_origin && (
+                                                            <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>
+                                                                {brand.country_of_origin}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {/* Edit / Delete Brand only visible in in_stock subtab and if it is not Universal */}
+                                                    {partSubTab === 'in_stock' && brand.name.toLowerCase() !== 'universal' && (
+                                                        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                                                            <button
+                                                                className="btn-secondary"
+                                                                style={{ padding: '3px 8px', fontSize: 11, borderRadius: 6 }}
+                                                                title="Edit Brand"
+                                                                onClick={() => {
+                                                                    setEditBrandTarget(brand);
+                                                                    setEditBrandForm({
+                                                                        name: brand.name,
+                                                                        country_of_origin: brand.country_of_origin || '',
+                                                                        description: brand.description || '',
+                                                                    });
+                                                                }}>
+                                                                Edit
+                                                            </button>
+                                                            <button
+                                                                className="btn-danger"
+                                                                style={{ padding: '3px 7px', fontSize: 11, borderRadius: 6 }}
+                                                                title="Delete Brand"
+                                                                onClick={() => setDeleteBrandTarget(brand)}>
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {/* Description */}
+                                                <p style={{ fontSize: 12, color: '#64748B', margin: '4px 0 14px', lineHeight: 1.4, minHeight: 32 }}>
+                                                    {brand.description || 'Spare parts and components for cooling systems.'}
+                                                </p>
+                                            </div>
+
+                                            {/* Bottom Stats & Category Pills */}
+                                            <div>
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                                                    {Object.entries(catCounts).slice(0, 3).map(([cat, c]) => (
+                                                        <span key={cat} style={{
+                                                            fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 6,
+                                                            background: '#F1F5F9', color: '#475569',
+                                                        }}>
+                                                            {cat}: {c}
+                                                        </span>
+                                                    ))}
+                                                    {Object.keys(catCounts).length > 3 && (
+                                                        <span style={{ fontSize: 10, color: '#94A3B8', alignSelf: 'center' }}>
+                                                            +{Object.keys(catCounts).length - 3} more
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #F1F5F9', paddingTop: 10 }}>
+                                                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF' }}>
+                                                        {count} Items ({totalQty} Qty)
+                                                    </span>
+                                                    {partSubTab === 'in_stock' && (
+                                                        <span style={{ fontSize: 12, fontWeight: 600, color: totalQty > 0 ? '#16A34A' : '#94A3B8' }}>
+                                                            {totalQty > 0 ? `${totalQty} in stock` : 'Out of Stock'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ) : (
+                        /* ──────────────────────────────────────────────────────────
+                            B. INSIDE BRAND CARD: DYNAMIC CATEGORIES & SPARE PARTS TABLE
+                           ────────────────────────────────────────────────────────── */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                            {/* Brand Header Banner with Back Button */}
+                            <div style={{ background: '#fff', borderRadius: 14, padding: '16px 20px', border: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                    <button
+                                        className="btn-secondary"
+                                        style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, fontWeight: 600 }}
+                                        onClick={() => setSelectedPartBrand(null)}>
+                                        ← Back
+                                    </button>
+                                    <div>
+                                        <h2 style={{ fontSize: 19, fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                                            {selectedPartBrand} Spare Parts {partSubTab === 'order' ? '— Order Base' : partSubTab === 'sold' ? '— Sold' : partSubTab === 'defects' ? '— Defects' : partSubTab === 'warranty_reserved' ? '— Warranty Reserved' : ''}
+                                        </h2>
+                                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                            {activeBrandParts.length} distinct spare part items ({activeBrandParts.reduce((s, p) => s + (p.quantity_on_hand || 0), 0)} total quantity)
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        className="btn-secondary"
+                                        style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                        onClick={() => setManagePartCategoriesModal(true)}>
+                                        Manage Categories
+                                    </button>
+                                    <button
+                                        className="btn-primary"
+                                        style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                        onClick={() => {
+                                            setPartCategoryForm({ name: '', description: '' });
+                                            setAddPartCategoryModal(true);
+                                        }}>
+                                        + New Category
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Category Types Pill Selector Bar */}
+                            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '14px 16px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
+                                        {selectedPartBrand} Spare Part Categories
+                                    </span>
+                                    <span style={{ fontSize: 12, color: '#64748B' }}>
+                                        {allPartCategories.length} categories configured
+                                    </span>
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    <button
+                                        onClick={() => setSelectedPartCategory('all')}
+                                        style={{
+                                            padding: '6px 14px', borderRadius: 20, border: '1px solid', cursor: 'pointer',
+                                            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                                            borderColor: selectedPartCategory === 'all' ? '#3B82F6' : '#CBD5E1',
+                                            background: selectedPartCategory === 'all' ? '#EFF6FF' : '#fff',
+                                            color: selectedPartCategory === 'all' ? '#1D4ED8' : '#334155',
+                                            boxShadow: selectedPartCategory === 'all' ? '0 2px 6px rgba(59,130,246,0.15)' : 'none',
+                                            transition: 'all 0.15s ease',
+                                        }}>
+                                        All Categories ({activeBrandParts.length})
+                                    </button>
+                                    {allPartCategories.map(cat => {
+                                        const count = activeBrandParts.filter(p => {
+                                            const pCat = p.sub_category || p.category || '';
+                                            return pCat.toLowerCase() === cat.name.toLowerCase() || (p.part_name || p.item_name || '').toLowerCase().includes(cat.name.toLowerCase());
+                                        }).length;
+                                        const isSelected = selectedPartCategory.toLowerCase() === cat.name.toLowerCase();
+                                        return (
+                                            <button
+                                                key={cat.id || cat.name}
+                                                onClick={() => setSelectedPartCategory(cat.name)}
+                                                style={{
+                                                    padding: '6px 14px', borderRadius: 20, border: '1px solid', cursor: 'pointer',
+                                                    fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                                                    borderColor: isSelected ? '#3B82F6' : '#E2E8F0',
+                                                    background: isSelected ? '#3B82F6' : '#fff',
+                                                    color: isSelected ? '#fff' : '#334155',
+                                                    boxShadow: isSelected ? '0 2px 8px rgba(59,130,246,0.25)' : 'none',
+                                                    transition: 'all 0.15s ease',
+                                                }}>
+                                                {cat.name} <span style={{ opacity: 0.85, fontSize: 11, marginLeft: 4 }}>({count})</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Spare Parts Table Card */}
+                            <div className="card" style={{ padding: 20 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                                {selectedPartCategory === 'all' ? `All ${selectedPartBrand} Spare Parts` : `${selectedPartBrand} — ${selectedPartCategory}`}
+                                            </p>
+                                            {selectedPartCategory !== 'all' && (
+                                                <button
+                                                    onClick={() => setSelectedPartCategory('all')}
+                                                    style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                                                    View All Categories
+                                                </button>
+                                            )}
+                                        </div>
+                                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                            Showing {filteredBrandParts.length} spare part items
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                        <SearchBar value={partTableSearch} onChange={setPartTableSearch} placeholder={`Search ${selectedPartBrand} parts...`} />
+                                        <button
+                                            className="btn-primary"
+                                            style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                            onClick={() => handleOpenAddPart(selectedPartBrand, selectedPartCategory !== 'all' ? selectedPartCategory : null)}>
+                                            + Add Spare Part {selectedPartCategory !== 'all' ? `to ${selectedPartCategory}` : ''}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+                                        <thead>
+                                            <tr style={{ background: '#F8FAFC' }}>
+                                                {['Part ID', 'Part Name', 'Compatible Brands', 'Category', 'Unit', 'Initial', 'Qty on Hand', 'Reorder', 'Capital', 'Selling Price', 'Supplier', 'Status', 'Actions'].map(h => (
+                                                    <th key={h} style={thStyle}>{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredBrandParts.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={13} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                        No spare parts found for {selectedPartBrand} {selectedPartCategory !== 'all' ? `in "${selectedPartCategory}"` : ''}.
+                                                        <div style={{ marginTop: 10 }}>
+                                                            <button
+                                                                className="btn-primary"
+                                                                style={{ fontSize: 12, padding: '5px 12px' }}
+                                                                onClick={() => handleOpenAddPart(selectedPartBrand, selectedPartCategory !== 'all' ? selectedPartCategory : null)}>
+                                                                + Add Spare Part Here
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ) : filteredBrandParts.map(p => {
+                                                const brandsStr = Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || 'Universal');
+                                                const itemId = p.part_id || p.item_id;
+                                                const canSell = (p.quantity_on_hand || 0) > 0 && p.status !== 'Sold';
+
+                                                return (
+                                                    <tr
+                                                        key={itemId}
+                                                        style={{ borderTop: '1px solid #F1F5F9' }}
+                                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                        <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600, color: '#2563EB' }}>#{itemId}</td>
+                                                        <td style={{ ...tdStyle, fontWeight: 600, color: '#0F172A' }}>{p.part_name || p.item_name}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{brandsStr}</td>
+                                                        <td style={{ ...tdStyle }}>
+                                                            <span style={{
+                                                                display: 'inline-block',
+                                                                fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 6,
+                                                                background: '#F1F5F9', color: '#334155', border: '1px solid #E2E8F0',
+                                                            }}>
+                                                                {p.sub_category || p.category || 'General'}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ ...tdStyle, fontSize: 12 }}>{p.unit || 'pc'}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{p.initial_stock ?? p.quantity_on_hand}</td>
+                                                        <td style={{ ...tdStyle, fontWeight: 700, color: p.quantity_on_hand <= p.reorder_level ? '#EF4444' : '#0F172A' }}>
+                                                            {p.quantity_on_hand}
+                                                        </td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#94A3B8' }}>{p.reorder_level}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12 }}>₱{(p.capital || 0).toLocaleString()}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600, color: '#16A34A' }}>₱{(p.selling_price || 0).toLocaleString()}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{p.supplier_name || p.supplier || '—'}</td>
+                                                        <td style={{ padding: '10px 12px' }}>
+                                                            <StatusBadge status={p.status} />
+                                                        </td>
+                                                        <td style={{ padding: '10px 12px' }}>
+                                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                                {canSell && (
+                                                                    <button
+                                                                        className="btn-primary"
+                                                                        style={{ padding: '4px 10px', fontSize: 11, background: '#16A34A' }}
+                                                                        onClick={() => {
+                                                                            setPartSoldModal(p);
+                                                                            setPartSoldForm(createEmptyPartSellForm(p));
+                                                                        }}>
+                                                                        Sold
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    className="btn-secondary"
+                                                                    style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                    onClick={() => {
+                                                                        setEditPartTarget(p);
+                                                                        setEditPartForm({
+                                                                            part_name: p.part_name || p.item_name || '',
+                                                                            compatible_brands: brandsStr,
+                                                                            sub_category: p.sub_category || p.category || 'Capacitors',
+                                                                            unit: p.unit || 'pc',
+                                                                            initial_stock: String(p.initial_stock ?? p.quantity_on_hand),
+                                                                            quantity_on_hand: String(p.quantity_on_hand),
+                                                                            reorder_level: String(p.reorder_level),
+                                                                            capital: String(p.capital || 0),
+                                                                            selling_price: String(p.selling_price || 0),
+                                                                            supplier_name: p.supplier_name || p.supplier || '',
+                                                                            status: p.status || 'Available / On Hand',
+                                                                        });
+                                                                    }}>
+                                                                    Edit
+                                                                </button>
+                                                                <button
+                                                                    className="btn-danger"
+                                                                    style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                    onClick={() => setDeletePartTarget(p)}>
+                                                                    Delete
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* ══════════════════════════════════════════════════════════════
-                MODALS: BRAND, CATEGORIES, AC UNITS, SOLD, SPARE PARTS
+                MODALS: BRAND, AC UNITS, SPARE PARTS, CATEGORIES, SOLD
                ══════════════════════════════════════════════════════════════ */}
 
-            {/* Create Brand Modal (Only accessible from mainTab === 'brands') */}
+            {/* Create Brand Modal (Only accessible from mainTab === 'brands' or partSubTab === 'in_stock') */}
             {addBrandModal && renderModalWrapper(true, () => setAddBrandModal(false), (
                 <form onSubmit={handleCreateBrand}>
                     <div style={{ marginBottom: 16 }}>
                         <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>Create AC Brand Card</h2>
-                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Add a new brand card to group AC unit categories and inventory</p>
+                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Add a new brand card to group categories, AC units, and spare parts</p>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
                         <div>
@@ -1272,7 +2067,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
             <Modal
                 open={!!deleteBrandTarget}
                 title="Delete Brand?"
-                message={`Are you sure you want to delete "${deleteBrandTarget?.name}"? Any AC units under this brand will remain safely recorded.`}
+                message={`Are you sure you want to delete "${deleteBrandTarget?.name}"? Any AC units and spare parts under this brand will remain safely recorded.`}
                 confirmLabel={deletingBrand ? "Deleting..." : "Yes, Delete Brand"}
                 confirmDisabled={deletingBrand}
                 variant="danger"
@@ -1280,7 +2075,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => !deletingBrand && setDeleteBrandTarget(null)}
             />
 
-            {/* Create Category Modal */}
+            {/* ── AC CATEGORY MODALS ── */}
             {addCategoryModal && renderModalWrapper(true, () => setAddCategoryModal(false), (
                 <form onSubmit={handleCreateCategory}>
                     <div style={{ marginBottom: 16 }}>
@@ -1328,7 +2123,6 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 </form>
             ))}
 
-            {/* Manage Categories Modal */}
             {manageCategoriesModal && renderModalWrapper(true, () => { setManageCategoriesModal(false); setEditCategoryTarget(null); }, (
                 <div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -1393,7 +2187,6 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 </div>
             ))}
 
-            {/* Delete Category Modal */}
             <Modal
                 open={!!deleteCategoryTarget}
                 title="Delete AC Category?"
@@ -1405,7 +2198,120 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => !deletingCategory && setDeleteCategoryTarget(null)}
             />
 
-            {/* ── Add AC Unit Modal ── */}
+            {/* ── SPARE PARTS CATEGORY MODALS ── */}
+            {addPartCategoryModal && renderModalWrapper(true, () => setAddPartCategoryModal(false), (
+                <form onSubmit={handleCreatePartCategory}>
+                    <div style={{ marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>Create Spare Part Category</h2>
+                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>e.g. Capacitors, Contactors, Fan Motors, PCBs, Expansion Valves</p>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+                        <div>
+                            <label className="section-label" style={{ display: 'block', marginBottom: 6 }}>Category Name *</label>
+                            <input
+                                className="input-field"
+                                autoFocus
+                                required
+                                placeholder="e.g. Expansion Valves & Coils"
+                                value={partCategoryForm.name}
+                                onChange={e => setPartCategoryForm(p => ({ ...p, name: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="section-label" style={{ display: 'block', marginBottom: 6 }}>Description (Optional)</label>
+                            <textarea
+                                className="input-field"
+                                style={{ height: 75, resize: 'none' }}
+                                placeholder="Details about this spare part category..."
+                                value={partCategoryForm.description}
+                                onChange={e => setPartCategoryForm(p => ({ ...p, description: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button type="button" className="btn-secondary" onClick={() => setAddPartCategoryModal(false)}>Cancel</button>
+                        <button type="submit" className="btn-primary" disabled={savingPartCategory}>
+                            {savingPartCategory ? 'Creating...' : 'Create Category'}
+                        </button>
+                    </div>
+                </form>
+            ))}
+
+            {managePartCategoriesModal && renderModalWrapper(true, () => { setManagePartCategoriesModal(false); setEditPartCategoryTarget(null); }, (
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>Manage Spare Part Categories</h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Configure dynamic categories for spare parts</p>
+                        </div>
+                        <button className="btn-primary" style={{ fontSize: 11, padding: '5px 12px' }} onClick={() => setAddPartCategoryModal(true)}>
+                            + New Category
+                        </button>
+                    </div>
+
+                    {editPartCategoryTarget ? (
+                        <form onSubmit={handleUpdatePartCategory} style={{ background: '#F8FAFC', padding: 16, borderRadius: 12, border: '1px solid #E2E8F0', marginBottom: 16 }}>
+                            <p style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', marginBottom: 10 }}>Edit Category: {editPartCategoryTarget.name}</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+                                <input className="input-field" required value={editPartCategoryForm.name} onChange={e => setEditPartCategoryForm(p => ({ ...p, name: e.target.value }))} placeholder="Name" />
+                                <textarea className="input-field" style={{ height: 60, resize: 'none' }} value={editPartCategoryForm.description} onChange={e => setEditPartCategoryForm(p => ({ ...p, description: e.target.value }))} placeholder="Description" />
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setEditPartCategoryTarget(null)}>Cancel</button>
+                                <button type="submit" className="btn-primary" style={{ fontSize: 11, padding: '4px 12px' }} disabled={savingPartCategory}>Save Changes</button>
+                            </div>
+                        </form>
+                    ) : null}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
+                        {allPartCategories.map(cat => {
+                            const count = parts.filter(p => (p.sub_category || p.category || '').toLowerCase() === cat.name.toLowerCase() || (p.part_name || p.item_name || '').toLowerCase().includes(cat.name.toLowerCase())).length;
+                            return (
+                                <div key={cat.id || cat.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0' }}>
+                                    <div>
+                                        <p style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', margin: 0 }}>{cat.name}</p>
+                                        <p style={{ fontSize: 11, color: '#64748B', margin: '2px 0 0' }}>{cat.description || 'No description'} · <strong style={{ color: '#2563EB' }}>{count} parts recorded</strong></p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                        <button
+                                            className="btn-secondary"
+                                            style={{ padding: '4px 8px', fontSize: 11 }}
+                                            onClick={() => {
+                                                setEditPartCategoryTarget(cat);
+                                                setEditPartCategoryForm({ name: cat.name, description: cat.description || '' });
+                                            }}>
+                                            Edit
+                                        </button>
+                                        <button
+                                            className="btn-danger"
+                                            style={{ padding: '4px 8px', fontSize: 11 }}
+                                            onClick={() => setDeletePartCategoryTarget(cat)}>
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                        <button className="btn-secondary" onClick={() => setManagePartCategoriesModal(false)}>Close</button>
+                    </div>
+                </div>
+            ))}
+
+            <Modal
+                open={!!deletePartCategoryTarget}
+                title="Delete Spare Part Category?"
+                message={`Are you sure you want to delete "${deletePartCategoryTarget?.name}"? Spare parts currently under this category will remain safe in inventory records.`}
+                confirmLabel={deletingPartCategory ? "Deleting..." : "Yes, Delete Category"}
+                confirmDisabled={deletingPartCategory}
+                variant="danger"
+                onConfirm={handleDeletePartCategory}
+                onCancel={() => !deletingPartCategory && setDeletePartCategoryTarget(null)}
+            />
+
+            {/* ── AC UNIT MODALS ── */}
             {addUnitModal && !confirmAddUnit && renderModalWrapper(true, () => setAddUnitModal(false), (
                 <>
                     <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Add AC Unit to Inventory</h2>
@@ -1506,7 +2412,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => setConfirmAddUnit(false)}
             />
 
-            {/* ── Edit AC Unit Modal ── */}
+            {/* Edit AC Unit Modal */}
             {editUnitTarget && !confirmEditUnit && renderModalWrapper(true, () => setEditUnitTarget(null), (
                 <>
                     <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Edit AC Unit</h2>
@@ -1587,7 +2493,6 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => setConfirmEditUnit(false)}
             />
 
-            {/* ── Delete AC Unit Modal ── */}
             <Modal
                 open={!!deleteUnitTarget}
                 title="Delete AC Unit?"
@@ -1599,7 +2504,7 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => !deletingUnit && setDeleteUnitTarget(null)}
             />
 
-            {/* ── Mark as Sold Modal ── */}
+            {/* AC Unit Sold Modal */}
             {soldModal && !confirmMarkSold && renderModalWrapper(true, () => setSoldModal(null), (
                 <>
                     <h2 style={{ fontSize: 17, fontWeight: 700, color: '#16A34A', margin: '0 0 6px' }}>Mark AC Unit as Sold</h2>
@@ -1645,71 +2550,363 @@ function AcUnits({ addToast, onDataChanged, endpoints }) {
                 onCancel={() => !processingSold && setConfirmMarkSold(false)}
             />
 
-            {/* Spare Parts Modals (Add, Delete) */}
+            {/* ══════════════════════════════════════════════════════════════
+                SPARE PART MODALS: ADD, EDIT, DELETE, SOLD
+               ══════════════════════════════════════════════════════════════ */}
+
+            {/* Add Spare Part Modal */}
             {addPartModal && !confirmAddPart && renderModalWrapper(true, () => setAddPartModal(false), (
-                <>
-                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Add Spare Part</h2>
+                <form onSubmit={(e) => { e.preventDefault(); setConfirmAddPart(true); }}>
+                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Add Spare Part to Inventory</h2>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Part Name</p>
-                            <Combobox value={partForm.part_name} onChange={v => setPartForm(p => ({ ...p, part_name: v }))} options={PART_NAMES} placeholder="e.g. Capacitor 35+5 MFD" />
-                        </div>
-                        <div style={{ gridColumn: '1 / -1' }}>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Compatible Brands</p>
-                            <input className="input-field" placeholder="e.g. Carrier, Daikin, Panasonic" value={partForm.compatible_brands} onChange={e => setPartForm(p => ({ ...p, compatible_brands: e.target.value }))} />
-                        </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Unit</p>
-                            <Combobox value={partForm.unit} onChange={v => setPartForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="e.g. pc" />
+                            <p className="section-label" style={{ marginBottom: 5 }}>Part Name *</p>
+                            <Combobox
+                                value={partForm.part_name}
+                                onChange={v => setPartForm(p => ({ ...p, part_name: v }))}
+                                options={PART_NAMES}
+                                placeholder="e.g. Capacitor 35+5 MFD, Fan Motor 1/5HP"
+                            />
                         </div>
                         <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Initial Quantity</p>
-                            <input type="number" className="input-field" placeholder="e.g. 10" value={partForm.qty} onChange={e => setPartForm(p => ({ ...p, qty: e.target.value }))} />
+                            <p className="section-label" style={{ marginBottom: 5 }}>Compatible Brands *</p>
+                            <input
+                                className="input-field"
+                                required
+                                placeholder="e.g. Carrier, Daikin, Universal"
+                                value={partForm.compatible_brands}
+                                onChange={e => setPartForm(p => ({ ...p, compatible_brands: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Category / Sub-category *</p>
+                            <select
+                                className="input-field"
+                                value={partForm.sub_category}
+                                onChange={e => {
+                                    if (e.target.value === '__new__') {
+                                        setAddPartCategoryModal(true);
+                                    } else {
+                                        setPartForm(p => ({ ...p, sub_category: e.target.value }));
+                                    }
+                                }}>
+                                {allPartCategories.map(c => (
+                                    <option key={c.name} value={c.name}>{c.name}</option>
+                                ))}
+                                <option value="__new__">+ Create New Category...</option>
+                            </select>
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Unit *</p>
+                            <Combobox value={partForm.unit} onChange={v => setPartForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="e.g. pc, set, unit" />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Initial Stock *</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                required
+                                placeholder="e.g. 10"
+                                value={partForm.initial_stock}
+                                onChange={e => setPartForm(p => ({ ...p, initial_stock: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Quantity on Hand *</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                required
+                                placeholder="e.g. 10"
+                                value={partForm.quantity_on_hand}
+                                onChange={e => setPartForm(p => ({ ...p, quantity_on_hand: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level *</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                required
+                                placeholder="e.g. 2"
+                                value={partForm.reorder_level}
+                                onChange={e => setPartForm(p => ({ ...p, reorder_level: e.target.value }))}
+                            />
                         </div>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Capital (₱)</p>
-                            <input type="number" className="input-field" placeholder="0.00" value={partForm.capital} onChange={e => setPartForm(p => ({ ...p, capital: e.target.value }))} />
+                            <input
+                                type="number"
+                                className="input-field"
+                                placeholder="0.00"
+                                value={partForm.capital}
+                                onChange={e => setPartForm(p => ({ ...p, capital: e.target.value }))}
+                            />
                         </div>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Selling Price (₱)</p>
-                            <input type="number" className="input-field" placeholder="0.00" value={partForm.selling_price} onChange={e => setPartForm(p => ({ ...p, selling_price: e.target.value }))} />
+                            <input
+                                type="number"
+                                className="input-field"
+                                placeholder="0.00"
+                                value={partForm.selling_price}
+                                onChange={e => setPartForm(p => ({ ...p, selling_price: e.target.value }))}
+                            />
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Supplier Name (Optional)</p>
+                            <input
+                                className="input-field"
+                                placeholder="e.g. HVAC Parts Supply Corp"
+                                value={partForm.supplier_name}
+                                onChange={e => setPartForm(p => ({ ...p, supplier_name: e.target.value }))}
+                            />
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Status *</p>
+                            <select
+                                className="input-field"
+                                value={partForm.status}
+                                onChange={e => setPartForm(p => ({ ...p, status: e.target.value }))}>
+                                {SPARE_PART_STATUS_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                        <button className="btn-secondary" onClick={() => setAddPartModal(false)}>Cancel</button>
-                        <button className="btn-primary" onClick={() => setConfirmAddPart(true)}>Add Spare Part →</button>
+                        <button type="button" className="btn-secondary" onClick={() => setAddPartModal(false)}>Cancel</button>
+                        <button type="submit" className="btn-primary">Add Spare Part →</button>
+                    </div>
+                </form>
+            ))}
+            <Modal
+                open={confirmAddPart}
+                title="Confirm Add Spare Part?"
+                message={`Add "${partForm.part_name}" (${partForm.quantity_on_hand} ${partForm.unit}) under ${partForm.compatible_brands} to inventory?`}
+                confirmLabel={savingPart ? "Adding..." : "Yes, Add Part"}
+                confirmDisabled={savingPart}
+                onConfirm={handleAddPart}
+                onCancel={() => !savingPart && setConfirmAddPart(false)}
+            />
+
+            {/* Edit Spare Part Modal */}
+            {editPartTarget && !confirmEditPart && renderModalWrapper(true, () => setEditPartTarget(null), (
+                <form onSubmit={(e) => { e.preventDefault(); setConfirmEditPart(true); }}>
+                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Edit Spare Part</h2>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Part Name *</p>
+                            <input
+                                className="input-field"
+                                required
+                                value={editPartForm.part_name}
+                                onChange={e => setEditPartForm(p => ({ ...p, part_name: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Compatible Brands *</p>
+                            <input
+                                className="input-field"
+                                required
+                                value={editPartForm.compatible_brands}
+                                onChange={e => setEditPartForm(p => ({ ...p, compatible_brands: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Category / Sub-category *</p>
+                            <select
+                                className="input-field"
+                                value={editPartForm.sub_category}
+                                onChange={e => setEditPartForm(p => ({ ...p, sub_category: e.target.value }))}>
+                                {allPartCategories.map(c => (
+                                    <option key={c.name} value={c.name}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Unit *</p>
+                            <Combobox value={editPartForm.unit} onChange={v => setEditPartForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="e.g. pc" />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Initial Stock</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                value={editPartForm.initial_stock}
+                                onChange={e => setEditPartForm(p => ({ ...p, initial_stock: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Quantity on Hand *</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                required
+                                value={editPartForm.quantity_on_hand}
+                                onChange={e => setEditPartForm(p => ({ ...p, quantity_on_hand: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level *</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                required
+                                value={editPartForm.reorder_level}
+                                onChange={e => setEditPartForm(p => ({ ...p, reorder_level: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Capital (₱)</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                value={editPartForm.capital}
+                                onChange={e => setEditPartForm(p => ({ ...p, capital: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Selling Price (₱)</p>
+                            <input
+                                type="number"
+                                className="input-field"
+                                value={editPartForm.selling_price}
+                                onChange={e => setEditPartForm(p => ({ ...p, selling_price: e.target.value }))}
+                            />
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Supplier Name</p>
+                            <input
+                                className="input-field"
+                                value={editPartForm.supplier_name}
+                                onChange={e => setEditPartForm(p => ({ ...p, supplier_name: e.target.value }))}
+                            />
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Status *</p>
+                            <select
+                                className="input-field"
+                                value={editPartForm.status}
+                                onChange={e => setEditPartForm(p => ({ ...p, status: e.target.value }))}>
+                                {SPARE_PART_STATUS_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button type="button" className="btn-secondary" onClick={() => setEditPartTarget(null)}>Cancel</button>
+                        <button type="submit" className="btn-primary">Save Changes →</button>
+                    </div>
+                </form>
+            ))}
+            <Modal
+                open={confirmEditPart}
+                title="Save Changes?"
+                message={`Update "${editPartForm.part_name}" in spare parts inventory?`}
+                confirmLabel={savingEditPart ? "Saving..." : "Yes, Save"}
+                confirmDisabled={savingEditPart}
+                onConfirm={handleEditPart}
+                onCancel={() => !savingEditPart && setConfirmEditPart(false)}
+            />
+
+            {/* Delete Spare Part Modal */}
+            <Modal
+                open={!!deletePartTarget}
+                title="Delete Spare Part?"
+                message={`Remove "${deletePartTarget?.part_name || deletePartTarget?.item_name}" from spare parts inventory records?`}
+                confirmLabel={deletingPart ? "Deleting..." : "Yes, Delete"}
+                confirmDisabled={deletingPart}
+                variant="danger"
+                onConfirm={handleDeletePart}
+                onCancel={() => !deletingPart && setDeletePartTarget(null)}
+            />
+
+            {/* Spare Part Sold Modal */}
+            {partSoldModal && !confirmPartSold && renderModalWrapper(true, () => setPartSoldModal(null), (
+                <>
+                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#16A34A', margin: '0 0 6px' }}>Sell Spare Part</h2>
+                    <p style={{ fontSize: 13, color: '#64748B', marginBottom: 18 }}>
+                        <strong style={{ color: '#0F172A' }}>{partSoldModal.part_name || partSoldModal.item_name}</strong> · Compatible: {Array.isArray(partSoldModal.compatible_brands) ? partSoldModal.compatible_brands.join(', ') : partSoldModal.compatible_brands} · Available: <strong style={{ color: '#2563EB' }}>{partSoldModal.quantity_on_hand} {partSoldModal.unit}</strong>
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Quantity to Sell *</p>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max={partSoldModal.quantity_on_hand}
+                                    className="input-field"
+                                    required
+                                    value={partSoldForm.quantity_to_sell}
+                                    onChange={e => setPartSoldForm(p => ({ ...p, quantity_to_sell: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Selling Price (₱ each)</p>
+                                <input
+                                    type="number"
+                                    className="input-field"
+                                    value={partSoldForm.selling_price}
+                                    onChange={e => setPartSoldForm(p => ({ ...p, selling_price: e.target.value }))}
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Customer Name (Optional)</p>
+                            <input
+                                className="input-field"
+                                placeholder="e.g. Juan Dela Cruz"
+                                value={partSoldForm.customer_name}
+                                onChange={e => setPartSoldForm(p => ({ ...p, customer_name: e.target.value }))}
+                            />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Contact Number</p>
+                                <input
+                                    className="input-field"
+                                    placeholder="e.g. 0917-123-4567"
+                                    value={partSoldForm.customer_contact}
+                                    onChange={e => setPartSoldForm(p => ({ ...p, customer_contact: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Payment Method</p>
+                                <select
+                                    className="input-field"
+                                    value={partSoldForm.payment_method}
+                                    onChange={e => setPartSoldForm(p => ({ ...p, payment_method: e.target.value }))}>
+                                    <option value="Cash">Cash</option>
+                                    <option value="GCash">GCash</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="Credit Card">Credit Card</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button className="btn-secondary" onClick={() => setPartSoldModal(null)}>Cancel</button>
+                        <button
+                            className="btn-primary"
+                            style={{ background: '#16A34A' }}
+                            onClick={() => setConfirmPartSold(true)}>
+                            Complete Sale →
+                        </button>
                     </div>
                 </>
             ))}
-            <Modal open={confirmAddPart} title="Add Spare Part?" message={`Add "${partForm.part_name}" to spare parts inventory?`} confirmLabel="Yes, Add" onConfirm={async () => {
-                const brandsList = partForm.compatible_brands.split(',').map(b => b.trim()).filter(Boolean);
-                const qty = parseInt(partForm.qty) || 0;
-                const capital = parseFloat(partForm.capital) || 0;
-                const sellingPrice = parseFloat(partForm.selling_price) || 0;
-                try {
-                    await window.axios.post(ep.spareParts ?? SUPER_ADMIN_ENDPOINTS.spareParts, {
-                        item_name: partForm.part_name.trim(),
-                        item_type: 'Spare Part',
-                        inventory_mode: 'spare_part',
-                        compatible_brands: brandsList,
-                        quantity_on_hand: qty,
-                        initial_stock: qty,
-                        reorder_level: 2,
-                        unit: partForm.unit.trim() || 'pc',
-                        capital,
-                        selling_price: sellingPrice,
-                        profit: Math.max(0, sellingPrice - capital),
-                        status: qty === 0 ? 'Out of Stock' : 'Available',
-                    });
-                    addToast(`Spare part "${partForm.part_name}" added.`);
-                    setAddPartModal(false);
-                    setConfirmAddPart(false);
-                    setPartForm(createEmptyPartForm());
-                    await fetchParts();
-                } catch (error) {
-                    addToast(extractErrorMessage(error, "Unable to add spare part."), "error");
-                }
-            }} onCancel={() => setConfirmAddPart(false)} />
+            <Modal
+                open={confirmPartSold}
+                title="Confirm Spare Part Sale?"
+                message={`Sell ${partSoldForm.quantity_to_sell} ${partSoldModal?.unit} of "${partSoldModal?.part_name || partSoldModal?.item_name}" for ₱${((parseFloat(partSoldForm.selling_price) || 0) * (parseInt(partSoldForm.quantity_to_sell) || 1)).toLocaleString()}? Stock on hand will be updated.`}
+                confirmLabel={processingPartSold ? "Processing..." : "Yes, Complete Sale"}
+                confirmDisabled={processingPartSold}
+                onConfirm={handlePartSoldConfirm}
+                onCancel={() => !processingPartSold && setConfirmPartSold(false)}
+            />
         </div>
     );
 }

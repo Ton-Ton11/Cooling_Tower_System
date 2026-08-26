@@ -598,7 +598,7 @@ abstract class SuperAdminBaseController extends Controller
 
         $qty = (int) $item->quantity_on_hand;
         $reorder = (int) $item->reorder_level;
-        $status = $item->status ?? ($qty === 0 ? 'Out of Stock' : ($qty <= $reorder ? 'Low Stock' : 'Available'));
+        $status = $item->status ?? ($qty === 0 ? 'Out of Stock' : ($qty <= $reorder ? 'Low Stock' : 'Available / On Hand'));
 
         return [
             'part_id' => (int) $item->item_id,
@@ -606,6 +606,9 @@ abstract class SuperAdminBaseController extends Controller
             'part_name' => $item->item_name,
             'item_name' => $item->item_name,
             'item_type' => $item->item_type,
+            'folder_id' => $item->folder_id ? (int) $item->folder_id : null,
+            'sub_category' => $item->sub_category ?? null,
+            'category' => $item->sub_category ?? null,
             'compatible_brands' => $brands,
             'quantity_on_hand' => $qty,
             'initial_stock' => $item->initial_stock !== null ? (int) $item->initial_stock : $qty,

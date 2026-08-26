@@ -176,6 +176,42 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
     const [editHTForm, setEditHTForm] = useState({ item_name: '', unit: '', quantity_on_hand: '', reorder_level: '', sub_category: '', folder_id: null });
     const [editSaleForm, setEditSaleForm] = useState({ item_name: '', item_type: 'Material', unit: '', quantity_on_hand: '', reorder_level: '', capital: '', profit: '', supplier_name: '', sub_category: '', folder_id: null });
 
+    // ── Checkout & Usage Tracking States ──
+    const [checkouts, setCheckouts] = useState([]);
+    const [checkoutOptions, setCheckoutOptions] = useState({ technicians: [], services: [] });
+    const [loadingCheckouts, setLoadingCheckouts] = useState(false);
+    const [checkoutFilterStatus, setCheckoutFilterStatus] = useState('all');
+    const [checkoutSearch, setCheckoutSearch] = useState('');
+
+    // Checkout / Material Usage Modal State
+    const [checkoutModal, setCheckoutModal] = useState(null); // { item, mode: 'power_tool'|'hand_tool'|'material' }
+    const [checkoutForm, setCheckoutForm] = useState({
+        technician_id: '',
+        technician_name: '',
+        service_name: '',
+        custom_service: '',
+        checkout_date: '',
+        quantity: 1,
+        notes: '',
+    });
+    const [processingCheckout, setProcessingCheckout] = useState(false);
+
+    // Return Modal State
+    const [returnModal, setReturnModal] = useState(null); // { item, checkout: null }
+    const [returnForm, setReturnForm] = useState({
+        checkout_id: null,
+        return_date: '',
+        quantity: 1,
+        notes: '',
+    });
+    const [processingReturn, setProcessingReturn] = useState(false);
+
+    const getNowDateTimeString = () => {
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    };
+
     // Fetch Sub-categories (Folders)
     const fetchFolders = useCallback(async () => {
         try {
@@ -187,6 +223,31 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
         }
     }, [ep.inventoryFolders]);
 
+    // Fetch Checkouts & Material Usage Logs
+    const fetchCheckouts = useCallback(async () => {
+        try {
+            const checkoutsUrl = ep.inventoryCheckouts || '/super-admin/inventory/checkouts';
+            const { data } = await window.axios.get(checkoutsUrl);
+            setCheckouts(Array.isArray(data?.data) ? data.data : []);
+        } catch (error) {
+            console.error("Unable to load inventory checkouts log", error);
+        }
+    }, [ep.inventoryCheckouts]);
+
+    // Fetch Checkout Options (Technicians and Services list)
+    const fetchCheckoutOptions = useCallback(async () => {
+        try {
+            const optionsUrl = ep.inventoryCheckoutOptions || '/super-admin/inventory/checkout-options';
+            const { data } = await window.axios.get(optionsUrl);
+            setCheckoutOptions({
+                technicians: Array.isArray(data?.technicians) ? data.technicians : [],
+                services: Array.isArray(data?.services) ? data.services : [],
+            });
+        } catch (error) {
+            console.error("Unable to load checkout options", error);
+        }
+    }, [ep.inventoryCheckoutOptions]);
+
     // Fetch Items
     const fetchItems = useCallback(async (showLoader = true) => {
         if (showLoader) setLoading(true);
@@ -194,12 +255,14 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
             const { data } = await window.axios.get(ep.inventory);
             setItems((Array.isArray(data?.data) ? data.data : []).map(normalizeInventoryItem));
             await fetchFolders();
+            await fetchCheckouts();
+            await fetchCheckoutOptions();
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to load inventory items."), "error");
         } finally {
             setLoading(false);
         }
-    }, [ep.inventory, addToast, fetchFolders]);
+    }, [ep.inventory, addToast, fetchFolders, fetchCheckouts, fetchCheckoutOptions]);
 
     useEffect(() => {
         fetchItems();
@@ -210,6 +273,12 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
     const powerCategories = useMemo(() => folders.filter(f => f.field_type === 'power_tools'), [folders]);
     const handCategories = useMemo(() => folders.filter(f => f.field_type === 'hand_tools'), [folders]);
     const saleCategories = useMemo(() => folders.filter(f => f.field_type === 'sale_items'), [folders]);
+
+    // Active sub-category objects
+    const activeMaterialCategoryObj = useMemo(() => materialCategories.find(f => f.name === selectedMaterialCategory), [materialCategories, selectedMaterialCategory]);
+    const activePowerCategoryObj = useMemo(() => powerCategories.find(f => f.name === selectedPowerCategory), [powerCategories, selectedPowerCategory]);
+    const activeHandCategoryObj = useMemo(() => handCategories.find(f => f.name === selectedHandCategory), [handCategories, selectedHandCategory]);
+    const activeSaleCategoryObj = useMemo(() => saleCategories.find(f => f.name === selectedSaleCategory), [saleCategories, selectedSaleCategory]);
 
     // Filtered items by category & sub-category
     const workerMaterials = useMemo(() => items.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool'), [items]);
@@ -226,9 +295,10 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
             const matchesSearch = i.item_name.toLowerCase().includes(materialSearch.toLowerCase()) || (i.sub_category || '').toLowerCase().includes(materialSearch.toLowerCase());
             if (!matchesSearch) return false;
             if (selectedMaterialCategory === 'all') return true;
-            return i.sub_category === selectedMaterialCategory || i.folder_id === selectedMaterialCategory;
+            return (i.sub_category || '').toLowerCase() === selectedMaterialCategory.toLowerCase() ||
+                (activeMaterialCategoryObj && (i.folder_id === activeMaterialCategoryObj.id || (i.sub_category || '').toLowerCase() === activeMaterialCategoryObj.name.toLowerCase()));
         });
-    }, [workerMaterials, materialSearch, selectedMaterialCategory]);
+    }, [workerMaterials, materialSearch, selectedMaterialCategory, activeMaterialCategoryObj]);
     
     const filteredPower = useMemo(() => {
         return powerTools.filter(i => {
@@ -237,18 +307,20 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                 (i.sub_category || '').toLowerCase().includes(powerSearch.toLowerCase());
             if (!matchesSearch) return false;
             if (selectedPowerCategory === 'all') return true;
-            return i.sub_category === selectedPowerCategory || i.folder_id === selectedPowerCategory;
+            return (i.sub_category || '').toLowerCase() === selectedPowerCategory.toLowerCase() ||
+                (activePowerCategoryObj && (i.folder_id === activePowerCategoryObj.id || (i.sub_category || '').toLowerCase() === activePowerCategoryObj.name.toLowerCase()));
         });
-    }, [powerTools, powerSearch, selectedPowerCategory]);
+    }, [powerTools, powerSearch, selectedPowerCategory, activePowerCategoryObj]);
     
     const filteredHand = useMemo(() => {
         return handTools.filter(i => {
             const matchesSearch = i.item_name.toLowerCase().includes(handSearch.toLowerCase()) || (i.sub_category || '').toLowerCase().includes(handSearch.toLowerCase());
             if (!matchesSearch) return false;
             if (selectedHandCategory === 'all') return true;
-            return i.sub_category === selectedHandCategory || i.folder_id === selectedHandCategory;
+            return (i.sub_category || '').toLowerCase() === selectedHandCategory.toLowerCase() ||
+                (activeHandCategoryObj && (i.folder_id === activeHandCategoryObj.id || (i.sub_category || '').toLowerCase() === activeHandCategoryObj.name.toLowerCase()));
         });
-    }, [handTools, handSearch, selectedHandCategory]);
+    }, [handTools, handSearch, selectedHandCategory, activeHandCategoryObj]);
     
     const filteredSale = useMemo(() => {
         return saleItems.filter(i => {
@@ -257,13 +329,146 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                 (i.sub_category || '').toLowerCase().includes(saleSearch.toLowerCase());
             if (!matchesSearch) return false;
             if (selectedSaleCategory === 'all') return true;
-            return i.sub_category === selectedSaleCategory || i.folder_id === selectedSaleCategory;
+            return (i.sub_category || '').toLowerCase() === selectedSaleCategory.toLowerCase() ||
+                (activeSaleCategoryObj && (i.folder_id === activeSaleCategoryObj.id || (i.sub_category || '').toLowerCase() === activeSaleCategoryObj.name.toLowerCase()));
         });
-    }, [saleItems, saleSearch, selectedSaleCategory]);
+    }, [saleItems, saleSearch, selectedSaleCategory, activeSaleCategoryObj]);
+
+    // Filtered Checkouts & Usage Tracking Logs
+    const filteredCheckouts = useMemo(() => {
+        return checkouts.filter(c => {
+            if (checkoutFilterStatus !== 'all') {
+                if (checkoutFilterStatus === 'active' && c.status !== 'Checked Out') return false;
+                if (checkoutFilterStatus === 'returned' && c.status !== 'Returned') return false;
+                if (checkoutFilterStatus === 'material' && c.log_type !== 'material_usage') return false;
+            }
+            if (checkoutSearch.trim()) {
+                const q = checkoutSearch.toLowerCase();
+                const matches = (c.item_name || '').toLowerCase().includes(q) ||
+                    (c.technician_name || '').toLowerCase().includes(q) ||
+                    (c.service_name || '').toLowerCase().includes(q) ||
+                    (c.serial_number || '').toLowerCase().includes(q) ||
+                    (c.notes || '').toLowerCase().includes(q);
+                if (!matches) return false;
+            }
+            return true;
+        });
+    }, [checkouts, checkoutFilterStatus, checkoutSearch]);
+
+    // ── Checkout & Return Open Modals ──
+    const handleOpenCheckout = (item, mode = 'power_tool') => {
+        const defaultTech = checkoutOptions.technicians[0]?.name || '';
+        const defaultTechId = checkoutOptions.technicians[0]?.user_id || '';
+        const defaultService = checkoutOptions.services[0]?.service_name || 'Basic Cleaning & Filter Wash';
+
+        setCheckoutModal({ item, mode });
+        setCheckoutForm({
+            technician_id: defaultTechId,
+            technician_name: defaultTech,
+            service_name: defaultService,
+            custom_service: '',
+            checkout_date: getNowDateTimeString(),
+            quantity: 1,
+            notes: '',
+        });
+    };
+
+    const handleOpenReturn = (item, activeCheckout = null) => {
+        setReturnModal({ item, checkout: activeCheckout });
+        setReturnForm({
+            checkout_id: activeCheckout?.checkout_id || null,
+            return_date: getNowDateTimeString(),
+            quantity: 1,
+            notes: '',
+        });
+    };
+
+    const handleConfirmCheckout = async (e) => {
+        e?.preventDefault();
+        if (!checkoutModal?.item) return;
+
+        const techName = (checkoutForm.technician_name || '').trim();
+        if (!techName) {
+            addToast("Please specify who is borrowing / using the item (Technician/Worker name).", "error");
+            return;
+        }
+
+        const chosenService = (checkoutForm.custom_service || checkoutForm.service_name || '').trim();
+        if (!chosenService) {
+            addToast("Please specify the service / job the technician is working on.", "error");
+            return;
+        }
+
+        const qty = parseInt(checkoutForm.quantity) || 1;
+        if (qty <= 0) {
+            addToast("Quantity must be at least 1.", "error");
+            return;
+        }
+
+        if (checkoutModal.mode !== 'power_tool' && qty > checkoutModal.item.quantity_on_hand) {
+            addToast(`Cannot take ${qty}. Only ${checkoutModal.item.quantity_on_hand} ${checkoutModal.item.unit} available in stock.`, "error");
+            return;
+        }
+
+        setProcessingCheckout(true);
+        try {
+            const checkoutUrl = ep.checkoutInventory || '/super-admin/inventory/checkout';
+            const payload = {
+                item_id: checkoutModal.item.item_id,
+                technician_id: checkoutForm.technician_id ? parseInt(checkoutForm.technician_id) : null,
+                technician_name: techName,
+                service_name: chosenService,
+                checkout_date: checkoutForm.checkout_date || getNowDateTimeString(),
+                quantity: qty,
+                log_type: checkoutModal.mode === 'material' ? 'material_usage' : 'borrow',
+                notes: checkoutForm.notes?.trim() || null,
+            };
+
+            const { data } = await window.axios.post(checkoutUrl, payload);
+            addToast(data?.message || `Checkout recorded for ${techName}.`);
+            setCheckoutModal(null);
+            await fetchItems(false);
+            await fetchCheckouts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to process checkout."), "error");
+        } finally {
+            setProcessingCheckout(false);
+        }
+    };
+
+    const handleConfirmReturn = async (e) => {
+        e?.preventDefault();
+        if (!returnModal?.item) return;
+
+        setProcessingReturn(true);
+        try {
+            const returnUrl = ep.returnInventory || '/super-admin/inventory/return';
+            const payload = {
+                item_id: returnModal.item.item_id,
+                checkout_id: returnForm.checkout_id || null,
+                return_date: returnForm.return_date || getNowDateTimeString(),
+                quantity: parseInt(returnForm.quantity) || 1,
+                notes: returnForm.notes?.trim() || null,
+            };
+
+            const { data } = await window.axios.post(returnUrl, payload);
+            addToast(data?.message || `Item returned successfully.`);
+            setReturnModal(null);
+            await fetchItems(false);
+            await fetchCheckouts();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to return item."), "error");
+        } finally {
+            setProcessingReturn(false);
+        }
+    };
 
     const statusBadgeColor = (status) => {
-        if (status === 'Available') return { bg: 'rgba(22,163,74,0.1)', color: '#16A34A' };
-        if (status === 'Borrowed') return { bg: 'rgba(63,125,255,0.1)', color: '#3F7DFF' };
+        if (status === 'Available' || status === 'Returned') return { bg: 'rgba(22,163,74,0.1)', color: '#16A34A' };
+        if (status === 'Borrowed' || status === 'Checked Out') return { bg: 'rgba(63,125,255,0.1)', color: '#3F7DFF' };
+        if (status === 'Used / Consumed') return { bg: 'rgba(147,51,234,0.1)', color: '#9333EA' };
         return { bg: 'rgba(239,68,68,0.1)', color: '#EF4444' };
     };
 
@@ -431,6 +636,36 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
             });
             addToast(`${returnTarget.item_name} (${returnTarget.serial_number}) has been returned and is available.`);
             setReturnTarget(null);
+            await fetchItems(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to return tool."), "error");
+        }
+    };
+
+    const handleHandToolBorrow = async (item) => {
+        if (!item || item.quantity_on_hand <= 0) return;
+        try {
+            await window.axios.patch(ep.updateInventory(item.item_id), {
+                quantity_on_hand: Math.max(0, item.quantity_on_hand - 1),
+            });
+            addToast(`${item.item_name} borrowed. ${item.quantity_on_hand - 1} remaining.`);
+            await fetchItems(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to borrow tool."), "error");
+        }
+    };
+
+    const handleHandToolReturn = async (item) => {
+        if (!item) return;
+        const maxStock = item.initial_stock || (item.quantity_on_hand + 1);
+        if (item.quantity_on_hand >= maxStock) return;
+        try {
+            await window.axios.patch(ep.updateInventory(item.item_id), {
+                quantity_on_hand: Math.min(maxStock, item.quantity_on_hand + 1),
+            });
+            addToast(`${item.item_name} returned. ${Math.min(maxStock, item.quantity_on_hand + 1)} now available.`);
             await fetchItems(false);
             onDataChanged?.();
         } catch (error) {
@@ -704,12 +939,6 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
         );
     };
 
-    // Active sub-category information helpers
-    const activeMaterialCategoryObj = materialCategories.find(f => f.name === selectedMaterialCategory);
-    const activePowerCategoryObj = powerCategories.find(f => f.name === selectedPowerCategory);
-    const activeHandCategoryObj = handCategories.find(f => f.name === selectedHandCategory);
-    const activeSaleCategoryObj = saleCategories.find(f => f.name === selectedSaleCategory);
-
     if (loading) {
         return (
             <div style={{ padding: 32, borderRadius: 12, background: '#F8FAFC', color: '#64748B', textAlign: 'center', border: '1px solid #E2E8F0' }}>
@@ -750,6 +979,7 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                                 { key: 'materials', label: 'Materials', count: workerMaterials.length, fieldType: 'materials' },
                                 { key: 'power', label: 'Power Tools', count: powerTools.length, fieldType: 'power_tools' },
                                 { key: 'hand', label: 'Hand Tools & Hardware', count: handTools.length, fieldType: 'hand_tools' },
+                                { key: 'logs', label: 'Usage & Borrowing Logs', count: checkouts.length, fieldType: null },
                             ].map(t => (
                                 <button key={t.key} onClick={() => setWorkerSubTab(t.key)}
                                     style={{
@@ -766,27 +996,36 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                         </div>
 
                         {/* Top Action Buttons for the Active Field */}
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        {workerSubTab !== 'logs' ? (
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                    className="btn-secondary"
+                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                    onClick={() => {
+                                        const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
+                                        setCategoryFieldType(fieldType);
+                                        setManageCategoriesModal(true);
+                                    }}>
+                                    Manage Sub-categories
+                                </button>
+                                <button
+                                    className="btn-primary"
+                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                    onClick={() => {
+                                        const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
+                                        handleOpenCreateCategory(fieldType);
+                                    }}>
+                                    + New Sub-category
+                                </button>
+                            </div>
+                        ) : (
                             <button
                                 className="btn-secondary"
                                 style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                onClick={() => {
-                                    const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
-                                    setCategoryFieldType(fieldType);
-                                    setManageCategoriesModal(true);
-                                }}>
-                                Manage Sub-categories
+                                onClick={() => { fetchCheckouts(); addToast("Refreshed usage and checkout logs."); }}>
+                                ↻ Refresh Logs
                             </button>
-                            <button
-                                className="btn-primary"
-                                style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                onClick={() => {
-                                    const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
-                                    handleOpenCreateCategory(fieldType);
-                                }}>
-                                + New Sub-category
-                            </button>
-                        </div>
+                        )}
                     </div>
 
                     {/* ══════════════════════════════════════════════════════════════
@@ -941,10 +1180,15 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                                                         <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
                                                         <td style={{ padding: '10px 12px' }}>
                                                             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                                                <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                    onClick={() => { setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Add</button>
+                                                                <button
+                                                                    className="btn-primary"
+                                                                    style={{ padding: '4px 9px', fontSize: 11, background: '#7C3AED', borderColor: '#6D28D9' }}
+                                                                    disabled={item.quantity_on_hand <= 0}
+                                                                    onClick={() => handleOpenCheckout(item, 'material')}>
+                                                                    − Use Material
+                                                                </button>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                    onClick={() => { setQtyAction({ item, mode: 'reduce' }); setQtyValue(''); }}>− Use</button>
+                                                                    onClick={() => { setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => {
                                                                         setEditWMTarget(item);
@@ -1105,15 +1349,19 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                                                             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                                                                 {item.status === 'Available' && (
                                                                     <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                        onClick={() => setBorrowTarget(item)}>Borrow</button>
+                                                                        onClick={() => handleOpenCheckout(item, 'power_tool')}>Borrow</button>
                                                                 )}
                                                                 {item.status === 'Borrowed' && (
                                                                     <>
                                                                         <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                            onClick={() => setReturnTarget(item)}>Return</button>
+                                                                            onClick={() => handleOpenReturn(item)}>Return</button>
                                                                         <button className="btn-danger" style={{ padding: '4px 8px', fontSize: 11 }}
                                                                             onClick={() => setDamagedModal(item)}>Report Damage</button>
                                                                     </>
+                                                                )}
+                                                                {item.status === 'Lost/Damaged' && (
+                                                                    <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                        onClick={() => handleOpenReturn(item)}>Mark Repaired</button>
                                                                 )}
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => {
@@ -1286,16 +1534,18 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                                                                     className="btn-primary"
                                                                     style={{ padding: '4px 9px', fontSize: 11, opacity: available === 0 ? 0.4 : 1, cursor: available === 0 ? 'not-allowed' : 'pointer' }}
                                                                     disabled={available === 0}
-                                                                    onClick={() => handleHandToolBorrow(item)}>
+                                                                    onClick={() => handleOpenCheckout(item, 'hand_tool')}>
                                                                     Borrow
                                                                 </button>
                                                                 <button
                                                                     className="btn-secondary"
                                                                     style={{ padding: '4px 9px', fontSize: 11, opacity: available >= item.initial_stock ? 0.4 : 1, cursor: available >= item.initial_stock ? 'not-allowed' : 'pointer' }}
                                                                     disabled={available >= item.initial_stock}
-                                                                    onClick={() => handleHandToolReturn(item)}>
+                                                                    onClick={() => handleOpenReturn(item)}>
                                                                     Return
                                                                 </button>
+                                                                <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                    onClick={() => { setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => {
                                                                         setEditHTTarget(item);
@@ -1320,6 +1570,143 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                                 </div>
                             </div>
                         </>
+                    )}
+
+                    {/* ══════════════════════════════════════════════════════════════
+                        4. USAGE & BORROWING TRACKING LOGS SUB-TAB
+                       ══════════════════════════════════════════════════════════════ */}
+                    {workerSubTab === 'logs' && (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                        Worker Materials & Tools Usage / Borrowing Logs
+                                    </p>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        Track who borrowed tools, what service technician is working on, checkout timestamps, and return dates
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <div style={{ display: 'inline-flex', gap: 4, background: '#F1F5F9', padding: 3, borderRadius: 8 }}>
+                                        {[
+                                            { key: 'all', label: `All Logs (${checkouts.length})` },
+                                            { key: 'active', label: `Active / Borrowed (${checkouts.filter(c => c.status === 'Checked Out').length})` },
+                                            { key: 'returned', label: `Returned (${checkouts.filter(c => c.status === 'Returned').length})` },
+                                            { key: 'material', label: `Materials Used (${checkouts.filter(c => c.log_type === 'material_usage').length})` },
+                                        ].map(f => (
+                                            <button
+                                                key={f.key}
+                                                onClick={() => setCheckoutFilterStatus(f.key)}
+                                                style={{
+                                                    padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                                                    fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+                                                    background: checkoutFilterStatus === f.key ? '#fff' : 'transparent',
+                                                    color: checkoutFilterStatus === f.key ? '#1D4ED8' : '#475569',
+                                                    boxShadow: checkoutFilterStatus === f.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                                }}>
+                                                {f.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <SearchBar value={checkoutSearch} onChange={setCheckoutSearch} placeholder="Search worker, service, item..." />
+                                </div>
+                            </div>
+
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 920 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['Date & Time', 'Item & Category', 'Qty', 'Technician / Worker', 'Service Working On', 'Status', 'Returned At', 'Notes', 'Actions'].map(h => (
+                                                <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredCheckouts.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={9} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No usage or borrowing logs recorded yet.
+                                                </td>
+                                            </tr>
+                                        ) : filteredCheckouts.map(log => {
+                                            const isBorrowed = log.status === 'Checked Out';
+                                            const isMaterial = log.log_type === 'material_usage';
+                                            const badgeStyle = isBorrowed
+                                                ? { bg: 'rgba(59,130,246,0.1)', color: '#2563EB', text: 'Checked Out' }
+                                                : isMaterial
+                                                ? { bg: 'rgba(147,51,234,0.1)', color: '#9333EA', text: 'Used / Consumed' }
+                                                : { bg: 'rgba(22,163,74,0.1)', color: '#16A34A', text: 'Returned' };
+
+                                            const matchingItem = items.find(i => i.item_id === log.item_id);
+
+                                            return (
+                                                <tr key={log.checkout_id} style={{ borderTop: '1px solid #F1F5F9' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155', whiteSpace: 'nowrap' }}>
+                                                        <div style={{ fontWeight: 600 }}>{log.checkout_date ? formatDate(log.checkout_date) : 'N/A'}</div>
+                                                        <div style={{ fontSize: 11, color: '#94A3B8' }}>{log.checkout_date ? new Date(log.checkout_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{log.item_name}</div>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#F1F5F9', color: '#475569' }}>
+                                                                {log.item_type || 'Tool'}
+                                                            </span>
+                                                            {log.serial_number && (
+                                                                <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#2563EB', fontWeight: 600 }}>
+                                                                    S/N: {log.serial_number}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: '#0F172A' }}>
+                                                        {log.quantity} {log.unit || 'pcs'}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1E40AF', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#DBEAFE', color: '#1D4ED8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>
+                                                                {(log.technician_name || 'T')[0].toUpperCase()}
+                                                            </span>
+                                                            {log.technician_name}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 6,
+                                                            background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A',
+                                                        }}>
+                                                            {log.service_name || 'General Service'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: badgeStyle.bg, color: badgeStyle.color }}>
+                                                            {badgeStyle.text}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 11, color: '#64748B', whiteSpace: 'nowrap' }}>
+                                                        {log.return_date ? formatDate(log.return_date) : (isBorrowed ? <span style={{ color: '#D97706', fontWeight: 600 }}>In Use</span> : '—')}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', maxWidth: 160 }}>
+                                                        {log.notes || '—'}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        {isBorrowed && (
+                                                            <button
+                                                                className="btn-primary"
+                                                                style={{ padding: '4px 10px', fontSize: 11, background: '#16A34A', borderColor: '#15803D' }}
+                                                                onClick={() => handleOpenReturn(matchingItem || { item_id: log.item_id, item_name: log.item_name }, log)}>
+                                                                Return Tool
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     )}
                 </div>
             )}
@@ -1527,39 +1914,6 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                     </div>
                 </div>
             )}
-
-            {/* Hand Tool Borrow / Return Quick Action Helpers */}
-            {(() => {
-                const handleHandToolBorrow = async (item) => {
-                    if (item.quantity_on_hand <= 0) return;
-                    try {
-                        await window.axios.patch(ep.updateInventory(item.item_id), {
-                            quantity_on_hand: Math.max(0, item.quantity_on_hand - 1),
-                        });
-                        addToast(`${item.item_name} borrowed. ${item.quantity_on_hand - 1} remaining.`);
-                        await fetchItems(false);
-                        onDataChanged?.();
-                    } catch (error) {
-                        addToast(extractErrorMessage(error, "Unable to borrow tool."), "error");
-                    }
-                };
-
-                const handleHandToolReturn = async (item) => {
-                    if (item.quantity_on_hand >= item.initial_stock) return;
-                    try {
-                        await window.axios.patch(ep.updateInventory(item.item_id), {
-                            quantity_on_hand: Math.min(item.initial_stock, item.quantity_on_hand + 1),
-                        });
-                        addToast(`${item.item_name} returned. ${Math.min(item.initial_stock, item.quantity_on_hand + 1)} now available.`);
-                        await fetchItems(false);
-                        onDataChanged?.();
-                    } catch (error) {
-                        addToast(extractErrorMessage(error, "Unable to return tool."), "error");
-                    }
-                };
-
-                return null;
-            })()}
 
             {/* ══════════════════════════════════════════════════════════════
                 SUB-CATEGORY MODALS (CREATE, MANAGE, DELETE)
@@ -2235,6 +2589,278 @@ function MaterialsTools({ addToast, onDataChanged, endpoints }) {
                 </>
             ))}
             <Modal open={confirmEditSale} title="Save Changes?" message={`Update "${editSaleForm.item_name}" in For Sale Inventory?`} confirmLabel="Yes, Save" onConfirm={handleEditSale} onCancel={() => setConfirmEditSale(false)} />
+
+            {/* ── Checkout / Borrow / Material Usage Modal ── */}
+            {checkoutModal && renderModalWrapper(true, () => !processingCheckout && setCheckoutModal(null), (
+                <form onSubmit={handleConfirmCheckout}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                        <div style={{
+                            width: 42, height: 42, borderRadius: 10,
+                            background: checkoutModal.mode === 'material' ? 'rgba(147,51,234,0.1)' : 'rgba(59,130,246,0.1)',
+                            color: checkoutModal.mode === 'material' ? '#9333EA' : '#2563EB',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                        }}>
+                            {checkoutModal.mode === 'material' ? '📦' : checkoutModal.mode === 'power_tool' ? '⚡' : '🔧'}
+                        </div>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                {checkoutModal.mode === 'material'
+                                    ? 'Log Material Usage / Checkout'
+                                    : checkoutModal.mode === 'power_tool'
+                                    ? 'Check Out Power Tool'
+                                    : 'Borrow Hand Tool'}
+                            </h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                {checkoutModal.item.item_name}
+                                {checkoutModal.item.serial_number ? ` (S/N: ${checkoutModal.item.serial_number})` : ''}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+                        {/* Technician / Worker Selection */}
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Who is borrowing / using this item? (Technician / Worker) *
+                            </label>
+                            {checkoutOptions.technicians.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    <select
+                                        className="input-field"
+                                        value={checkoutForm.technician_id || ''}
+                                        onChange={e => {
+                                            const selectedId = e.target.value;
+                                            if (selectedId === 'custom') {
+                                                setCheckoutForm(p => ({ ...p, technician_id: '', technician_name: '' }));
+                                            } else {
+                                                const tech = checkoutOptions.technicians.find(t => String(t.user_id) === String(selectedId));
+                                                setCheckoutForm(p => ({
+                                                    ...p,
+                                                    technician_id: selectedId,
+                                                    technician_name: tech ? tech.name : '',
+                                                }));
+                                            }
+                                        }}>
+                                        {checkoutOptions.technicians.map(t => (
+                                            <option key={t.user_id} value={t.user_id}>{t.name} ({t.email})</option>
+                                        ))}
+                                        <option value="custom">-- Other / Enter Custom Worker Name --</option>
+                                    </select>
+                                    {(checkoutForm.technician_id === '' || checkoutForm.technician_id === 'custom') && (
+                                        <input
+                                            className="input-field"
+                                            placeholder="Enter Technician / Worker Name..."
+                                            value={checkoutForm.technician_name}
+                                            onChange={e => setCheckoutForm(p => ({ ...p, technician_name: e.target.value }))}
+                                            required
+                                        />
+                                    )}
+                                </div>
+                            ) : (
+                                <input
+                                    className="input-field"
+                                    placeholder="Enter Technician / Worker Name..."
+                                    value={checkoutForm.technician_name}
+                                    onChange={e => setCheckoutForm(p => ({ ...p, technician_name: e.target.value }))}
+                                    required
+                                />
+                            )}
+                        </div>
+
+                        {/* Service / Job Technician is working on */}
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                What service / job is the technician working on? *
+                            </label>
+                            {checkoutOptions.services.length > 0 ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                    <select
+                                        className="input-field"
+                                        value={checkoutForm.service_name || ''}
+                                        onChange={e => {
+                                            const val = e.target.value;
+                                            if (val === 'custom') {
+                                                setCheckoutForm(p => ({ ...p, service_name: 'custom', custom_service: '' }));
+                                            } else {
+                                                setCheckoutForm(p => ({ ...p, service_name: val, custom_service: '' }));
+                                            }
+                                        }}>
+                                        {checkoutOptions.services.map(s => (
+                                            <option key={s.service_id} value={s.service_name}>{s.service_name}</option>
+                                        ))}
+                                        <option value="custom">-- Other / Custom Job Description --</option>
+                                    </select>
+                                    {checkoutForm.service_name === 'custom' && (
+                                        <input
+                                            className="input-field"
+                                            placeholder="Describe service / job assignment..."
+                                            value={checkoutForm.custom_service}
+                                            onChange={e => setCheckoutForm(p => ({ ...p, custom_service: e.target.value }))}
+                                            required
+                                        />
+                                    )}
+                                </div>
+                            ) : (
+                                <input
+                                    className="input-field"
+                                    placeholder="e.g. AC Installation, Preventive Maintenance"
+                                    value={checkoutForm.service_name}
+                                    onChange={e => setCheckoutForm(p => ({ ...p, service_name: e.target.value }))}
+                                    required
+                                />
+                            )}
+                        </div>
+
+                        {/* Date & Time */}
+                        <div>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Time & Date *
+                            </label>
+                            <input
+                                type="datetime-local"
+                                className="input-field"
+                                value={checkoutForm.checkout_date}
+                                onChange={e => setCheckoutForm(p => ({ ...p, checkout_date: e.target.value }))}
+                                required
+                            />
+                        </div>
+
+                        {/* Quantity */}
+                        <div>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Quantity ({checkoutModal.item.unit || 'unit'}) *
+                            </label>
+                            <input
+                                type="number"
+                                min="1"
+                                max={checkoutModal.mode === 'power_tool' ? 1 : checkoutModal.item.quantity_on_hand}
+                                disabled={checkoutModal.mode === 'power_tool'}
+                                className="input-field"
+                                value={checkoutForm.quantity}
+                                onChange={e => setCheckoutForm(p => ({ ...p, quantity: e.target.value }))}
+                                required
+                            />
+                            {checkoutModal.mode !== 'power_tool' && (
+                                <span style={{ fontSize: 11, color: '#64748B' }}>
+                                    Available in stock: {checkoutModal.item.quantity_on_hand} {checkoutModal.item.unit}
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Notes / Purpose */}
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Notes / Purpose / Remarks (Optional)
+                            </label>
+                            <input
+                                className="input-field"
+                                placeholder="e.g. For Unit 402 AC coil washing, return by 5 PM"
+                                value={checkoutForm.notes}
+                                onChange={e => setCheckoutForm(p => ({ ...p, notes: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={processingCheckout}
+                            onClick={() => setCheckoutModal(null)}>
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={processingCheckout}
+                            style={{ background: checkoutModal.mode === 'material' ? '#7C3AED' : '#2563EB', borderColor: checkoutModal.mode === 'material' ? '#6D28D9' : '#1D4ED8' }}>
+                            {processingCheckout ? 'Saving Record...' : 'Confirm Checkout / Usage →'}
+                        </button>
+                    </div>
+                </form>
+            ))}
+
+            {/* ── Return Tool Modal ── */}
+            {returnModal && renderModalWrapper(true, () => !processingReturn && setReturnModal(null), (
+                <form onSubmit={handleConfirmReturn}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                        <div style={{
+                            width: 42, height: 42, borderRadius: 10,
+                            background: 'rgba(22,163,74,0.1)', color: '#16A34A',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                        }}>
+                            🔄
+                        </div>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                Return Tool to Inventory
+                            </h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                {returnModal.item.item_name}
+                                {returnModal.checkout?.technician_name ? ` · Checked out by ${returnModal.checkout.technician_name}` : ''}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
+                        <div>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Return Date & Time *
+                            </label>
+                            <input
+                                type="datetime-local"
+                                className="input-field"
+                                value={returnForm.return_date}
+                                onChange={e => setReturnForm(p => ({ ...p, return_date: e.target.value }))}
+                                required
+                            />
+                        </div>
+
+                        <div>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Quantity Returned
+                            </label>
+                            <input
+                                type="number"
+                                min="1"
+                                className="input-field"
+                                value={returnForm.quantity}
+                                onChange={e => setReturnForm(p => ({ ...p, quantity: e.target.value }))}
+                                required
+                            />
+                        </div>
+
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>
+                                Condition / Notes upon return
+                            </label>
+                            <input
+                                className="input-field"
+                                placeholder="e.g. Returned in good clean working condition"
+                                value={returnForm.notes}
+                                onChange={e => setReturnForm(p => ({ ...p, notes: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={processingReturn}
+                            onClick={() => setReturnModal(null)}>
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={processingReturn}
+                            style={{ background: '#16A34A', borderColor: '#15803D' }}>
+                            {processingReturn ? 'Saving...' : 'Confirm Return →'}
+                        </button>
+                    </div>
+                </form>
+            ))}
 
             {/* ── Delete Modal ── */}
             <Modal
