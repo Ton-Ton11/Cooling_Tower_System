@@ -69,8 +69,7 @@ function Sidebar({
               position: "fixed",
               top: 0,
               left: 0,
-              background:
-                  "linear-gradient(180deg,#1E2F5F 0%,#162347 60%,#0E1932 100%)",
+              background: "#0E1A33",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -80,10 +79,9 @@ function Sidebar({
               transition: "transform 0.25s ease",
           }
         : {
-              width: collapsed ? 68 : 240,
+              width: collapsed ? 72 : 248,
               minHeight: "100vh",
-              background:
-                  "linear-gradient(180deg,#1E2F5F 0%,#162347 60%,#0E1932 100%)",
+              background: "#0E1A33",
               display: "flex",
               flexDirection: "column",
               transition: "width 0.25s ease",
@@ -96,13 +94,13 @@ function Sidebar({
         <aside style={sidebarStyle}>
             <div
                 style={{
-                    padding: collapsed && !isMobile ? "16px 14px" : "16px 16px",
+                    padding: collapsed && !isMobile ? "18px 14px" : "18px 18px",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    gap: 10,
+                    gap: 12,
                     borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    minHeight: 68,
+                    minHeight: 74,
                     flexShrink: 0,
                 }}
             >
@@ -110,32 +108,46 @@ function Sidebar({
                     style={{
                         display: "flex",
                         alignItems: "center",
-                        gap: 10,
+                        gap: 11,
                         overflow: "hidden",
                     }}
                 >
-                    <img
-                        src={logo}
-                        alt="Cooling Tower Logo"
+                    <div
                         style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 10,
-                            objectFit: "cover",
+                            width: 42,
+                            height: 42,
+                            borderRadius: 12,
+                            background: "#FFFFFF",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 4,
                             flexShrink: 0,
-                            boxShadow: "0 0 0 2px rgba(255,255,255,0.18)",
+                            boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
                         }}
-                    />
+                    >
+                        <img
+                            src={logo}
+                            alt="Cooling Tower Logo"
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "contain",
+                                borderRadius: 8,
+                            }}
+                        />
+                    </div>
                     {(!collapsed || isMobile) && (
                         <div style={{ overflow: "hidden" }}>
                             <p
                                 style={{
-                                    fontSize: 12,
-                                    fontWeight: 700,
+                                    fontSize: 13,
+                                    fontWeight: 800,
                                     color: "#fff",
                                     whiteSpace: "nowrap",
                                     lineHeight: 1.2,
                                     margin: 0,
+                                    letterSpacing: "-0.01em",
                                 }}
                             >
                                 Cooling Tower
@@ -143,11 +155,11 @@ function Sidebar({
                             <p
                                 style={{
                                     fontSize: 10,
-                                    color: "#59B7FF",
-                                    fontWeight: 500,
+                                    color: "#38BDF8",
+                                    fontWeight: 600,
                                     whiteSpace: "nowrap",
                                     lineHeight: 1.3,
-                                    margin: 0,
+                                    margin: "2px 0 0",
                                 }}
                             >
                                 Airconditioning Services
@@ -181,7 +193,7 @@ function Sidebar({
             <nav
                 style={{
                     flex: 1,
-                    padding: "10px 8px",
+                    padding: "14px 10px",
                     overflowY: "auto",
                     overflowX: "hidden",
                 }}
@@ -201,56 +213,43 @@ function Sidebar({
                             style={{
                                 display: "flex",
                                 alignItems: "center",
-                                gap: collapsed && !isMobile ? 0 : 10,
+                                gap: collapsed && !isMobile ? 0 : 11,
                                 width: "100%",
                                 padding:
                                     collapsed && !isMobile
-                                        ? "10px 0"
-                                        : "9px 12px",
+                                        ? "11px 0"
+                                        : "11px 14px",
                                 justifyContent:
                                     collapsed && !isMobile
                                         ? "center"
                                         : "flex-start",
-                                borderRadius: 12,
+                                borderRadius: 14,
                                 border: "none",
                                 background: isActive
-                                    ? "rgba(63,125,255,0.25)"
+                                    ? "#FFFFFF"
                                     : "transparent",
                                 cursor: "pointer",
-                                transition: "all 0.15s",
-                                marginBottom: 2,
+                                transition: "all 0.18s ease",
+                                marginBottom: 4,
                                 position: "relative",
-                                color: isActive ? "#fff" : "rgba(255,255,255,0.5)",
+                                color: isActive ? "#0E1A33" : "rgba(255,255,255,0.72)",
+                                boxShadow: isActive ? "0 4px 12px rgba(0,0,0,0.15)" : "none",
                             }}
                             onMouseEnter={(e) => {
                                 if (!isActive) {
-                                    e.currentTarget.style.color =
-                                        "rgba(255,255,255,0.8)";
+                                    e.currentTarget.style.color = "#FFFFFF";
+                                    e.currentTarget.style.background = "rgba(255,255,255,0.08)";
                                 }
                             }}
                             onMouseLeave={(e) => {
                                 if (!isActive) {
-                                    e.currentTarget.style.color =
-                                        "rgba(255,255,255,0.5)";
+                                    e.currentTarget.style.color = "rgba(255,255,255,0.72)";
+                                    e.currentTarget.style.background = "transparent";
                                 }
                             }}
                         >
-                            {isActive && (
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        left: 0,
-                                        top: "50%",
-                                        transform: "translateY(-50%)",
-                                        width: 3,
-                                        height: 22,
-                                        borderRadius: "0 4px 4px 0",
-                                        background: "#59B7FF",
-                                    }}
-                                />
-                            )}
-                            <span style={{ flexShrink: 0, display: "flex" }}>
-                                <Icon d={item.icon} size={18} />
+                            <span style={{ flexShrink: 0, display: "flex", color: isActive ? "#1D4ED8" : "inherit" }}>
+                                <Icon d={item.icon} size={19} />
                             </span>
                             {(!collapsed || isMobile) && (
                                 <span

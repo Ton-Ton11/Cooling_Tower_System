@@ -39,10 +39,31 @@ class ManagerDashboardController extends ManagerBaseController
             ->whereNotNull('payment_date')
             ->get(['amount_paid', 'payment_date']);
 
+        $activeDispatches = $this->bookingsBaseQuery()
+            ->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress'])
+            ->orderBy('bookings.scheduled_date')
+            ->limit(5)
+            ->get();
+
+        $announcements = DB::table('announcements')
+            ->join('users as creators', 'creators.user_id', '=', 'announcements.created_by')
+            ->select([
+                'announcements.id',
+                'announcements.title',
+                'announcements.message',
+                'announcements.created_at',
+                DB::raw("TRIM(CONCAT_WS(' ', creators.given_name, creators.middle_name, creators.last_name)) as author_name"),
+            ])
+            ->orderByDesc('announcements.created_at')
+            ->limit(4)
+            ->get();
+
         return response()->json([
-            'stats'           => $stats,
+            'stats'            => $stats,
             'pending_bookings' => $this->mapBookings($pendingBookings),
-            'weekly_revenue'  => $this->buildWeeklyRevenueSeries($paidPayments),
+            'active_bookings'  => $this->mapBookings($activeDispatches),
+            'announcements'    => $announcements,
+            'weekly_revenue'   => $this->buildWeeklyRevenueSeries($paidPayments),
         ]);
     }
 }
