@@ -70,11 +70,16 @@ class CustomerDashboardController extends Controller
                     'service_name' => $b->service?->service_name ?? 'Aircon Service',
                     'service_base_price' => (float) ($b->service?->base_price ?? 0),
                     'scheduled_date' => $b->scheduled_date?->toISOString(),
+                    'scheduled_date_formatted' => $b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD',
                     'booking_status' => $b->booking_status,
+                    'quotation_status' => $b->quotation_status ?? 'Pending Assessment',
+                    'service_order_status' => $b->service_order_status ?? 'Pending Quotation',
+                    'units_data' => $b->units_data ?? [],
                     'service_payment_method' => $b->service_payment_method ?? 'Cash',
                     'cancellation_reason' => $b->cancellation_reason,
                     'notes' => $b->notes,
                     'created_at' => $b->created_at?->toISOString(),
+                    'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y') : '',
                     'assigned_tech_name' => $b->technician ? trim("{$b->technician->given_name} {$b->technician->middle_name} {$b->technician->last_name}") : null,
                     'assigned_tech_contact' => $b->technician?->contact_number,
                     'payment_status' => $b->latestPayment?->payment_status ?? 'Pending',
@@ -83,6 +88,86 @@ class CustomerDashboardController extends Controller
                     'reference_number' => $b->latestPayment?->reference_number,
                     'has_feedback' => (bool) $b->feedback,
                     'rating' => $b->feedback?->rating,
+                ];
+            });
+
+        $upcomingBooking = Booking::with(['service', 'technician'])
+            ->where('client_id', $userId)
+            ->whereNotIn('booking_status', ['Cancelled', 'Completed'])
+            ->orderBy('scheduled_date', 'asc')
+            ->first();
+
+        $toDoItems = [];
+        $quotationBooking = Booking::where('client_id', $userId)
+            ->where('quotation_status', 'Quotation Issued')
+            ->latest('booking_id')
+            ->first();
+        if ($quotationBooking) {
+            $toDoItems[] = [
+                'id' => 'quote_' . $quotationBooking->booking_id,
+                'title' => 'Review & accept official quotation for Booking #' . $quotationBooking->booking_id,
+                'sub' => 'Action required before technician dispatch',
+                'target' => 'bookings',
+                'badge' => 'Quotation Ready',
+                'badge_color' => 'amber',
+            ];
+        }
+
+        $unratedBooking = Booking::with('service')
+            ->where('client_id', $userId)
+            ->where('booking_status', 'Completed')
+            ->whereDoesntHave('feedback')
+            ->latest('booking_id')
+            ->first();
+        if ($unratedBooking) {
+            $toDoItems[] = [
+                'id' => 'feedback_' . $unratedBooking->booking_id,
+                'title' => 'Rate technician performance for ' . ($unratedBooking->service?->service_name ?? 'Service'),
+                'sub' => 'Help us recognize quality service',
+                'target' => 'history',
+                'badge' => 'Rate Service',
+                'badge_color' => 'blue',
+            ];
+        }
+
+        if (empty($user->address) || empty($user->contact_number)) {
+            $toDoItems[] = [
+                'id' => 'profile_complete',
+                'title' => 'Set default service address and contact number',
+                'sub' => 'Fast-tracks your next technician arrival',
+                'target' => 'book',
+                'badge' => 'Profile',
+                'badge_color' => 'slate',
+            ];
+        }
+
+        $toDoItems[] = [
+            'id' => 'maintenance_check',
+            'title' => 'Schedule regular quarterly aircon cleaning',
+            'sub' => 'Recommended every 3–6 months for optimal cooling',
+            'target' => 'book',
+            'badge' => 'Routine Care',
+            'badge_color' => 'emerald',
+        ];
+
+        $onlineTechnicians = DB::table('users')
+            ->join('roles', 'roles.role_id', '=', 'users.role_id')
+            ->whereIn('users.role_id', [5, 7])
+            ->select([
+                'users.user_id',
+                'users.given_name',
+                'users.last_name',
+                'roles.role_name',
+                'users.contact_number',
+            ])
+            ->limit(6)
+            ->get()
+            ->map(function ($t) {
+                return [
+                    'id' => $t->user_id,
+                    'name' => trim("{$t->given_name} {$t->last_name}"),
+                    'role' => $t->role_name,
+                    'online' => true,
                 ];
             });
 
@@ -118,6 +203,16 @@ class CustomerDashboardController extends Controller
                 'announcements' => $announcements->count(),
             ],
             'recent_bookings' => $recentBookings,
+            'upcoming_appointment' => $upcomingBooking ? [
+                'booking_id' => $upcomingBooking->booking_id,
+                'service_name' => $upcomingBooking->service?->service_name ?? 'Aircon Service',
+                'scheduled_date' => $upcomingBooking->scheduled_date?->toISOString(),
+                'scheduled_date_formatted' => $upcomingBooking->scheduled_date ? $upcomingBooking->scheduled_date->format('D, M d, Y • h:i A') : 'TBD',
+                'booking_status' => $upcomingBooking->booking_status,
+                'assigned_tech_name' => $upcomingBooking->technician ? trim("{$upcomingBooking->technician->given_name} {$upcomingBooking->technician->last_name}") : 'Pending Assignment',
+            ] : null,
+            'to_do_items' => $toDoItems,
+            'online_technicians' => $onlineTechnicians,
             'services' => $services,
             'unit_types' => $unitTypes,
             'brands' => $brands,

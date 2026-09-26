@@ -74,17 +74,17 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar }) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "#9CA3AF",
+                    color: "#64748B",
                     flexShrink: 0,
                     transition: "all 0.15s",
                 }}
                 onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#F5F7FA";
-                    e.currentTarget.style.color = "#1E2F5F";
+                    e.currentTarget.style.background = "#F1F5F9";
+                    e.currentTarget.style.color = "#0F172A";
                 }}
                 onMouseLeave={(e) => {
                     e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.color = "#9CA3AF";
+                    e.currentTarget.style.color = "#64748B";
                 }}
             >
                 <Icon
@@ -94,40 +94,70 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar }) {
             </button>
 
             {!isMobile && (
-                <div style={{ position: "relative", flex: 1, maxWidth: 340 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 12 }}>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#0E1A33", letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
+                        Cooling Tower System
+                    </span>
+                </div>
+            )}
+
+            {!isMobile && (
+                <div style={{ position: "relative", flex: 1, maxWidth: 380, margin: "0 auto" }}>
                     <span
                         style={{
                             position: "absolute",
-                            left: 11,
+                            left: 14,
                             top: "50%",
                             transform: "translateY(-50%)",
-                            color: "#9CA3AF",
+                            color: "#64748B",
                             display: "flex",
                             pointerEvents: "none",
                         }}
                     >
-                        <Icon d={ic.search} size={14} />
+                        <Icon d={ic.search} size={15} />
                     </span>
                     <input
                         type="text"
-                        placeholder="Search bookings, staff, clients..."
+                        placeholder="Search services, bookings..."
                         style={{
                             width: "100%",
-                            paddingLeft: 34,
-                            paddingRight: 12,
+                            paddingLeft: 38,
+                            paddingRight: 32,
                             paddingTop: 8,
                             paddingBottom: 8,
-                            background: "#F5F7FA",
-                            border: "1px solid #EAECF0",
-                            borderRadius: 10,
+                            background: "#F1F5F9",
+                            border: "1px solid #E2E8F0",
+                            borderRadius: 999,
                             fontSize: 13,
-                            color: "#374151",
+                            color: "#1E293B",
                             outline: "none",
                             fontFamily: "inherit",
+                            transition: "all 0.2s",
                         }}
-                        onFocus={(e) => (e.currentTarget.style.borderColor = "#3F7DFF")}
-                        onBlur={(e) => (e.currentTarget.style.borderColor = "#EAECF0")}
+                        onFocus={(e) => {
+                            e.currentTarget.style.borderColor = "#2563EB";
+                            e.currentTarget.style.background = "#fff";
+                            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.12)";
+                        }}
+                        onBlur={(e) => {
+                            e.currentTarget.style.borderColor = "#E2E8F0";
+                            e.currentTarget.style.background = "#F1F5F9";
+                            e.currentTarget.style.boxShadow = "none";
+                        }}
                     />
+                    <span
+                        style={{
+                            position: "absolute",
+                            right: 14,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            color: "#94A3B8",
+                            pointerEvents: "none",
+                            fontSize: 10,
+                        }}
+                    >
+                        ▼
+                    </span>
                 </div>
             )}
 
@@ -135,136 +165,147 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar }) {
                 style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: isMobile ? 6 : 8,
+                    gap: isMobile ? 8 : 12,
                     marginLeft: "auto",
                 }}
             >
-                {!isMobile && (
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            background: "#F5F7FA",
-                            border: "1px solid #EAECF0",
-                            borderRadius: 10,
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            color: "#6B7280",
-                            fontWeight: 500,
-                            whiteSpace: "nowrap",
-                        }}
-                    >
-                        <Icon d={ic.calendar} size={13} />
-                        {dateStr}
-                    </div>
-                )}
-
-                {!isMobile && (
+                {/* Messages Counter Badge */}
+                <div style={{ position: "relative" }}>
                     <button
+                        title="Messages"
                         style={{
                             width: 34,
                             height: 34,
-                            borderRadius: 10,
+                            borderRadius: "50%",
                             border: "none",
                             background: "transparent",
                             cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            color: "#9CA3AF",
+                            color: "#64748B",
                             transition: "all 0.15s",
                         }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.background = "#F5F7FA";
-                            e.currentTarget.style.color = "#1E2F5F";
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "transparent";
-                            e.currentTarget.style.color = "#9CA3AF";
-                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
-                        <Icon d={ic.settings} size={16} />
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                            <polyline points="22,6 12,13 2,6" />
+                        </svg>
                     </button>
-                )}
-
-                <button
-                    style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 10,
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#9CA3AF",
-                        position: "relative",
-                        transition: "all 0.15s",
-                    }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#F5F7FA";
-                        e.currentTarget.style.color = "#1E2F5F";
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                        e.currentTarget.style.color = "#9CA3AF";
-                    }}
-                >
-                    <Icon d={ic.bell} size={16} />
                     <span
                         style={{
                             position: "absolute",
-                            top: 7,
-                            right: 7,
-                            width: 8,
-                            height: 8,
-                            background: "#F58A07",
-                            borderRadius: "50%",
-                            border: "2px solid #fff",
-                        }}
-                    />
-                </button>
-
-                {!isMobile && (
-                    <div
-                        style={{
-                            width: 1,
-                            height: 28,
-                            background: "#F0F2F5",
-                            margin: "0 4px",
-                        }}
-                    />
-                )}
-
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div
-                        style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: 10,
-                            background: "linear-gradient(135deg,#3F7DFF,#1E2F5F)",
+                            top: -2,
+                            right: -2,
+                            background: "#0284C7",
+                            color: "#fff",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            minWidth: 17,
+                            height: 17,
+                            borderRadius: 999,
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            color: "#fff",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            flexShrink: 0,
+                            padding: "0 4px",
+                            border: "2px solid #fff",
                         }}
                     >
-                        {initials}
-                    </div>
+                        3
+                    </span>
+                </div>
+
+                {/* Notifications Bell with Badge */}
+                <div style={{ position: "relative" }}>
+                    <button
+                        title="Notifications"
+                        style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#64748B",
+                            transition: "all 0.15s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                        <Icon d={ic.bell} size={17} />
+                    </button>
+                    <span
+                        style={{
+                            position: "absolute",
+                            top: -2,
+                            right: -2,
+                            background: "#0EA5E9",
+                            color: "#fff",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            minWidth: 17,
+                            height: 17,
+                            borderRadius: 999,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: "0 4px",
+                            border: "2px solid #fff",
+                        }}
+                    >
+                        9
+                    </span>
+                </div>
+
+                {!isMobile && (
+                    <button
+                        title="Calendar"
+                        style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#64748B",
+                            transition: "all 0.15s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                        <Icon d={ic.calendar} size={17} />
+                    </button>
+                )}
+
+                <div
+                    style={{
+                        width: 1,
+                        height: 24,
+                        background: "#E2E8F0",
+                        margin: "0 4px",
+                    }}
+                />
+
+                {/* User Profile Avatar with Online Ring */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {!isMobile && (
-                        <div>
+                        <div style={{ textAlign: "right" }}>
                             <p
                                 style={{
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    color: "#1E2F5F",
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    color: "#0E1A33",
                                     lineHeight: 1.2,
                                     margin: 0,
+                                    whiteSpace: "nowrap",
                                 }}
                             >
                                 {displayName}
@@ -272,15 +313,47 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar }) {
                             <p
                                 style={{
                                     fontSize: 11,
-                                    color: "#9CA3AF",
-                                    lineHeight: 1.3,
-                                    margin: 0,
+                                    color: "#64748B",
+                                    lineHeight: 1.2,
+                                    margin: "2px 0 0",
                                 }}
                             >
                                 {roleLabel}
                             </p>
                         </div>
                     )}
+                    <div style={{ position: "relative" }}>
+                        <div
+                            style={{
+                                width: 38,
+                                height: 38,
+                                borderRadius: "50%",
+                                background: "linear-gradient(135deg,#2563EB,#0E1A33)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#fff",
+                                fontSize: 13,
+                                fontWeight: 800,
+                                flexShrink: 0,
+                                boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
+                            }}
+                        >
+                            {initials}
+                        </div>
+                        <span
+                            style={{
+                                position: "absolute",
+                                bottom: 0,
+                                right: 0,
+                                width: 10,
+                                height: 10,
+                                background: "#10B981",
+                                borderRadius: "50%",
+                                border: "2px solid #fff",
+                            }}
+                        />
+                    </div>
                 </div>
             </div>
         </header>

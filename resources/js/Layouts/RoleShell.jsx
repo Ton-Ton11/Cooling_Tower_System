@@ -30,19 +30,21 @@ const chevR      = "M9 18l6-6-6-6";
 // ── Role-aware Sidebar (inline, not shared with SuperAdmin Sidebar) ───────────
 function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, badges = {}, isMobile, mobileOpen, onMobileClose }) {
     const sidebarStyle = isMobile
-        ? { width: 264, height: "100vh", position: "fixed", top: 0, left: 0, background: "linear-gradient(180deg,#1E2F5F 0%,#162347 60%,#0E1932 100%)", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, zIndex: 20, transform: mobileOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s ease" }
-        : { width: collapsed ? 68 : 240, minHeight: "100vh", background: "linear-gradient(180deg,#1E2F5F 0%,#162347 60%,#0E1932 100%)", display: "flex", flexDirection: "column", transition: "width 0.25s ease", overflow: "hidden", flexShrink: 0, zIndex: 10 };
+        ? { width: 264, height: "100vh", position: "fixed", top: 0, left: 0, background: "#0E1A33", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, zIndex: 20, transform: mobileOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s ease" }
+        : { width: collapsed ? 72 : 248, minHeight: "100vh", background: "#0E1A33", display: "flex", flexDirection: "column", transition: "width 0.25s ease", overflow: "hidden", flexShrink: 0, zIndex: 10 };
 
     return (
         <aside style={sidebarStyle}>
-            {/* Logo */}
-            <div style={{ padding: collapsed && !isMobile ? "16px 14px" : "16px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, borderBottom: "1px solid rgba(255,255,255,0.08)", minHeight: 68, flexShrink: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, overflow: "hidden" }}>
-                    <img src={logo} alt="Logo" style={{ width: 36, height: 36, borderRadius: 10, objectFit: "cover", flexShrink: 0, boxShadow: "0 0 0 2px rgba(255,255,255,0.18)" }} />
+            {/* Logo Brand Container */}
+            <div style={{ padding: collapsed && !isMobile ? "18px 14px" : "18px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.08)", minHeight: 74, flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 11, overflow: "hidden" }}>
+                    <div style={{ width: 42, height: 42, borderRadius: 12, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, flexShrink: 0, boxShadow: "0 2px 10px rgba(0,0,0,0.25)" }}>
+                        <img src={logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 8 }} />
+                    </div>
                     {(!collapsed || isMobile) && (
                         <div style={{ overflow: "hidden" }}>
-                            <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", lineHeight: 1.2, margin: 0 }}>Cooling Tower</p>
-                            <p style={{ fontSize: 10, color: "#59B7FF", fontWeight: 500, whiteSpace: "nowrap", lineHeight: 1.3, margin: 0 }}>Airconditioning Services</p>
+                            <p style={{ fontSize: 13, fontWeight: 800, color: "#fff", whiteSpace: "nowrap", lineHeight: 1.2, margin: 0, letterSpacing: "-0.01em" }}>Cooling Tower</p>
+                            <p style={{ fontSize: 10, color: "#38BDF8", fontWeight: 600, whiteSpace: "nowrap", lineHeight: 1.3, margin: "2px 0 0" }}>Airconditioning Services</p>
                         </div>
                     )}
                 </div>
@@ -54,7 +56,7 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
             </div>
 
             {/* Nav */}
-            <nav style={{ flex: 1, padding: "10px 8px", overflowY: "auto", overflowX: "hidden" }}>
+            <nav style={{ flex: 1, padding: "14px 10px", overflowY: "auto", overflowX: "hidden" }}>
                 {navItems.map((item) => {
                     const isActive    = activePage === item.id;
                     const badgeCount  = Number(badges[item.id] ?? 0);
@@ -66,34 +68,91 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
                             key={item.id}
                             onClick={() => onNavigate(item.id)}
                             title={collapsed && !isMobile ? item.label : undefined}
-                            style={{ display: "flex", alignItems: "center", gap: collapsed && !isMobile ? 0 : 10, width: "100%", padding: collapsed && !isMobile ? "10px 0" : "9px 12px", justifyContent: collapsed && !isMobile ? "center" : "flex-start", borderRadius: 12, border: "none", background: isActive ? "rgba(63,125,255,0.25)" : "transparent", cursor: "pointer", transition: "all 0.15s", marginBottom: 2, position: "relative", color: isActive ? "#fff" : "rgba(255,255,255,0.5)" }}
-                            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "rgba(255,255,255,0.8)"; }}
-                            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = "rgba(255,255,255,0.5)"; }}
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: collapsed && !isMobile ? 0 : 11,
+                                width: "100%",
+                                padding: collapsed && !isMobile ? "11px 0" : "11px 14px",
+                                justifyContent: collapsed && !isMobile ? "center" : "flex-start",
+                                borderRadius: 14,
+                                border: "none",
+                                background: isActive ? "#FFFFFF" : "transparent",
+                                cursor: "pointer",
+                                transition: "all 0.18s ease",
+                                marginBottom: 4,
+                                position: "relative",
+                                color: isActive ? "#0E1A33" : "rgba(255,255,255,0.72)",
+                                boxShadow: isActive ? "0 4px 12px rgba(0,0,0,0.15)" : "none",
+                            }}
+                            onMouseEnter={(e) => {
+                                if (!isActive) {
+                                    e.currentTarget.style.color = "#FFFFFF";
+                                    e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+                                }
+                            }}
+                            onMouseLeave={(e) => {
+                                if (!isActive) {
+                                    e.currentTarget.style.color = "rgba(255,255,255,0.72)";
+                                    e.currentTarget.style.background = "transparent";
+                                }
+                            }}
                         >
-                            {isActive && <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", width: 3, height: 22, borderRadius: "0 4px 4px 0", background: "#59B7FF" }} />}
-                            <span style={{ flexShrink: 0, display: "flex" }}><Icon d={item.icon} size={18} /></span>
-                            {(!collapsed || isMobile) && <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, flex: 1, textAlign: "left", whiteSpace: "nowrap" }}>{item.label}</span>}
+                            <span style={{ flexShrink: 0, display: "flex", color: isActive ? "#1D4ED8" : "inherit" }}>
+                                <Icon d={item.icon} size={19} />
+                            </span>
+                            {(!collapsed || isMobile) && (
+                                <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 500, flex: 1, textAlign: "left", whiteSpace: "nowrap" }}>
+                                    {item.label}
+                                </span>
+                            )}
                             {(!collapsed || isMobile) && hasBadge ? (
-                                <span style={{ flexShrink: 0, background: "#F58A07", color: "#fff", fontSize: 10, fontWeight: 700, minWidth: 20, height: 20, padding: "0 6px", borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center" }}>{badgeLabel}</span>
+                                <span style={{ flexShrink: 0, background: isActive ? "#EF4444" : "#F58A07", color: "#fff", fontSize: 10, fontWeight: 700, minWidth: 20, height: 20, padding: "0 6px", borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    {badgeLabel}
+                                </span>
                             ) : collapsed && hasBadge ? (
-                                <span style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, background: "#F58A07", borderRadius: "50%" }} />
+                                <span style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, background: "#F58A07", borderRadius: "50%" }} />
                             ) : null}
                         </button>
                     );
                 })}
             </nav>
 
+            {/* Bottom Utilities (Shortcuts & Help) */}
+            {(!collapsed || isMobile) && (
+                <div style={{ padding: "8px 10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 2 }}>
+                    <button
+                        onClick={() => onNavigate("book")}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 14px", borderRadius: 10, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
+                    >
+                        <span>⭐</span>
+                        <span>Quick Book Service</span>
+                    </button>
+                    <button
+                        onClick={() => onNavigate("complaints")}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 14px", borderRadius: 10, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
+                    >
+                        <span>💬</span>
+                        <span>Help & Support</span>
+                    </button>
+                </div>
+            )}
+
             {/* Logout */}
-            <div style={{ padding: "10px 8px", borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+            <div style={{ padding: "10px 10px", borderTop: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
                 <button
                     onClick={onLogout}
                     title={collapsed && !isMobile ? "Logout" : undefined}
-                    style={{ display: "flex", alignItems: "center", gap: collapsed && !isMobile ? 0 : 10, width: "100%", padding: collapsed && !isMobile ? "10px 0" : "9px 12px", justifyContent: collapsed && !isMobile ? "center" : "flex-start", borderRadius: 12, border: "none", background: "transparent", cursor: "pointer", transition: "all 0.15s", color: "rgba(239,68,68,0.6)" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.color = "#EF4444"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(239,68,68,0.6)"; }}
+                    style={{ display: "flex", alignItems: "center", gap: collapsed && !isMobile ? 0 : 10, width: "100%", padding: collapsed && !isMobile ? "10px 0" : "9px 14px", justifyContent: collapsed && !isMobile ? "center" : "flex-start", borderRadius: 12, border: "none", background: "transparent", cursor: "pointer", transition: "all 0.15s", color: "rgba(239,68,68,0.7)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(239,68,68,0.7)"; }}
                 >
                     <span style={{ flexShrink: 0, display: "flex" }}><Icon d={logoutIcon} size={18} /></span>
-                    {(!collapsed || isMobile) && <span style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap" }}>Logout</span>}
+                    {(!collapsed || isMobile) && <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>Logout</span>}
                 </button>
             </div>
         </aside>
