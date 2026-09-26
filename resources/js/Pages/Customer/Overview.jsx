@@ -186,14 +186,26 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
             {/* Available Services Showcase Grid */}
             <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-100 space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
                     <div>
-                        <h2 className="text-lg font-bold text-gray-900">Our Airconditioning Services</h2>
-                        <p className="text-xs text-gray-500 mt-0.5">Explore our professional services and book online in minutes.</p>
+                        <h2 className="text-lg font-bold text-gray-900">Our Core Airconditioning Services</h2>
+                        <p className="text-xs text-gray-500 mt-0.5">Submit a service request and reserve your appointment slot in minutes.</p>
+                    </div>
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 text-xs font-semibold">
+                        <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span>Official Quotation Provided After Assessment</span>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Service Request Notice */}
+                <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border border-blue-100 rounded-xl p-3.5 flex items-start gap-3">
+                    <span className="text-lg">📋</span>
+                    <p className="text-xs text-blue-900 leading-relaxed">
+                        <strong>Service Request Model:</strong> This is a service booking and schedule reservation platform. Final charges will be determined by assessment, required parts, materials, and labor through an official quotation before service starts.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {services.map((srv) => (
                         <div
                             key={srv.service_id}
@@ -201,11 +213,11 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                         >
                             <div>
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                                    <span className="w-9 h-9 rounded-xl bg-blue-100/70 text-blue-700 flex items-center justify-center">
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icons.service} /></svg>
                                     </span>
-                                    <span className="text-xs font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full">
-                                        {formatCurrency(srv.base_price)}
+                                    <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                                        Quotation on Review
                                     </span>
                                 </div>
                                 <h3 className="text-sm font-bold text-gray-900 mt-3">{srv.service_name}</h3>
@@ -217,9 +229,9 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                     if (onSelectServiceToBook) onSelectServiceToBook(srv.service_id);
                                     onNavigate("book");
                                 }}
-                                className="mt-4 w-full py-2.5 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-600 text-blue-700 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1.5"
+                                className="mt-4 w-full py-2.5 rounded-xl border border-blue-200 bg-blue-50/60 hover:bg-blue-600 text-blue-700 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1.5"
                             >
-                                Book This Service
+                                Request This Service
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
                             </button>
                         </div>

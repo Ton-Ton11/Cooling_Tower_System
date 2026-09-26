@@ -86,12 +86,18 @@ class CustomerDashboardController extends Controller
                 ];
             });
 
-        $services = Service::active()->orderBy('display_order')->orderBy('service_id')->get()->map(function ($s) {
+        $services = Service::whereIn('service_name', [
+            'Installation',
+            'Repair / Check-up',
+            'Cleaning / Preventive Maintenance'
+        ])
+        ->orderBy('display_order')
+        ->get()
+        ->map(function ($s) {
             return [
                 'service_id' => $s->service_id,
                 'service_name' => $s->service_name,
                 'description' => $s->description,
-                'base_price' => (float) $s->base_price,
                 'category' => $s->category,
             ];
         });

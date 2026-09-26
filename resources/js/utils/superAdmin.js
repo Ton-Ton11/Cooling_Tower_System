@@ -303,6 +303,7 @@ export const CUSTOMER_ENDPOINTS = {
     storeBooking: "/customer/bookings",
     rescheduleBooking: (bookingId) => `/customer/bookings/${bookingId}/reschedule`,
     cancelBooking: (bookingId) => `/customer/bookings/${bookingId}/cancel`,
+    respondQuotation: (bookingId) => `/customer/bookings/${bookingId}/quotation-response`,
     feedback: "/customer/feedback",
     complaints: "/customer/complaints",
     storeComplaint: "/customer/complaints",

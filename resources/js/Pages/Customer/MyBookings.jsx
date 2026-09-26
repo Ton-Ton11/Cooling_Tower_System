@@ -19,6 +19,11 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
     const [feedbackBooking, setFeedbackBooking] = useState(null);
     const [viewDetailsBooking, setViewDetailsBooking] = useState(null);
 
+    // Quotation action state
+    const [quotationActionLoading, setQuotationActionLoading] = useState(false);
+    const [quotationNotesModal, setQuotationNotesModal] = useState(null); // { action: 'accept'|'decline'|'clarify', bookingId }
+    const [quotationNotes, setQuotationNotes] = useState("");
+
     const fetchBookings = useCallback(async (showLoader = true) => {
         if (showLoader) setLoading(true);
         try {
@@ -37,7 +42,6 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
 
     const filteredBookings = useMemo(() => {
         return bookings.filter((b) => {
-            // Tab filtering
             let matchTab = true;
             if (tab === "Pending") matchTab = b.booking_status === "Pending" || b.booking_status === "Rescheduled";
             else if (tab === "Active") matchTab = ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status);
@@ -46,14 +50,14 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
 
             if (!matchTab) return false;
 
-            // Search filtering
             if (!searchTerm.trim()) return true;
             const term = searchTerm.toLowerCase();
             return (
                 String(b.booking_id).includes(term) ||
                 (b.service_name && b.service_name.toLowerCase().includes(term)) ||
                 (b.reference_number && b.reference_number.toLowerCase().includes(term)) ||
-                (b.assigned_tech_name && b.assigned_tech_name.toLowerCase().includes(term))
+                (b.assigned_tech_name && b.assigned_tech_name.toLowerCase().includes(term)) ||
+                (b.quotation_status && b.quotation_status.toLowerCase().includes(term))
             );
         });
     }, [bookings, tab, searchTerm]);
@@ -68,6 +72,37 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
         };
     }, [bookings]);
 
+    // Handle Quotation Response (Accept / Decline / Clarify)
+    const handleQuotationResponse = async (action, bookingId, notes = "") => {
+        setQuotationActionLoading(true);
+        try {
+            const url = CUSTOMER_ENDPOINTS.respondQuotation(bookingId);
+            const { data } = await window.axios.post(url, {
+                action,
+                notes: notes.trim() || null,
+            });
+
+            addToast(data.message || `Quotation response recorded (${action})!`, "success");
+            setQuotationNotesModal(null);
+            setQuotationNotes("");
+
+            // Update in-memory state
+            fetchBookings(false);
+
+            if (viewDetailsBooking && viewDetailsBooking.booking_id === bookingId) {
+                setViewDetailsBooking(prev => ({
+                    ...prev,
+                    quotation_status: action === "accept" ? "Accepted" : action === "decline" ? "Declined" : "Clarification Requested",
+                    service_order_status: action === "accept" ? "Service Order Generated" : prev.service_order_status,
+                }));
+            }
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Failed to submit quotation response."), "error");
+        } finally {
+            setQuotationActionLoading(false);
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -75,7 +110,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                 <div>
                     <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">My Service Bookings</h1>
                     <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                        Track upcoming appointments, reschedule pending requests, or rate completed services.
+                        Track your service requests, review official quotations, confirm appointment schedules, and view service orders.
                     </p>
                 </div>
                 <button
@@ -85,7 +120,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
                     </svg>
-                    Book New Service
+                    New Service Request
                 </button>
             </div>
 
@@ -152,7 +187,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                     </div>
                     <h3 className="text-base font-bold text-gray-800">No {tab !== "All" ? tab.toLowerCase() : ""} bookings found</h3>
                     <p className="text-xs text-gray-500 max-w-sm mx-auto mt-1">
-                        {tab === "Pending" ? "You don't have any bookings waiting for admin approval." : "You don't have any bookings under this filter category."}
+                        {tab === "Pending" ? "You don't have any service requests currently in review." : "You don't have any bookings matching this category."}
                     </p>
                     <button
                         onClick={() => onNavigate && onNavigate("book")}
@@ -169,6 +204,13 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                         const isCancelled = b.booking_status === "Cancelled";
                         const canReschedule = isPending || ["Approved"].includes(b.booking_status);
                         const canCancel = isPending;
+                        const unitsCount = b.total_units_count
+                            ? b.total_units_count
+                            : Array.isArray(b.units_data) && b.units_data.length > 0
+                            ? b.units_data.reduce((sum, u) => sum + (parseInt(u.quantity, 10) || 1), 0)
+                            : 1;
+                        const qStatus = b.quotation_status || "Pending Assessment";
+                        const hasQuotationToReview = qStatus === "Quotation Issued";
 
                         return (
                             <div
@@ -184,17 +226,39 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             <div className="flex items-center gap-2.5 flex-wrap">
                                                 <h3 className="text-base font-extrabold text-gray-900">{b.service_name}</h3>
                                                 <StatusBadge status={b.booking_status} />
+                                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                                    qStatus === "Accepted"
+                                                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                                        : qStatus === "Quotation Issued"
+                                                        ? "bg-blue-50 text-blue-800 border-blue-200 animate-pulse"
+                                                        : qStatus === "Declined"
+                                                        ? "bg-rose-50 text-rose-800 border-rose-200"
+                                                        : "bg-amber-50 text-amber-800 border-amber-200"
+                                                }`}>
+                                                    Quotation: {qStatus}
+                                                </span>
                                             </div>
-                                            <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                                                <span>Booked on {b.created_at_formatted}</span>
+                                            <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
+                                                <span>Requested on {b.created_at_formatted}</span>
                                                 <span>•</span>
-                                                <span className="font-semibold text-gray-700">Base Price: {formatCurrency(b.service_base_price)}</span>
+                                                <span className="font-semibold text-gray-700">{unitsCount} Aircon Unit(s)</span>
+                                                <span>•</span>
+                                                <span className="text-emerald-700 font-semibold">Reservation Fee: ₱{Number(b.booking_fee_paid || 300).toFixed(2)} (Paid)</span>
                                             </p>
                                         </div>
                                     </div>
 
                                     {/* Action Buttons */}
                                     <div className="flex items-center gap-2 flex-wrap self-start lg:self-auto">
+                                        {hasQuotationToReview && (
+                                            <button
+                                                onClick={() => setViewDetailsBooking(b)}
+                                                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-1.5"
+                                            >
+                                                <span>📋 Review Quotation</span>
+                                            </button>
+                                        )}
+
                                         {canReschedule && (
                                             <button
                                                 onClick={() => setRescheduleBooking(b)}
@@ -233,7 +297,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             onClick={() => setViewDetailsBooking(b)}
                                             className="px-3.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-bold transition"
                                         >
-                                            View Details
+                                            View Details & Quotation
                                         </button>
                                     </div>
                                 </div>
@@ -241,7 +305,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                 {/* Body Information Grid */}
                                 <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Service Schedule</span>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Preferred Schedule</span>
                                         <span className="text-xs font-bold text-gray-800 mt-1 block flex items-center gap-1.5">
                                             <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                             {formatDateTime(b.scheduled_date)}
@@ -259,27 +323,22 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             ) : b.assigned_tech_name ? (
                                                 <span className="text-blue-700 font-bold">👤 {b.assigned_tech_name}</span>
                                             ) : (
-                                                <span className="text-amber-600 font-semibold italic">Waiting for Dispatch</span>
-                                            )}
-                                            {b.assigned_team_name && b.assigned_tech_name && (
-                                                <span className="text-[11px] text-gray-500 block font-normal mt-0.5">
-                                                    Lead: {b.assigned_tech_name}
-                                                </span>
+                                                <span className="text-amber-600 font-semibold italic">Waiting for Assessment</span>
                                             )}
                                         </span>
                                     </div>
 
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">GCash Booking Fee</span>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Reservation Fee</span>
                                         <span className="text-xs font-mono font-bold text-emerald-700 mt-1 block">
-                                            ₱{Number(b.booking_fee_paid || 0).toFixed(2)} (Ref: {b.reference_number || "N/A"})
+                                            ₱{Number(b.booking_fee_paid || 300).toFixed(2)} (Ref: {b.reference_number || "N/A"})
                                         </span>
                                     </div>
 
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Service Payment Method</span>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Service Order Status</span>
                                         <span className="text-xs font-bold text-gray-800 mt-1 block">
-                                            {b.service_payment_method || "Cash"}
+                                            {b.service_order_status || "Pending Quotation"}
                                         </span>
                                     </div>
                                 </div>
@@ -320,14 +379,16 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                 addToast={addToast}
             />
 
-            {/* View Details Modal */}
+            {/* ══════════════════════════════════════════════════════════════════
+                VIEW DETAILS & OFFICIAL QUOTATION MODAL
+            ══════════════════════════════════════════════════════════════════ */}
             {viewDetailsBooking && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full border border-gray-100 p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full border border-gray-100 p-6 sm:p-7 space-y-6 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
                         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
                             <div>
-                                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">Booking Details</span>
-                                <h3 className="text-lg font-extrabold text-gray-900 mt-0.5">
+                                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">Service Request Details</span>
+                                <h3 className="text-xl font-extrabold text-gray-900 mt-0.5">
                                     #{viewDetailsBooking.booking_id} — {viewDetailsBooking.service_name}
                                 </h3>
                             </div>
@@ -339,61 +400,235 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                             </button>
                         </div>
 
-                        <div className="space-y-4 text-xs">
-                            <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
-                                <div>
-                                    <p className="font-semibold text-gray-400 uppercase text-[10px]">Status</p>
-                                    <div className="mt-1"><StatusBadge status={viewDetailsBooking.booking_status} /></div>
+                        {/* Top Info Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-100 text-xs">
+                            <div>
+                                <p className="font-semibold text-gray-400 uppercase text-[10px]">Booking Status</p>
+                                <div className="mt-1"><StatusBadge status={viewDetailsBooking.booking_status} /></div>
+                            </div>
+                            <div>
+                                <p className="font-semibold text-gray-400 uppercase text-[10px]">Quotation Status</p>
+                                <p className="font-bold text-blue-700 mt-1">{viewDetailsBooking.quotation_status || "Pending Assessment"}</p>
+                            </div>
+                            <div>
+                                <p className="font-semibold text-gray-400 uppercase text-[10px]">Preferred Date</p>
+                                <p className="font-bold text-gray-800 mt-1">{formatDateTime(viewDetailsBooking.scheduled_date)}</p>
+                            </div>
+                            <div>
+                                <p className="font-semibold text-gray-400 uppercase text-[10px]">Service Order</p>
+                                <p className="font-bold text-gray-800 mt-1">{viewDetailsBooking.service_order_status || "Pending Quotation"}</p>
+                            </div>
+                        </div>
+
+                        {/* SECTION: OFFICIAL QUOTATION WORKFLOW */}
+                        <div className="border border-blue-200 bg-blue-50/30 rounded-2xl p-5 space-y-4">
+                            <div className="flex items-center justify-between border-b border-blue-200/60 pb-3">
+                                <div className="flex items-center gap-2">
+                                    <span className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                                        ₱
+                                    </span>
+                                    <div>
+                                        <h4 className="text-sm font-extrabold text-blue-950">Official Service Quotation</h4>
+                                        <p className="text-[11px] text-blue-800/80">Proposed final charges for requested service scope</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="font-semibold text-gray-400 uppercase text-[10px]">Scheduled Date & Time</p>
-                                    <p className="font-bold text-gray-800 mt-1">{formatDateTime(viewDetailsBooking.scheduled_date)}</p>
-                                </div>
-                                <div>
-                                    <p className="font-semibold text-gray-400 uppercase text-[10px]">Service Base Price</p>
-                                    <p className="font-extrabold text-blue-700 mt-1">{formatCurrency(viewDetailsBooking.service_base_price)}</p>
-                                </div>
-                                <div>
-                                    <p className="font-semibold text-gray-400 uppercase text-[10px]">Assigned Team & Technician</p>
-                                    <p className="font-bold text-gray-800 mt-1">
-                                        {viewDetailsBooking.assigned_team_name ? (
-                                            <span className="text-blue-700">👥 {viewDetailsBooking.assigned_team_name} {viewDetailsBooking.assigned_tech_name ? `(Lead: ${viewDetailsBooking.assigned_tech_name})` : ""}</span>
-                                        ) : viewDetailsBooking.assigned_tech_name ? (
-                                            `👤 ${viewDetailsBooking.assigned_tech_name}`
-                                        ) : (
-                                            "Awaiting Team Assignment"
-                                        )}
-                                    </p>
-                                </div>
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+                                    viewDetailsBooking.quotation_status === "Accepted"
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : viewDetailsBooking.quotation_status === "Declined"
+                                        ? "bg-rose-100 text-rose-800"
+                                        : viewDetailsBooking.quotation_status === "Quotation Issued"
+                                        ? "bg-blue-600 text-white shadow-sm"
+                                        : "bg-amber-100 text-amber-800"
+                                }`}>
+                                    {viewDetailsBooking.quotation_status || "Pending Assessment"}
+                                </span>
                             </div>
 
-                            {viewDetailsBooking.notes && (
-                                <div>
-                                    <p className="font-bold text-gray-700 uppercase tracking-wider text-[10px]">Notes & History</p>
-                                    <p className="text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100 mt-1 whitespace-pre-line">{viewDetailsBooking.notes}</p>
+                            {/* Quotation Content */}
+                            {viewDetailsBooking.quotation_data ? (
+                                <div className="space-y-4 text-xs">
+                                    {/* Breakdown Table */}
+                                    <div className="bg-white rounded-xl p-4 border border-blue-100 space-y-2.5">
+                                        <div className="flex items-center justify-between text-gray-600">
+                                            <span>Labor & Technical Work</span>
+                                            <span className="font-semibold text-gray-900">{formatCurrency(viewDetailsBooking.quotation_data.labor || 0)}</span>
+                                        </div>
+                                        {viewDetailsBooking.quotation_data.spare_parts > 0 && (
+                                            <div className="flex items-center justify-between text-gray-600">
+                                                <span>Spare Parts</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(viewDetailsBooking.quotation_data.spare_parts)}</span>
+                                            </div>
+                                        )}
+                                        {viewDetailsBooking.quotation_data.materials > 0 && (
+                                            <div className="flex items-center justify-between text-gray-600">
+                                                <span>Materials & Piping</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(viewDetailsBooking.quotation_data.materials)}</span>
+                                            </div>
+                                        )}
+                                        {viewDetailsBooking.quotation_data.refrigerant > 0 && (
+                                            <div className="flex items-center justify-between text-gray-600">
+                                                <span>Refrigerant / Freon</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(viewDetailsBooking.quotation_data.refrigerant)}</span>
+                                            </div>
+                                        )}
+                                        {viewDetailsBooking.quotation_data.additional_charges > 0 && (
+                                            <div className="flex items-center justify-between text-gray-600">
+                                                <span>Additional Charges</span>
+                                                <span className="font-semibold text-gray-900">{formatCurrency(viewDetailsBooking.quotation_data.additional_charges)}</span>
+                                            </div>
+                                        )}
+
+                                        <div className="border-t border-gray-100 pt-2 flex items-center justify-between text-gray-700 font-semibold">
+                                            <span>Subtotal</span>
+                                            <span>{formatCurrency(viewDetailsBooking.quotation_data.subtotal || 0)}</span>
+                                        </div>
+
+                                        {/* Reservation Fee Deduction */}
+                                        <div className="flex items-center justify-between text-emerald-700 font-medium">
+                                            <span>Less: Appointment Reservation Fee Paid</span>
+                                            <span>- {formatCurrency(300)}</span>
+                                        </div>
+
+                                        <div className="border-t-2 border-blue-600 pt-2 flex items-center justify-between text-sm font-extrabold text-blue-950">
+                                            <span>Net Payable Balance</span>
+                                            <span className="text-base text-blue-700">
+                                                {formatCurrency((viewDetailsBooking.quotation_data.total || 0) - 300)}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {viewDetailsBooking.quotation_data.terms && (
+                                        <div className="text-[11px] text-gray-500 italic bg-white/60 p-2.5 rounded-xl border border-blue-100">
+                                            Terms: {viewDetailsBooking.quotation_data.terms}
+                                        </div>
+                                    )}
+
+                                    {/* Action Buttons for Customer if Quotation is Issued */}
+                                    {viewDetailsBooking.quotation_status === "Quotation Issued" && (
+                                        <div className="pt-2 flex items-center gap-3">
+                                            <button
+                                                type="button"
+                                                disabled={quotationActionLoading}
+                                                onClick={() => handleQuotationResponse("accept", viewDetailsBooking.booking_id)}
+                                                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md transition flex items-center gap-1.5"
+                                            >
+                                                <span>✓ Accept & Agree</span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={quotationActionLoading}
+                                                onClick={() => setQuotationNotesModal({ action: "clarify", bookingId: viewDetailsBooking.booking_id })}
+                                                className="px-4 py-2.5 rounded-xl border border-blue-200 bg-white hover:bg-blue-50 text-blue-700 font-bold transition"
+                                            >
+                                                Request Clarification
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={quotationActionLoading}
+                                                onClick={() => setQuotationNotesModal({ action: "decline", bookingId: viewDetailsBooking.booking_id })}
+                                                className="px-4 py-2.5 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 font-bold transition"
+                                            >
+                                                Decline
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="bg-white rounded-xl p-4 border border-blue-100 text-xs text-blue-900 leading-relaxed space-y-2">
+                                    <div className="flex items-center gap-2 text-amber-700 font-bold">
+                                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                        <span>Quotation Pending Technical Assessment</span>
+                                    </div>
+                                    <p className="text-gray-600">
+                                        Our certified HVAC technicians are reviewing your unit details and service request. Once technical evaluation is complete, an itemized quotation will be presented here for your agreement before work commences.
+                                    </p>
                                 </div>
                             )}
+                        </div>
 
-                            {/* Payments History */}
-                            <div>
-                                <p className="font-bold text-gray-700 uppercase tracking-wider text-[10px] mb-2">Payment Records</p>
-                                {viewDetailsBooking.payments?.length ? (
-                                    <div className="space-y-2">
-                                        {viewDetailsBooking.payments.map((p, idx) => (
-                                            <div key={idx} className="bg-gray-50 p-3 rounded-xl border border-gray-100 flex items-center justify-between">
-                                                <div>
-                                                    <span className="font-bold text-gray-800">{p.payment_type}</span>
-                                                    <p className="text-gray-500 font-mono text-[11px] mt-0.5">Ref: {p.reference_number || "None"} • {p.payment_method}</p>
+                        {/* SECTION: CONFIGURED AIRCON UNITS */}
+                        <div className="space-y-3">
+                            {(() => {
+                                const totalModalUnits = viewDetailsBooking.total_units_count
+                                    ? viewDetailsBooking.total_units_count
+                                    : Array.isArray(viewDetailsBooking.units_data) && viewDetailsBooking.units_data.length > 0
+                                    ? viewDetailsBooking.units_data.reduce((sum, u) => sum + (parseInt(u.quantity, 10) || 1), 0)
+                                    : 1;
+                                return (
+                                    <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center justify-between">
+                                        <span>Aircon Units in this Request ({totalModalUnits} Unit{totalModalUnits === 1 ? "" : "s"} Total)</span>
+                                        {Array.isArray(viewDetailsBooking.units_data) && viewDetailsBooking.units_data.length > 1 && (
+                                            <span className="text-[11px] font-normal text-gray-500 lowercase">({viewDetailsBooking.units_data.length} unit models)</span>
+                                        )}
+                                    </h4>
+                                );
+                            })()}
+                            <div className="space-y-2">
+                                {Array.isArray(viewDetailsBooking.units_data) && viewDetailsBooking.units_data.length > 0 ? (
+                                    viewDetailsBooking.units_data.map((u, idx) => {
+                                        const qty = parseInt(u.quantity, 10) || 1;
+                                        return (
+                                            <div key={idx} className="bg-gray-50 p-3.5 rounded-xl border border-gray-100 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="font-extrabold text-blue-900">Unit #{idx + 1}: {u.unit_type}</span>
+                                                        {qty > 1 && (
+                                                            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-[11px]">
+                                                                Qty: {qty} units
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-gray-500">
+                                                        Brand: <strong>{u.brand}</strong> • Capacity: <strong>{u.capacity}</strong>
+                                                        {u.model_number ? ` • Model: ${u.model_number}` : ""}
+                                                        {qty > 1 ? ` • Quantity: ${qty} identical units` : ""}
+                                                    </p>
+                                                    {u.issue && (
+                                                        <p className="text-gray-700 italic text-[11px] mt-0.5">Symptom / Request: {u.issue}</p>
+                                                    )}
                                                 </div>
-                                                <span className="font-extrabold text-emerald-700">{formatCurrency(p.amount_paid)}</span>
                                             </div>
-                                        ))}
-                                    </div>
+                                        );
+                                    })
                                 ) : (
-                                    <p className="text-gray-400 italic">No payments logged yet.</p>
+                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs text-gray-600">
+                                        Single aircon unit configured.
+                                    </div>
                                 )}
                             </div>
                         </div>
+
+                        {/* SECTION: PAYMENTS & RESERVATION FEE */}
+                        <div className="space-y-2">
+                            <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Appointment Reservation Fee & Payment History</h4>
+                            {viewDetailsBooking.payments?.length ? (
+                                <div className="space-y-2 text-xs">
+                                    {viewDetailsBooking.payments.map((p, idx) => (
+                                        <div key={idx} className="bg-gray-50 p-3.5 rounded-xl border border-gray-100 flex items-center justify-between">
+                                            <div>
+                                                <span className="font-bold text-gray-800">{p.payment_type}</span>
+                                                <p className="text-gray-500 font-mono text-[11px] mt-0.5">
+                                                    Ref: {p.reference_number || "None"} • {p.payment_method}
+                                                </p>
+                                            </div>
+                                            <span className="font-extrabold text-emerald-700">{formatCurrency(p.amount_paid)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-400 italic">No payments logged yet.</p>
+                            )}
+                        </div>
+
+                        {viewDetailsBooking.notes && (
+                            <div>
+                                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Notes & History</h4>
+                                <p className="text-xs text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100 whitespace-pre-line">
+                                    {viewDetailsBooking.notes}
+                                </p>
+                            </div>
+                        )}
 
                         <div className="pt-3 border-t border-gray-100 flex justify-end">
                             <button
@@ -401,6 +636,51 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                 className="px-5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold transition"
                             >
                                 Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Quotation Notes Modal (for Decline or Clarify) */}
+            {quotationNotesModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                        <h3 className="text-base font-extrabold text-gray-900">
+                            {quotationNotesModal.action === "decline" ? "Decline Official Quotation" : "Request Quotation Clarification"}
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                            {quotationNotesModal.action === "decline"
+                                ? "Please provide a reason so our customer representative can assist you."
+                                : "Please state what part of the quotation or service scope you would like clarified."}
+                        </p>
+                        <textarea
+                            rows={3}
+                            value={quotationNotes}
+                            onChange={(e) => setQuotationNotes(e.target.value)}
+                            placeholder="Type your message here..."
+                            className="w-full px-3.5 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs"
+                        />
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setQuotationNotesModal(null);
+                                    setQuotationNotes("");
+                                }}
+                                className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-600"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={quotationActionLoading}
+                                onClick={() => handleQuotationResponse(quotationNotesModal.action, quotationNotesModal.bookingId, quotationNotes)}
+                                className={`px-5 py-2 rounded-xl text-xs font-bold text-white ${
+                                    quotationNotesModal.action === "decline" ? "bg-rose-600 hover:bg-rose-700" : "bg-blue-600 hover:bg-blue-700"
+                                }`}
+                            >
+                                Submit Response
                             </button>
                         </div>
                     </div>

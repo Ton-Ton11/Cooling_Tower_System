@@ -588,6 +588,7 @@ Route::prefix('customer')
             Route::post('/bookings', 'storeBooking')->name('bookings.store');
             Route::match(['post', 'patch'], '/bookings/{bookingId}/reschedule', 'reschedule')->name('bookings.reschedule');
             Route::patch('/bookings/{bookingId}/cancel', 'cancel')->name('bookings.cancel');
+            Route::post('/bookings/{bookingId}/quotation-response', 'respondQuotation')->name('bookings.quotation-response');
         });
 
         Route::controller(CustomerFeedbackController::class)->group(function () {

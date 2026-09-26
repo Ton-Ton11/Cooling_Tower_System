@@ -101,8 +101,10 @@ export default function ServiceHistory({ addToast }) {
                                     <p className="font-bold text-gray-800 mt-0.5">{b.assigned_tech_name || "Cooling Tower Technician"}</p>
                                 </div>
                                 <div className="bg-gray-50 p-3 rounded-xl">
-                                    <span className="text-[10px] font-bold uppercase text-gray-400">Service Cost</span>
-                                    <p className="font-bold text-blue-700 mt-0.5">{formatCurrency(b.service_base_price)}</p>
+                                    <span className="text-[10px] font-bold uppercase text-gray-400">Quotation / Settlement</span>
+                                    <p className="font-bold text-blue-700 mt-0.5">
+                                        {b.quotation_data?.total ? formatCurrency(b.quotation_data.total) : "Quotation Settled"}
+                                    </p>
                                 </div>
                                 <div className="bg-gray-50 p-3 rounded-xl">
                                     <span className="text-[10px] font-bold uppercase text-gray-400">Payment Status</span>
