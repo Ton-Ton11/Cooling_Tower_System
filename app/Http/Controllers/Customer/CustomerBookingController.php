@@ -191,17 +191,47 @@ class CustomerBookingController extends Controller
                 $totalUnitsCount = 1;
             }
 
+            $leadUser = $b->leadTechnician ?: $b->technician;
+            $leadName = $leadUser ? trim("{$leadUser->given_name} {$leadUser->middle_name} {$leadUser->last_name}") : null;
+            $assistantUser = $b->assistantTechnician;
+            $assistantName = $assistantUser ? trim("{$assistantUser->given_name} {$assistantUser->middle_name} {$assistantUser->last_name}") : null;
+
+            $assignedTeamName = null;
+            if ($leadName && $assistantName) {
+                $assignedTeamName = "{$leadName} & {$assistantName}";
+            } elseif ($leadName) {
+                $assignedTeamName = "{$leadName} (Lead)";
+            } elseif ($b->team?->team_name) {
+                $assignedTeamName = $b->team->team_name;
+            }
+
             return [
                 'booking_id' => $b->booking_id,
                 'client_id' => $b->client_id,
                 'service_id' => $b->service_id,
                 'service_name' => $b->service?->service_name ?? 'Aircon Service',
                 'service_description' => $b->service?->description,
-                'assigned_tech_id' => $b->assigned_tech_id,
-                'assigned_tech_name' => $b->technician ? trim("{$b->technician->given_name} {$b->technician->middle_name} {$b->technician->last_name}") : null,
-                'assigned_tech_contact' => $b->technician?->contact_number,
+                'assigned_tech_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
+                'assigned_tech_name' => $leadName,
+                'lead_technician_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
+                'lead_technician_name' => $leadName,
+                'assistant_technician_id' => $b->assistant_technician_id,
+                'assistant_technician_name' => $assistantName,
+                'assigned_team' => [
+                    'lead' => $leadUser ? [
+                        'user_id' => (int) $leadUser->user_id,
+                        'name' => $leadName,
+                        'role' => 'Lead Technician',
+                    ] : null,
+                    'assistant' => $assistantUser ? [
+                        'user_id' => (int) $assistantUser->user_id,
+                        'name' => $assistantName,
+                        'role' => 'Assistant Technician',
+                    ] : null,
+                ],
+                'assigned_tech_contact' => $leadUser?->contact_number,
                 'assigned_team_id' => $b->assigned_team_id,
-                'assigned_team_name' => $b->team?->team_name,
+                'assigned_team_name' => $assignedTeamName,
                 'scheduled_date' => $b->scheduled_date?->toISOString(),
                 'scheduled_date_formatted' => $b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD',
                 'alternative_schedule' => $b->alternative_schedule,

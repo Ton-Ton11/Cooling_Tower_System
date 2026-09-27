@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePage } from "@inertiajs/react";
 import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import {
@@ -24,6 +25,7 @@ const ic = {
 };
 
 export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) {
+    const currentUserId = usePage()?.props?.auth?.user?.user_id;
     const [tab, setTab] = useState("All");
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -287,7 +289,7 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
 
                                         {/* Action buttons */}
                                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                            {isAssigned && Boolean(job.assigned_team_id) && (
+                                            {isAssigned && (Boolean(job.lead_technician_id) || Boolean(job.assigned_tech_id) || Boolean(job.assigned_team_id)) && (
                                                 <button
                                                     className="btn-secondary"
                                                     style={{
@@ -308,7 +310,7 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                                 booking_id: job.booking_id,
                                                                 client_name: job.client_name,
                                                                 service: job.service,
-                                                                team_name: job.assigned_team_name,
+                                                                team_name: job.assigned_team_name || (job.lead_technician_name ? `${job.lead_technician_name} & ${job.assistant_technician_name || ''}`.trim() : ""),
                                                             })
                                                         );
                                                         if (onNavigate) {
@@ -394,6 +396,106 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                             </p>
                                         </div>
                                     </div>
+
+                                    {/* Assigned Technician Team */}
+                                    {(job.lead_technician_name || job.assistant_technician_name) && (
+                                        <div
+                                            style={{
+                                                background: "#F8FAFC",
+                                                border: "1px solid #E2E8F0",
+                                                borderRadius: 12,
+                                                padding: "12px 14px",
+                                                display: "flex",
+                                                flexDirection: "column",
+                                                gap: 8,
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                                                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748B" }}>
+                                                    👥 Assigned Technician Team
+                                                </span>
+                                                {job.lead_technician_name && job.assistant_technician_name && (
+                                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 8px", borderRadius: 9999 }}>
+                                                        ✓ 2 Technicians Assigned
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                                                {job.lead_technician_name && (
+                                                    <div
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 10,
+                                                            padding: "10px 12px",
+                                                            background: "#EFF6FF",
+                                                            border: "1px solid #BFDBFE",
+                                                            borderRadius: 10,
+                                                        }}
+                                                    >
+                                                        <span style={{ fontSize: 20 }}>👤</span>
+                                                        <div style={{ minWidth: 0 }}>
+                                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#1E3A8A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                                {job.lead_technician_name} {job.lead_technician_id === currentUserId && <span style={{ fontSize: 11, color: "#2563EB", fontWeight: 700 }}>(You)</span>}
+                                                            </div>
+                                                            <span
+                                                                style={{
+                                                                    display: "inline-block",
+                                                                    fontSize: 10,
+                                                                    fontWeight: 700,
+                                                                    textTransform: "uppercase",
+                                                                    letterSpacing: "0.05em",
+                                                                    color: "#1D4ED8",
+                                                                    background: "#DBEAFE",
+                                                                    padding: "2px 8px",
+                                                                    borderRadius: 6,
+                                                                    marginTop: 3,
+                                                                }}
+                                                            >
+                                                                Lead Technician
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {job.assistant_technician_name && (
+                                                    <div
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 10,
+                                                            padding: "10px 12px",
+                                                            background: "#F0FDF4",
+                                                            border: "1px solid #BBF7D0",
+                                                            borderRadius: 10,
+                                                        }}
+                                                    >
+                                                        <span style={{ fontSize: 20 }}>👤</span>
+                                                        <div style={{ minWidth: 0 }}>
+                                                            <div style={{ fontSize: 13, fontWeight: 700, color: "#166534", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                                {job.assistant_technician_name} {job.assistant_technician_id === currentUserId && <span style={{ fontSize: 11, color: "#16A34A", fontWeight: 700 }}>(You)</span>}
+                                                            </div>
+                                                            <span
+                                                                style={{
+                                                                    display: "inline-block",
+                                                                    fontSize: 10,
+                                                                    fontWeight: 700,
+                                                                    textTransform: "uppercase",
+                                                                    letterSpacing: "0.05em",
+                                                                    color: "#15803D",
+                                                                    background: "#DCFCE7",
+                                                                    padding: "2px 8px",
+                                                                    borderRadius: 6,
+                                                                    marginTop: 3,
+                                                                }}
+                                                            >
+                                                                Assistant Technician
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     {/* Materials used summary if any */}
                                     {job.materials_used && job.materials_used.length > 0 && (

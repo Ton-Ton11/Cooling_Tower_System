@@ -165,6 +165,8 @@ abstract class SuperAdminBaseController extends Controller
             ->join('users as clients', 'clients.user_id', '=', 'bookings.client_id')
             ->join('services', 'services.service_id', '=', 'bookings.service_id')
             ->leftJoin('users as technicians', 'technicians.user_id', '=', 'bookings.assigned_tech_id')
+            ->leftJoin('users as lead_tech', 'lead_tech.user_id', '=', 'bookings.lead_technician_id')
+            ->leftJoin('users as assistant_tech', 'assistant_tech.user_id', '=', 'bookings.assistant_technician_id')
             ->leftJoin('technician_teams', 'technician_teams.team_id', '=', 'bookings.assigned_team_id')
             ->leftJoin('users as assigners', 'assigners.user_id', '=', 'bookings.assigned_by')
             ->leftJoin('payment', 'payment.booking_id', '=', 'bookings.booking_id')
@@ -172,8 +174,11 @@ abstract class SuperAdminBaseController extends Controller
                 'bookings.booking_id',
                 'bookings.client_id',
                 'bookings.assigned_tech_id',
+                'bookings.lead_technician_id',
+                'bookings.assistant_technician_id',
                 'bookings.assigned_team_id',
                 'bookings.assigned_by',
+                'bookings.assigned_at',
                 'bookings.scheduled_date',
                 'bookings.booking_status',
                 'bookings.created_at',
@@ -194,6 +199,14 @@ abstract class SuperAdminBaseController extends Controller
                 'technicians.given_name as tech_given_name',
                 'technicians.middle_name as tech_middle_name',
                 'technicians.last_name as tech_last_name',
+                'lead_tech.user_id as lead_tech_user_id',
+                'lead_tech.given_name as lead_tech_given_name',
+                'lead_tech.middle_name as lead_tech_middle_name',
+                'lead_tech.last_name as lead_tech_last_name',
+                'assistant_tech.user_id as assistant_tech_user_id',
+                'assistant_tech.given_name as assistant_tech_given_name',
+                'assistant_tech.middle_name as assistant_tech_middle_name',
+                'assistant_tech.last_name as assistant_tech_last_name',
                 'technician_teams.team_name as assigned_team_name',
                 'assigners.given_name as assigner_given_name',
                 'assigners.middle_name as assigner_middle_name',
@@ -402,6 +415,26 @@ abstract class SuperAdminBaseController extends Controller
     protected function mapBookings(Collection $rows): Collection
     {
         return $rows->map(function ($row) {
+            $leadId = $row->lead_technician_id ?? $row->assigned_tech_id ?? null;
+            $leadName = $row->lead_tech_user_id
+                ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
+                : ($row->tech_user_id ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null);
+
+            $assistantId = $row->assistant_technician_id ?? null;
+            $assistantName = $row->assistant_tech_user_id
+                ? $this->formatName($row->assistant_tech_given_name, $row->assistant_tech_middle_name, $row->assistant_tech_last_name)
+                : null;
+
+            // Generate dynamic team name representing the two-person assigned team
+            $teamName = null;
+            if ($leadName && $assistantName) {
+                $teamName = "{$leadName} & {$assistantName}";
+            } elseif ($leadName) {
+                $teamName = "{$leadName} (Lead)";
+            } elseif (! empty($row->assigned_team_name)) {
+                $teamName = $row->assigned_team_name;
+            }
+
             return [
                 'booking_id' => (int) $row->booking_id,
                 'client_id' => (int) $row->client_id,
@@ -412,12 +445,29 @@ abstract class SuperAdminBaseController extends Controller
                 'service_id' => (int) $row->service_id,
                 'service' => $row->service_name,
                 'service_base_price' => (float) $row->base_price,
-                'assigned_tech_id' => $row->assigned_tech_id ? (int) $row->assigned_tech_id : null,
-                'assigned_tech_name' => $row->tech_user_id ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null,
+                'assigned_tech_id' => $leadId ? (int) $leadId : null,
+                'assigned_tech_name' => $leadName,
+                'lead_technician_id' => $leadId ? (int) $leadId : null,
+                'lead_technician_name' => $leadName,
+                'assistant_technician_id' => $assistantId ? (int) $assistantId : null,
+                'assistant_technician_name' => $assistantName,
+                'assigned_team' => [
+                    'lead' => $leadId ? [
+                        'user_id' => (int) $leadId,
+                        'name' => $leadName,
+                        'role' => 'Lead Technician',
+                    ] : null,
+                    'assistant' => $assistantId ? [
+                        'user_id' => (int) $assistantId,
+                        'name' => $assistantName,
+                        'role' => 'Assistant Technician',
+                    ] : null,
+                ],
                 'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
-                'assigned_team_name' => $row->assigned_team_name ?? null,
+                'assigned_team_name' => $teamName,
                 'assigned_by' => $row->assigned_by ? (int) $row->assigned_by : null,
                 'assigned_by_name' => isset($row->assigner_given_name) ? $this->formatName($row->assigner_given_name, $row->assigner_middle_name, $row->assigner_last_name) : null,
+                'assigned_at' => $row->assigned_at ?? null,
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
                 'created_at' => $row->created_at,

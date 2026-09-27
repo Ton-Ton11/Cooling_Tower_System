@@ -20,8 +20,11 @@ class Booking extends Model
         'client_id',
         'service_id',
         'assigned_tech_id',
+        'lead_technician_id',
+        'assistant_technician_id',
         'assigned_team_id',
         'assigned_by',
+        'assigned_at',
         'scheduled_date',
         'booking_status',
         'cancellation_reason',
@@ -44,8 +47,11 @@ class Booking extends Model
         'client_id' => 'integer',
         'service_id' => 'integer',
         'assigned_tech_id' => 'integer',
+        'lead_technician_id' => 'integer',
+        'assistant_technician_id' => 'integer',
         'assigned_team_id' => 'integer',
         'assigned_by' => 'integer',
+        'assigned_at' => 'datetime',
         'scheduled_date' => 'datetime',
         'units_data' => 'array',
         'service_details' => 'array',
@@ -64,6 +70,16 @@ class Booking extends Model
     public function technician()
     {
         return $this->belongsTo(User::class, 'assigned_tech_id', 'user_id');
+    }
+
+    public function leadTechnician()
+    {
+        return $this->belongsTo(User::class, 'lead_technician_id', 'user_id');
+    }
+
+    public function assistantTechnician()
+    {
+        return $this->belongsTo(User::class, 'assistant_technician_id', 'user_id');
     }
 
     public function team()

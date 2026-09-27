@@ -314,8 +314,23 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
 
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Assigned Service Team</span>
-                                        <span className="text-xs font-bold text-gray-800 mt-1 block">
-                                            {b.assigned_team_name ? (
+                                        <div className="text-xs mt-1">
+                                            {b.lead_technician_name || b.assistant_technician_name ? (
+                                                <div className="space-y-1">
+                                                    {b.lead_technician_name && (
+                                                        <div className="flex items-center gap-1.5 text-blue-800 font-semibold">
+                                                            <span>👤 {b.lead_technician_name}</span>
+                                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded">Lead</span>
+                                                        </div>
+                                                    )}
+                                                    {b.assistant_technician_name && (
+                                                        <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
+                                                            <span>👤 {b.assistant_technician_name}</span>
+                                                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded">Assistant</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : b.assigned_team_name ? (
                                                 <span className="text-blue-700 font-bold flex items-center gap-1">
                                                     <span>👥</span>
                                                     <span>{b.assigned_team_name}</span>
@@ -325,7 +340,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             ) : (
                                                 <span className="text-amber-600 font-semibold italic">Waiting for Assessment</span>
                                             )}
-                                        </span>
+                                        </div>
                                     </div>
 
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
@@ -419,6 +434,40 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                 <p className="font-bold text-gray-800 mt-1">{viewDetailsBooking.service_order_status || "Pending Quotation"}</p>
                             </div>
                         </div>
+
+                        {/* Assigned Service Team */}
+                        {(viewDetailsBooking.lead_technician_name || viewDetailsBooking.assistant_technician_name) && (
+                            <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4">
+                                <div className="flex items-center justify-between mb-2.5">
+                                    <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
+                                        👥 Assigned Technician Team
+                                    </span>
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                        ✓ 2 Technicians Assigned
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                    {viewDetailsBooking.lead_technician_name && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-blue-100 flex items-center gap-2.5 shadow-xs">
+                                            <span className="text-lg">👤</span>
+                                            <div>
+                                                <div className="font-bold text-gray-900">{viewDetailsBooking.lead_technician_name}</div>
+                                                <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Lead Technician</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {viewDetailsBooking.assistant_technician_name && (
+                                        <div className="bg-white p-2.5 rounded-xl border border-emerald-100 flex items-center gap-2.5 shadow-xs">
+                                            <span className="text-lg">👤</span>
+                                            <div>
+                                                <div className="font-bold text-gray-900">{viewDetailsBooking.assistant_technician_name}</div>
+                                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Assistant Technician</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         {/* SECTION: OFFICIAL QUOTATION WORKFLOW */}
                         <div className="border border-blue-200 bg-blue-50/30 rounded-2xl p-5 space-y-4">

@@ -44,7 +44,9 @@ class TechnicianBookingController extends TechnicianBaseController
 
         if (in_array((int) $request->user()->role_id, [5, 7], true)) {
             $query->where(function ($q) use ($userId, $myTeamIds) {
-                $q->where('bookings.assigned_tech_id', $userId);
+                $q->where('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId)
+                    ->orWhere('bookings.assigned_tech_id', $userId);
                 if (! empty($myTeamIds)) {
                     $q->orWhereIn('bookings.assigned_team_id', $myTeamIds);
                 }
@@ -96,10 +98,16 @@ class TechnicianBookingController extends TechnicianBaseController
                 'service_id' => (int) $row->service_id,
                 'service' => $row->service_name,
                 'service_base_price' => (float) $row->base_price,
+                'lead_technician_id' => $row->lead_technician_id ? (int) $row->lead_technician_id : null,
+                'lead_technician_name' => $row->lead_user_id ? $this->formatName($row->lead_given_name, $row->lead_middle_name, $row->lead_last_name) : null,
+                'assistant_technician_id' => $row->assistant_technician_id ? (int) $row->assistant_technician_id : null,
+                'assistant_technician_name' => $row->assistant_user_id ? $this->formatName($row->assistant_given_name, $row->assistant_middle_name, $row->assistant_last_name) : null,
                 'assigned_tech_id' => $row->assigned_tech_id ? (int) $row->assigned_tech_id : null,
                 'assigned_tech_name' => $row->tech_user_id ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null,
                 'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
-                'assigned_team_name' => $row->assigned_team_name ?? null,
+                'assigned_team_name' => ($row->lead_user_id && $row->assistant_user_id)
+                    ? ($this->formatName($row->lead_given_name, $row->lead_middle_name, $row->lead_last_name) . ' & ' . $this->formatName($row->assistant_given_name, $row->assistant_middle_name, $row->assistant_last_name))
+                    : ($row->assigned_team_name ?? null),
                 'assigned_by' => $row->assigned_by ? (int) $row->assigned_by : null,
                 'assigned_by_name' => isset($row->assigner_given_name) ? $this->formatName($row->assigner_given_name, $row->assigner_middle_name, $row->assigner_last_name) : null,
                 'scheduled_date' => $row->scheduled_date,

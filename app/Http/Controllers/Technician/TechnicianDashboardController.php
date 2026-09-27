@@ -21,22 +21,32 @@ class TechnicianDashboardController extends TechnicianBaseController
 
         $userId = (int) $request->user()->user_id;
 
+        $techCondition = function ($q) use ($userId) {
+            $q->where('assigned_tech_id', $userId)
+                ->orWhere('lead_technician_id', $userId)
+                ->orWhere('assistant_technician_id', $userId);
+        };
+
         $avgRatingRow = DB::table('customer_feedback_and_ratings')
             ->join('bookings', 'bookings.booking_id', '=', 'customer_feedback_and_ratings.booking_id')
-            ->where('bookings.assigned_tech_id', $userId)
+            ->where(function ($q) use ($userId) {
+                $q->where('bookings.assigned_tech_id', $userId)
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+            })
             ->avg('rating');
 
         $stats = [
             'assigned_bookings'    => DB::table('bookings')
-                ->where('assigned_tech_id', $userId)
+                ->where($techCondition)
                 ->whereIn('booking_status', ['Approved', 'Dispatched'])
                 ->count(),
             'in_progress_bookings' => DB::table('bookings')
-                ->where('assigned_tech_id', $userId)
+                ->where($techCondition)
                 ->where('booking_status', 'In-Progress')
                 ->count(),
             'completed_bookings'   => DB::table('bookings')
-                ->where('assigned_tech_id', $userId)
+                ->where($techCondition)
                 ->where('booking_status', 'Completed')
                 ->count(),
             'avg_rating'           => $avgRatingRow ? round((float) $avgRatingRow, 1) : 5.0,
@@ -48,14 +58,22 @@ class TechnicianDashboardController extends TechnicianBaseController
         ];
 
         $activeJobs = $this->bookingsBaseQuery()
-            ->where('bookings.assigned_tech_id', $userId)
+            ->where(function ($q) use ($userId) {
+                $q->where('bookings.assigned_tech_id', $userId)
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+            })
             ->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress'])
             ->orderBy('bookings.scheduled_date')
             ->limit(5)
             ->get();
 
         $recentCompleted = $this->bookingsBaseQuery()
-            ->where('bookings.assigned_tech_id', $userId)
+            ->where(function ($q) use ($userId) {
+                $q->where('bookings.assigned_tech_id', $userId)
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+            })
             ->where('bookings.booking_status', 'Completed')
             ->orderByDesc('bookings.scheduled_date')
             ->limit(5)

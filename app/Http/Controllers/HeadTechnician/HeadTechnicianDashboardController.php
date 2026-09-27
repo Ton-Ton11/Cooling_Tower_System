@@ -46,32 +46,36 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
             ->join('bookings', 'bookings.booking_id', '=', 'customer_feedback_and_ratings.booking_id')
             ->where(function ($q) use ($userId, $myTeamIds) {
                 $q->where('bookings.assigned_tech_id', $userId)
-                    ->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+                if (! empty($myTeamIds)) {
+                    $q->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                }
             })
             ->avg('rating');
+
+        $techCond = function ($q) use ($userId, $myTeamIds) {
+            $q->where('assigned_tech_id', $userId)
+                ->orWhere('lead_technician_id', $userId)
+                ->orWhere('assistant_technician_id', $userId);
+            if (! empty($myTeamIds)) {
+                $q->orWhereIn('assigned_team_id', $myTeamIds);
+            }
+        };
 
         $stats = [
             'total_teams'          => DB::table('technician_teams')->count(),
             'total_technicians'    => DB::table('users')->whereIn('role_id', [5, 7])->count(),
             'assigned_bookings'    => DB::table('bookings')
-                ->where(function ($q) use ($userId, $myTeamIds) {
-                    $q->where('assigned_tech_id', $userId)
-                        ->orWhereIn('assigned_team_id', $myTeamIds);
-                })
+                ->where($techCond)
                 ->whereIn('booking_status', ['Approved', 'Dispatched'])
                 ->count(),
             'in_progress_bookings' => DB::table('bookings')
-                ->where(function ($q) use ($userId, $myTeamIds) {
-                    $q->where('assigned_tech_id', $userId)
-                        ->orWhereIn('assigned_team_id', $myTeamIds);
-                })
+                ->where($techCond)
                 ->where('booking_status', 'In-Progress')
                 ->count(),
             'completed_bookings'   => DB::table('bookings')
-                ->where(function ($q) use ($userId, $myTeamIds) {
-                    $q->where('assigned_tech_id', $userId)
-                        ->orWhereIn('assigned_team_id', $myTeamIds);
-                })
+                ->where($techCond)
                 ->where('booking_status', 'Completed')
                 ->count(),
             'avg_rating'           => $avgRatingRow ? round((float) $avgRatingRow, 1) : 5.0,
@@ -82,7 +86,11 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
         $activeJobs = $this->bookingsBaseQuery()
             ->where(function ($q) use ($userId, $myTeamIds) {
                 $q->where('bookings.assigned_tech_id', $userId)
-                    ->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+                if (! empty($myTeamIds)) {
+                    $q->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                }
             })
             ->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress'])
             ->orderBy('bookings.scheduled_date')
@@ -92,7 +100,11 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
         $recentCompleted = $this->bookingsBaseQuery()
             ->where(function ($q) use ($userId, $myTeamIds) {
                 $q->where('bookings.assigned_tech_id', $userId)
-                    ->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                    ->orWhere('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId);
+                if (! empty($myTeamIds)) {
+                    $q->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                }
             })
             ->where('bookings.booking_status', 'Completed')
             ->orderByDesc('bookings.scheduled_date')

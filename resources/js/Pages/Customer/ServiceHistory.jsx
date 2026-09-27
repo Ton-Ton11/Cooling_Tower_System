@@ -97,8 +97,14 @@ export default function ServiceHistory({ addToast }) {
                             {/* Details */}
                             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                                 <div className="bg-gray-50 p-3 rounded-xl">
-                                    <span className="text-[10px] font-bold uppercase text-gray-400">Assigned Technician</span>
-                                    <p className="font-bold text-gray-800 mt-0.5">{b.assigned_tech_name || "Cooling Tower Technician"}</p>
+                                    <span className="text-[10px] font-bold uppercase text-gray-400">Assigned Technician Team</span>
+                                    <p className="font-bold text-gray-800 mt-0.5">
+                                        {b.lead_technician_name && b.assistant_technician_name
+                                            ? `${b.lead_technician_name} (Lead) & ${b.assistant_technician_name} (Asst.)`
+                                            : b.lead_technician_name
+                                            ? `${b.lead_technician_name} (Lead)`
+                                            : b.assigned_tech_name || "Cooling Tower Technician"}
+                                    </p>
                                 </div>
                                 <div className="bg-gray-50 p-3 rounded-xl">
                                     <span className="text-[10px] font-bold uppercase text-gray-400">Quotation / Settlement</span>

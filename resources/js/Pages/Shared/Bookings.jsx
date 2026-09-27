@@ -33,8 +33,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const [approveModal, setApproveModal] = useState(null);
     const [completeModal, setCompleteModal] = useState(null);
     const [assignment, setAssignment] = useState({
-        assigned_team_id: "",
-        assigned_tech_id: "",
+        lead_technician_id: "",
+        assistant_technician_id: "",
         booking_status: "Approved",
     });
     const [clientPanel, setClientPanel] = useState(null);
@@ -100,8 +100,12 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const openAssignmentModal = (booking) => {
         setApproveModal(booking);
         setAssignment({
-            assigned_team_id: booking.assigned_team_id ? String(booking.assigned_team_id) : "",
-            assigned_tech_id: booking.assigned_tech_id ? String(booking.assigned_tech_id) : "",
+            lead_technician_id: booking.lead_technician_id
+                ? String(booking.lead_technician_id)
+                : (booking.assigned_tech_id ? String(booking.assigned_tech_id) : ""),
+            assistant_technician_id: booking.assistant_technician_id
+                ? String(booking.assistant_technician_id)
+                : "",
             booking_status:
                 booking.booking_status === "Dispatched"
                     ? "Dispatched"
@@ -109,14 +113,11 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
         });
     };
 
-    const handleTeamChange = (teamIdStr) => {
-        const teamId = teamIdStr ? Number(teamIdStr) : null;
-        const selectedTeam = teams.find((t) => t.team_id === teamId);
+    const handleSwapRoles = () => {
         setAssignment((prev) => ({
             ...prev,
-            assigned_team_id: teamIdStr,
-            // If team has leader and no tech is manually picked, default to team leader
-            assigned_tech_id: selectedTeam?.leader_id ? String(selectedTeam.leader_id) : prev.assigned_tech_id,
+            lead_technician_id: prev.assistant_technician_id,
+            assistant_technician_id: prev.lead_technician_id,
         }));
     };
 
@@ -125,8 +126,13 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             return;
         }
 
-        if (!assignment.assigned_team_id && !assignment.assigned_tech_id) {
-            addToast("Please select a technician team or technician to assign.", "error");
+        if (!assignment.lead_technician_id || !assignment.assistant_technician_id) {
+            addToast("Please select both a Lead Technician and an Assistant Technician.", "error");
+            return;
+        }
+
+        if (assignment.lead_technician_id === assignment.assistant_technician_id) {
+            addToast("The Lead and Assistant must be two different technicians.", "error");
             return;
         }
 
@@ -134,8 +140,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
 
         try {
             const payload = {
-                assigned_team_id: assignment.assigned_team_id ? Number(assignment.assigned_team_id) : null,
-                assigned_tech_id: assignment.assigned_tech_id ? Number(assignment.assigned_tech_id) : null,
+                lead_technician_id: Number(assignment.lead_technician_id),
+                assistant_technician_id: Number(assignment.assistant_technician_id),
                 booking_status: assignment.booking_status,
             };
 
@@ -144,7 +150,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                 payload,
             );
 
-            addToast(data?.message || "Booking team assignment confirmed successfully.");
+            addToast(data?.message || "Technicians assigned successfully.");
             setApproveModal(null);
             await fetchBookings(false);
             onDataChanged?.();
@@ -396,21 +402,32 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                     fontSize: 12,
                                                 }}
                                             >
-                                                {booking.assigned_team_name ? (
-                                                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontWeight: 600, color: "#1E2F5F" }}>
-                                                        <span style={{ fontSize: 13 }}>👥</span>
-                                                        <span>{booking.assigned_team_name}</span>
+                                                {booking.lead_technician_name || booking.assigned_tech_name ? (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "#0E1A33" }}>
+                                                            <span>👤</span>
+                                                            <span>{booking.lead_technician_name || booking.assigned_tech_name}</span>
+                                                            <span style={{ fontSize: 9, fontWeight: 800, background: "#EFF6FF", color: "#1D4ED8", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
+                                                                Lead
+                                                            </span>
+                                                        </div>
+                                                        {booking.assistant_technician_name && (
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                                                                <span>👤</span>
+                                                                <span>{booking.assistant_technician_name}</span>
+                                                                <span style={{ fontSize: 9, fontWeight: 800, background: "#F1F5F9", color: "#64748B", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
+                                                                    Assistant
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
-                                                    <span style={{ color: "#9CA3AF" }}>No team assigned</span>
-                                                )}
-                                                {booking.assigned_tech_name && (
-                                                    <div style={{ fontSize: 11, color: "#4B5563", marginTop: 2 }}>
-                                                        👤 {booking.assigned_tech_name}
-                                                    </div>
+                                                    <span style={{ color: "#D97706", fontWeight: 600, fontSize: 11, background: "#FEF3C7", padding: "2px 8px", borderRadius: 6 }}>
+                                                        Awaiting Assignment
+                                                    </span>
                                                 )}
                                                 {booking.assigned_by_name && (
-                                                    <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 1 }}>
+                                                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>
                                                         assigned by {booking.assigned_by_name}
                                                     </div>
                                                 )}
@@ -493,165 +510,262 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                 )}
             </div>
 
-            <Modal
-                open={!!approveModal}
-                title={
-                    approveModal?.booking_status === "Pending"
-                        ? `Assign Team & Approve Booking #${approveModal?.booking_id}`
-                        : `Update Assignment for Booking #${approveModal?.booking_id}`
-                }
-                message={
-                    approveModal
-                        ? `Assign task to a technician team and confirm live dispatch.`
-                        : ""
-                }
-                confirmLabel={assigning ? "Confirming..." : "Confirm Assignment"}
-                confirmDisabled={
-                    assigning ||
-                    (!assignment.assigned_team_id && !assignment.assigned_tech_id)
-                }
-                maxWidth={620}
-                onConfirm={handleAssign}
-                onCancel={() => !assigning && setApproveModal(null)}
-            >
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {/* Customer & Service Summary Box */}
-                    {approveModal && (
-                        <div
-                            style={{
-                                background: "#F8FAFC",
-                                border: "1px solid #E2E8F0",
-                                borderRadius: 10,
-                                padding: 14,
-                                display: "grid",
-                                gridTemplateColumns: "1fr 1fr",
-                                gap: 12,
-                                fontSize: 12,
-                            }}
-                        >
-                            <div>
-                                <span style={{ color: "#64748B", fontWeight: 600, textTransform: "uppercase", fontSize: 10 }}>Customer Details</span>
-                                <div style={{ fontWeight: 700, color: "#1E2F5F", marginTop: 2 }}>{approveModal.client_name}</div>
-                                <div style={{ color: "#475569", marginTop: 2 }}>📞 {approveModal.client_contact_number || "No contact"}</div>
-                                <div style={{ color: "#475569", marginTop: 2 }}>📍 {approveModal.client_address || "No address"}</div>
-                            </div>
-                            <div>
-                                <span style={{ color: "#64748B", fontWeight: 600, textTransform: "uppercase", fontSize: 10 }}>Requested Service</span>
-                                <div style={{ fontWeight: 700, color: "#3F7DFF", marginTop: 2 }}>{approveModal.service}</div>
-                                <div style={{ color: "#475569", marginTop: 2 }}>📅 {formatDateTime(approveModal.scheduled_date)}</div>
-                                <div style={{ color: "#475569", marginTop: 2 }}>💳 {approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)})</div>
-                            </div>
-                        </div>
-                    )}
+            {/* Assign Technicians Modal */}
+            {(() => {
+                const selectedLead = technicians.find((t) => String(t.user_id) === String(assignment.lead_technician_id));
+                const selectedAssistant = technicians.find((t) => String(t.user_id) === String(assignment.assistant_technician_id));
+                const isBothSelected = Boolean(selectedLead && selectedAssistant && selectedLead.user_id !== selectedAssistant.user_id);
 
-                    {/* Assigned By Info */}
-                    <div
-                        style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            background: "#F1F5F9",
-                            padding: "8px 12px",
-                            borderRadius: 8,
-                            fontSize: 12,
-                            color: "#334155",
-                        }}
+                return (
+                    <Modal
+                        open={!!approveModal}
+                        title="ASSIGN TECHNICIANS"
+                        message="Select the two technicians who will handle this service."
+                        confirmLabel={assigning ? "Confirming..." : "Confirm Assignment"}
+                        confirmDisabled={assigning || !isBothSelected}
+                        maxWidth={620}
+                        onConfirm={handleAssign}
+                        onCancel={() => !assigning && setApproveModal(null)}
                     >
-                        <span>Assigned By:</span>
-                        <strong style={{ color: "#1E2F5F" }}>
-                            {currentUser?.full_name || currentUser?.name || "Manager / Super Admin"}
-                        </strong>
-                    </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                            {/* Customer & Service Summary Box */}
+                            {approveModal && (
+                                <div
+                                    style={{
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                        borderRadius: 12,
+                                        padding: 14,
+                                        display: "grid",
+                                        gridTemplateColumns: "1fr 1fr",
+                                        gap: 12,
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    <div>
+                                        <span style={{ color: "#64748B", fontWeight: 700, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em" }}>Customer Details</span>
+                                        <div style={{ fontWeight: 800, color: "#1E2F5F", marginTop: 2, fontSize: 13 }}>{approveModal.client_name}</div>
+                                        <div style={{ color: "#475569", marginTop: 2 }}>📞 {approveModal.client_contact_number || "No contact"}</div>
+                                        <div style={{ color: "#475569", marginTop: 2 }}>📍 {approveModal.client_address || "No address"}</div>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: "#64748B", fontWeight: 700, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em" }}>Requested Service</span>
+                                        <div style={{ fontWeight: 800, color: "#2563EB", marginTop: 2, fontSize: 13 }}>{approveModal.service}</div>
+                                        <div style={{ color: "#475569", marginTop: 2 }}>📅 {formatDateTime(approveModal.scheduled_date)}</div>
+                                        <div style={{ color: "#475569", marginTop: 2 }}>💳 {approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)})</div>
+                                    </div>
+                                </div>
+                            )}
 
-                    <div
-                        style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr",
-                            gap: 16,
-                        }}
-                    >
-                        <div style={{ gridColumn: "1 / -1" }}>
-                            <label className="section-label" style={{ marginBottom: 6, display: "block" }}>
-                                Technician Team (Required)
-                            </label>
-                            <select
-                                className="input-field"
-                                value={assignment.assigned_team_id}
-                                onChange={(event) => handleTeamChange(event.target.value)}
+                            {/* Assigned By Info */}
+                            <div
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    background: "#F1F5F9",
+                                    padding: "8px 12px",
+                                    borderRadius: 8,
+                                    fontSize: 12,
+                                    color: "#334155",
+                                }}
                             >
-                                <option value="">Select Technician Team</option>
-                                {teams.map((team) => (
-                                    <option key={team.team_id} value={team.team_id}>
-                                        {team.team_name} {team.leader_name ? ` · Leader: ${team.leader_name}` : ""}
-                                    </option>
-                                ))}
-                            </select>
-                            <span style={{ fontSize: 11, color: "#64748B", marginTop: 4, display: "block" }}>
-                                Tasks assigned to a team notify all team members and allow them to create a task checklist.
-                            </span>
-                        </div>
+                                <span>Assigned By:</span>
+                                <strong style={{ color: "#1E2F5F" }}>
+                                    {currentUser?.full_name || currentUser?.name || "Manager / Super Admin"}
+                                </strong>
+                            </div>
 
-                        <div>
-                            <label className="section-label" style={{ marginBottom: 6, display: "block" }}>
-                                Assigned Technician / Lead
-                            </label>
-                            <select
-                                className="input-field"
-                                value={assignment.assigned_tech_id}
-                                onChange={(event) =>
-                                    setAssignment((previous) => ({
-                                        ...previous,
-                                        assigned_tech_id: event.target.value,
-                                    }))
-                                }
-                            >
-                                <option value="">Select Individual Lead (Optional)</option>
-                                {technicians.map((technician) => (
-                                    <option
-                                        key={technician.user_id}
-                                        value={technician.user_id}
+                            {/* Technician Selection Controls */}
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                                {/* Lead Technician */}
+                                <div>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                        <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
+                                            LEAD TECHNICIAN
+                                        </label>
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB", background: "#EFF6FF", padding: "1px 6px", borderRadius: 4 }}>
+                                            Primary Lead
+                                        </span>
+                                    </div>
+                                    <select
+                                        className="input-field"
+                                        value={assignment.lead_technician_id}
+                                        onChange={(event) =>
+                                            setAssignment((prev) => ({
+                                                ...prev,
+                                                lead_technician_id: event.target.value,
+                                            }))
+                                        }
+                                        style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
                                     >
-                                        {technician.full_name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                                        <option value="">Select Technician</option>
+                                        {technicians.map((technician) => {
+                                            const isAssistant = String(technician.user_id) === String(assignment.assistant_technician_id);
+                                            return (
+                                                <option
+                                                    key={technician.user_id}
+                                                    value={technician.user_id}
+                                                    disabled={isAssistant}
+                                                >
+                                                    {technician.full_name} {isAssistant ? "(Selected as Assistant)" : ""}
+                                                </option>
+                                            );
+                                        })}
+                                    </select>
+                                </div>
 
-                        <div>
-                            <label className="section-label" style={{ marginBottom: 6, display: "block" }}>
-                                Booking Status
-                            </label>
-                            <select
-                                className="input-field"
-                                value={assignment.booking_status}
-                                onChange={(event) =>
-                                    setAssignment((previous) => ({
-                                        ...previous,
-                                        booking_status: event.target.value,
-                                    }))
-                                }
+                                {/* Assistant Technician */}
+                                <div>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                        <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
+                                            ASSISTANT TECHNICIAN
+                                        </label>
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", background: "#F1F5F9", padding: "1px 6px", borderRadius: 4 }}>
+                                            Partner Tech
+                                        </span>
+                                    </div>
+                                    <select
+                                        className="input-field"
+                                        value={assignment.assistant_technician_id}
+                                        onChange={(event) =>
+                                            setAssignment((prev) => ({
+                                                ...prev,
+                                                assistant_technician_id: event.target.value,
+                                            }))
+                                        }
+                                        style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
+                                    >
+                                        <option value="">Select Technician</option>
+                                        {technicians.map((technician) => {
+                                            const isLead = String(technician.user_id) === String(assignment.lead_technician_id);
+                                            return (
+                                                <option
+                                                    key={technician.user_id}
+                                                    value={technician.user_id}
+                                                    disabled={isLead}
+                                                >
+                                                    {technician.full_name} {isLead ? "(Selected as Lead)" : ""}
+                                                </option>
+                                            );
+                                        })}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* Quick Swap Roles Button */}
+                            {(assignment.lead_technician_id || assignment.assistant_technician_id) && (
+                                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                                    <button
+                                        type="button"
+                                        onClick={handleSwapRoles}
+                                        style={{
+                                            border: "none",
+                                            background: "transparent",
+                                            color: "#2563EB",
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 4,
+                                        }}
+                                    >
+                                        <span>⇄</span> Swap Roles (Lead & Assistant)
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* ASSIGNED TEAM VISUAL CONFIRMATION BOX */}
+                            <div
+                                style={{
+                                    background: isBothSelected ? "#F0FDF4" : "#F8FAFC",
+                                    border: `1.5px solid ${isBothSelected ? "#86EFAC" : "#E2E8F0"}`,
+                                    borderRadius: 14,
+                                    padding: "16px 18px",
+                                    transition: "all 0.2s ease",
+                                }}
                             >
-                                <option value="Approved">Approved</option>
-                                <option value="Dispatched">Dispatched</option>
-                            </select>
-                        </div>
-                    </div>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 800, color: isBothSelected ? "#166534" : "#64748B", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                                        ASSIGNED TEAM
+                                    </span>
+                                    {isBothSelected ? (
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", display: "flex", alignItems: "center", gap: 4 }}>
+                                            ✓ 2 Technicians Assigned
+                                        </span>
+                                    ) : (
+                                        <span style={{ fontSize: 11, fontWeight: 600, color: "#D97706" }}>
+                                            Exactly 2 Technicians Required
+                                        </span>
+                                    )}
+                                </div>
 
-                    <div
-                        style={{
-                            background: "#EFF6FF",
-                            border: "1px solid #BFDBFE",
-                            borderRadius: 8,
-                            padding: "10px 12px",
-                            fontSize: 11,
-                            color: "#1E40AF",
-                            lineHeight: 1.5,
-                        }}
-                    >
-                        ℹ️ <strong>Status Sync:</strong> Confirming this assignment updates the booking status across Super Admin, Manager, Technician, and Customer dashboards simultaneously.
-                    </div>
-                </div>
-            </Modal>
+                                {isBothSelected ? (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
+                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
+                                                👤
+                                            </div>
+                                            <div style={{ minWidth: 0 }}>
+                                                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
+                                                    {selectedLead?.full_name}
+                                                </p>
+                                                <span style={{ fontSize: 10, fontWeight: 800, color: "#2563EB", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                                    LEAD TECHNICIAN
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
+                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#F1F5F9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
+                                                👤
+                                            </div>
+                                            <div style={{ minWidth: 0 }}>
+                                                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
+                                                    {selectedAssistant?.full_name}
+                                                </p>
+                                                <span style={{ fontSize: 10, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                                    ASSISTANT TECHNICIAN
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div style={{ padding: "12px", textAlign: "center", color: "#94A3B8", fontSize: 12, background: "#FFFFFF", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
+                                        {assignment.lead_technician_id && !assignment.assistant_technician_id
+                                            ? "👤 Lead selected. Please select an Assistant Technician to complete the pair."
+                                            : !assignment.lead_technician_id && assignment.assistant_technician_id
+                                            ? "👤 Assistant selected. Please select a Lead Technician to complete the pair."
+                                            : "Select both a Lead Technician and an Assistant Technician above."}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Booking Status Dropdown */}
+                            <div>
+                                <label className="section-label" style={{ marginBottom: 6, display: "block", fontWeight: 700, color: "#1E2F5F" }}>
+                                    BOOKING STATUS
+                                </label>
+                                <select
+                                    className="input-field"
+                                    value={assignment.booking_status}
+                                    onChange={(event) =>
+                                        setAssignment((previous) => ({
+                                            ...previous,
+                                            booking_status: event.target.value,
+                                        }))
+                                    }
+                                    style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
+                                >
+                                    <option value="Approved">Approved</option>
+                                    <option value="Dispatched">Dispatched</option>
+                                </select>
+                            </div>
+                        </div>
+                    </Modal>
+                );
+            })()}
 
             {/* Declare Completed Modal */}
             <Modal
@@ -682,10 +796,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 <strong>Service:</strong> {completeModal.service}
                             </p>
                             <p style={{ margin: "0 0 4px" }}>
-                                <strong>Team:</strong> {completeModal.assigned_team_name || "Unassigned"}
-                            </p>
-                            <p style={{ margin: 0 }}>
-                                <strong>Technician:</strong> {completeModal.assigned_tech_name || "Unassigned"}
+                                <strong>Assigned Team:</strong> {completeModal.lead_technician_name ? `${completeModal.lead_technician_name} (Lead) & ${completeModal.assistant_technician_name || "Assistant"}` : (completeModal.assigned_tech_name || "Unassigned")}
                             </p>
                         </div>
                         <div
