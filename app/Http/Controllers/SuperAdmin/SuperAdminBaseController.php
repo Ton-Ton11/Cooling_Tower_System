@@ -444,6 +444,7 @@ abstract class SuperAdminBaseController extends Controller
                 'client_email' => $row->client_email,
                 'service_id' => (int) $row->service_id,
                 'service' => $row->service_name,
+                'service_name' => $row->service_name,
                 'service_base_price' => (float) $row->base_price,
                 'assigned_tech_id' => $leadId ? (int) $leadId : null,
                 'assigned_tech_name' => $leadName,

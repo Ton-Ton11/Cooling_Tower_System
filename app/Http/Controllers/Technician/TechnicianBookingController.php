@@ -88,26 +88,39 @@ class TechnicianBookingController extends TechnicianBaseController
             ->groupBy('booking_id');
 
         $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking) {
-            $booking = [
-                'booking_id' => (int) $row->booking_id,
-                'client_id' => (int) $row->client_id,
-                'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
-                'client_address' => $row->client_address,
-                'client_contact_number' => $row->client_contact_number,
-                'client_email' => $row->client_email,
-                'service_id' => (int) $row->service_id,
-                'service' => $row->service_name,
-                'service_base_price' => (float) $row->base_price,
-                'lead_technician_id' => $row->lead_technician_id ? (int) $row->lead_technician_id : null,
-                'lead_technician_name' => $row->lead_user_id ? $this->formatName($row->lead_given_name, $row->lead_middle_name, $row->lead_last_name) : null,
-                'assistant_technician_id' => $row->assistant_technician_id ? (int) $row->assistant_technician_id : null,
-                'assistant_technician_name' => $row->assistant_user_id ? $this->formatName($row->assistant_given_name, $row->assistant_middle_name, $row->assistant_last_name) : null,
-                'assigned_tech_id' => $row->assigned_tech_id ? (int) $row->assigned_tech_id : null,
-                'assigned_tech_name' => $row->tech_user_id ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null,
-                'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
-                'assigned_team_name' => ($row->lead_user_id && $row->assistant_user_id)
-                    ? ($this->formatName($row->lead_given_name, $row->lead_middle_name, $row->lead_last_name) . ' & ' . $this->formatName($row->assistant_given_name, $row->assistant_middle_name, $row->assistant_last_name))
-                    : ($row->assigned_team_name ?? null),
+            $leadId = $row->lead_technician_id ?? $row->assigned_tech_id;
+            $leadName = ! empty($row->lead_tech_user_id)
+                ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
+                : (! empty($row->tech_user_id) ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null);
+
+                $assistantId = $row->assistant_technician_id ?? null;
+                $assistantName = ! empty($row->assistant_tech_user_id)
+                    ? $this->formatName($row->assistant_tech_given_name, $row->assistant_tech_middle_name, $row->assistant_tech_last_name)
+                    : null;
+
+                $teamName = ($leadName && $assistantName)
+                    ? "{$leadName} & {$assistantName}"
+                    : ($row->assigned_team_name ?? ($leadName ? "{$leadName} (Lead)" : null));
+
+                $booking = [
+                    'booking_id' => (int) $row->booking_id,
+                    'client_id' => (int) $row->client_id,
+                    'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
+                    'client_address' => $row->client_address,
+                    'client_contact_number' => $row->client_contact_number,
+                    'client_email' => $row->client_email,
+                    'service_id' => (int) $row->service_id,
+                    'service' => $row->service_name,
+                    'service_name' => $row->service_name,
+                    'service_base_price' => (float) $row->base_price,
+                    'lead_technician_id' => $leadId ? (int) $leadId : null,
+                    'lead_technician_name' => $leadName,
+                    'assistant_technician_id' => $assistantId ? (int) $assistantId : null,
+                    'assistant_technician_name' => $assistantName,
+                    'assigned_tech_id' => $leadId ? (int) $leadId : null,
+                    'assigned_tech_name' => $leadName,
+                    'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
+                    'assigned_team_name' => $teamName,
                 'assigned_by' => $row->assigned_by ? (int) $row->assigned_by : null,
                 'assigned_by_name' => isset($row->assigner_given_name) ? $this->formatName($row->assigner_given_name, $row->assigner_middle_name, $row->assigner_last_name) : null,
                 'scheduled_date' => $row->scheduled_date,

@@ -108,9 +108,11 @@ class ToolChecklistController extends Controller
             ->all();
 
         $query = ToolChecklist::with([
-            'booking:booking_id,client_id,service_id,booking_status,scheduled_date',
+            'booking:booking_id,client_id,service_id,booking_status,scheduled_date,lead_technician_id,assistant_technician_id,assigned_tech_id,assigned_team_id',
             'booking.client:user_id,given_name,middle_name,last_name,contact_number,address',
             'booking.service:service_id,service_name',
+            'booking.leadTechnician:user_id,given_name,middle_name,last_name',
+            'booking.assistantTechnician:user_id,given_name,middle_name,last_name',
             'technician:user_id,given_name,last_name',
             'team:team_id,team_name',
             'approvedBy:user_id,given_name,last_name',
@@ -122,7 +124,11 @@ class ToolChecklistController extends Controller
                     ->orWhereIn('team_id', $myTeamIds)
                     ->orWhereHas('booking', function ($bq) use ($userId, $myTeamIds) {
                         $bq->where('assigned_tech_id', $userId)
-                            ->orWhereIn('assigned_team_id', $myTeamIds);
+                            ->orWhere('lead_technician_id', $userId)
+                            ->orWhere('assistant_technician_id', $userId);
+                        if (! empty($myTeamIds)) {
+                            $bq->orWhereIn('assigned_team_id', $myTeamIds);
+                        }
                     });
             })
             ->orderByDesc('created_at');
@@ -158,8 +164,12 @@ class ToolChecklistController extends Controller
         // Verify booking assignment
         $booking = Booking::findOrFail($validated['booking_id']);
 
-        // Strict rule: A team can only create a checklist when there is a task given by manager to technician's team!
-        if (! $booking->assigned_team_id) {
+        $isAssignedBooking = ! empty($booking->lead_technician_id)
+            || ! empty($booking->assistant_technician_id)
+            || ! empty($booking->assigned_tech_id)
+            || ! empty($booking->assigned_team_id);
+
+        if (! $isAssignedBooking) {
             throw ValidationException::withMessages([
                 'booking_id' => ['A checklist can only be created when there is a task assigned by the manager to your technician team.'],
             ]);
@@ -176,18 +186,21 @@ class ToolChecklistController extends Controller
             ->pluck('team_id')
             ->all();
 
-        $isLeader = DB::table('technician_teams')
+        $isLeader = $booking->assigned_team_id ? DB::table('technician_teams')
             ->where('team_id', $booking->assigned_team_id)
             ->where('leader_id', $userId)
-            ->exists();
+            ->exists() : false;
 
-        $isTeamMember = in_array((int) $booking->assigned_team_id, $myTeamIds, true)
+        $isAssignedTechnician = (int) $booking->lead_technician_id === $userId
+            || (int) $booking->assistant_technician_id === $userId
+            || (int) $booking->assigned_tech_id === $userId
+            || in_array((int) $booking->assigned_team_id, $myTeamIds, true)
             || $isLeader
             || (int) $user->role_id === 1;
 
-        if (! $isTeamMember) {
+        if (! $isAssignedTechnician) {
             throw ValidationException::withMessages([
-                'booking_id' => ['This task is not assigned to your technician team.'],
+                'booking_id' => ['This task is not assigned to you or your technician team.'],
             ]);
         }
 
@@ -873,6 +886,10 @@ class ToolChecklistController extends Controller
     {
         $hasUnresolved = $c->items->contains(fn ($i) => strtolower($i->item_type ?? '') === 'tool' && $i->status === 'assigned');
 
+        $leadName = $c->booking?->leadTechnician ? $c->booking->leadTechnician->name : null;
+        $assistantName = $c->booking?->assistantTechnician ? $c->booking->assistantTechnician->name : null;
+        $dynamicTeam = ($leadName && $assistantName) ? "{$leadName} & {$assistantName}" : ($leadName ?: ($assistantName ?: null));
+
         return [
             'checklist_id' => (int) $c->checklist_id,
             'booking_id' => (int) $c->booking_id,
@@ -883,7 +900,7 @@ class ToolChecklistController extends Controller
             'technician_id' => (int) $c->technician_id,
             'technician_name' => $c->technician ? $c->technician->name : null,
             'team_id' => $c->team_id ? (int) $c->team_id : null,
-            'team_name' => $c->team ? $c->team->team_name : null,
+            'team_name' => $c->team ? $c->team->team_name : $dynamicTeam,
             'approved_by_name' => $c->approvedBy ? $c->approvedBy->name : null,
             'approved_at' => $c->approved_at?->toISOString(),
             'completed_by_name' => $c->completedBy ? $c->completedBy->name : null,

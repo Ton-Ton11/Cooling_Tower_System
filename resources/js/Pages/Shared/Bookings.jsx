@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePage } from "@inertiajs/react";
 import Modal from "../../Components/Modal";
@@ -228,9 +229,9 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                         currentTab === "All"
                             ? bookings.length
                             : bookings.filter(
-                                  (booking) =>
-                                      booking.booking_status === currentTab,
-                              ).length;
+                                (booking) =>
+                                    booking.booking_status === currentTab,
+                            ).length;
 
                     return (
                         <button
@@ -466,7 +467,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                             }
                                                         >
                                                             {booking.booking_status ===
-                                                            "Pending"
+                                                                "Pending"
                                                                 ? "✅ Assign Team"
                                                                 : "🛠 Reassign"}
                                                         </button>
@@ -736,8 +737,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                         {assignment.lead_technician_id && !assignment.assistant_technician_id
                                             ? "👤 Lead selected. Please select an Assistant Technician to complete the pair."
                                             : !assignment.lead_technician_id && assignment.assistant_technician_id
-                                            ? "👤 Assistant selected. Please select a Lead Technician to complete the pair."
-                                            : "Select both a Lead Technician and an Assistant Technician above."}
+                                                ? "👤 Assistant selected. Please select a Lead Technician to complete the pair."
+                                                : "Select both a Lead Technician and an Assistant Technician above."}
                                     </div>
                                 )}
                             </div>

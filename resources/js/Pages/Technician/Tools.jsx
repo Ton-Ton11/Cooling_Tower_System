@@ -58,9 +58,10 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         try {
             const { data } = await window.axios.get(TECHNICIAN_ENDPOINTS.bookings);
             const list = Array.isArray(data?.data) ? data.data : [];
-            // Team Task Requirement: Only bookings assigned to a technician team by the manager
+            // Task Requirement: Bookings assigned to this technician (Lead, Assistant, or legacy) by the manager
             const activeTasks = list.filter((b) =>
-                Boolean(b.assigned_team_id) && ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status),
+                (Boolean(b.lead_technician_id) || Boolean(b.assistant_technician_id) || Boolean(b.assigned_tech_id) || Boolean(b.assigned_team_id)) &&
+                ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status),
             );
             setAssignedBookings(activeTasks);
         } catch {
@@ -97,7 +98,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
 
     const openCreateChecklistModal = (prefillBookingId = "") => {
         if (assignedBookings.length === 0) {
-            addToast("Your team cannot create a checklist until the manager assigns a task to your technician team.", "error");
+            addToast("You cannot create a checklist until the manager assigns a service booking to you.", "error");
             return;
         }
         setEditingChecklist(null);
@@ -327,12 +328,12 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                         </div>
                     </div>
 
-                    {/* Team Task Assignment Status Notice */}
+                    {/* Task Assignment Status Notice */}
                     {assignedBookings.length === 0 && (
                         <div style={{ padding: "12px 16px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#1E40AF" }}>
                             <span style={{ fontSize: 18 }}>ℹ️</span>
                             <div>
-                                <strong>Manager Team Assignment Required:</strong> Technicians can only create a tool checklist once a task is assigned to their team by the manager. Once a booking is assigned to your team, it will appear here for checklist preparation.
+                                <strong>Manager Assignment Required:</strong> Technicians can create a tool checklist once a task is assigned to them by the manager. Once a booking is assigned to you, it will appear here for checklist preparation.
                             </div>
                         </div>
                     )}
@@ -652,7 +653,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                         </label>
                         {assignedBookings.length === 0 ? (
                             <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13 }}>
-                                ⚠️ <strong>No Assigned Team Tasks:</strong> Your team can only create a checklist when there is a task assigned by the manager to your technician team.
+                                ⚠️ <strong>No Assigned Tasks:</strong> You can create a checklist once a service booking is assigned to you by the manager.
                             </div>
                         ) : (
                             <select
@@ -661,10 +662,10 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                 onChange={(e) => setSelectedBookingId(e.target.value)}
                                 disabled={!!editingChecklist}
                             >
-                                <option value="">Select an assigned team task</option>
+                                <option value="">Select an assigned service task</option>
                                 {assignedBookings.map((b) => (
                                     <option key={b.booking_id} value={b.booking_id}>
-                                        Booking #{b.booking_id} · {b.client_name} — {b.service} ({b.assigned_team_name ? `Team: ${b.assigned_team_name}` : "Assigned Team"}) [{b.booking_status}]
+                                        Booking #{b.booking_id} · {b.client_name} — {b.service || b.service_name} ({b.assigned_team_name ? `Team: ${b.assigned_team_name}` : "Assigned Team"}) [{b.booking_status}]
                                     </option>
                                 ))}
                             </select>
