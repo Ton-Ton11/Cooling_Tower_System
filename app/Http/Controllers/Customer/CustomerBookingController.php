@@ -157,6 +157,7 @@ class CustomerBookingController extends Controller
             'brands' => $brands,
             'capacities' => $capacities,
             'policy' => $policy,
+            'schedule_config' => $this->getScheduleConfig(),
         ]);
     }
 
@@ -244,6 +245,9 @@ class CustomerBookingController extends Controller
                 'total_units_count' => $totalUnitsCount,
                 'units_data' => $unitsList,
                 'service_details' => $b->service_details ?? [],
+                'preferred_arrival_time' => $b->service_details['preferred_arrival_time'] ?? ($b->scheduled_date ? $b->scheduled_date->format('h:i A') : null),
+                'rate_type' => $b->service_details['rate_type'] ?? null,
+                'is_differential' => (bool) ($b->service_details['is_differential'] ?? false),
                 'service_payment_method' => $b->service_payment_method ?? 'Cash',
                 'cancellation_reason' => $b->cancellation_reason,
                 'notes' => $b->notes,
@@ -297,6 +301,9 @@ class CustomerBookingController extends Controller
             'aircon_type' => ['nullable', 'string', 'max:100'],
             'unit_quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
             'scheduled_date' => ['required', 'date', 'after:now'],
+            'preferred_arrival_time' => ['nullable', 'string', 'max:50'],
+            'rate_type' => ['nullable', 'string', 'max:50'],
+            'is_differential' => ['nullable'],
             'alternative_schedule' => ['nullable', 'string', 'max:150'],
             'service_payment_method' => ['required', 'string', Rule::in(['Cash', 'GCash'])],
             'booking_fee' => ['nullable', 'numeric', 'min:0'],
@@ -379,6 +386,22 @@ class CustomerBookingController extends Controller
 
             // 2. Create Booking
             $scheduledDateTime = Carbon::parse($validated['scheduled_date']);
+            $preferredArrivalTime = $validated['preferred_arrival_time'] ?? $scheduledDateTime->format('h:i A');
+
+            // Determine rate type based on schedule configuration
+            $diffConfig = config('booking_schedule.differential', ['start_time' => '00:00', 'end_time' => '05:00']);
+            $timeMinutes = ($scheduledDateTime->hour * 60) + $scheduledDateTime->minute;
+            $diffStartParts = explode(':', $diffConfig['start_time'] ?? '00:00');
+            $diffStartMins = ((int) $diffStartParts[0] * 60) + (int) ($diffStartParts[1] ?? 0);
+            $diffEndParts = explode(':', $diffConfig['end_time'] ?? '05:00');
+            $diffEndMins = ((int) $diffEndParts[0] * 60) + (int) ($diffEndParts[1] ?? 0);
+
+            $isDiff = ($timeMinutes >= $diffStartMins && $timeMinutes <= $diffEndMins);
+            $rateType = $isDiff ? 'Differential Rate' : 'Regular Rate';
+
+            $serviceDetails['preferred_arrival_time'] = $preferredArrivalTime;
+            $serviceDetails['rate_type'] = $rateType;
+            $serviceDetails['is_differential'] = $isDiff;
 
             $booking = Booking::create([
                 'client_id' => $userId,
@@ -423,11 +446,12 @@ class CustomerBookingController extends Controller
                 'user_id' => $userId,
                 'action_type' => 'BOOKING_CREATE',
                 'description' => sprintf(
-                    'Customer submitted service request #%d for %s with %d unit(s) scheduled on %s. GCash Ref: %s.',
+                    'Customer submitted service request #%d for %s with %d unit(s) scheduled on %s (%s). GCash Ref: %s.',
                     $booking->booking_id,
                     $service->service_name,
                     $totalQuantity,
                     $scheduledDateTime->format('M d, Y h:i A'),
+                    $rateType,
                     $validated['reference_number']
                 ),
                 'created_at' => now(),
@@ -653,4 +677,98 @@ class CustomerBookingController extends Controller
             'booking' => $booking->fresh(['service', 'technician']),
         ]);
     }
+
+    /**
+     * Build the dynamic booking schedule and arrival time slots.
+     */
+    private function getScheduleConfig(): array
+    {
+        $config = config('booking_schedule', []);
+        $interval = (int) ($config['interval_minutes'] ?? 30);
+
+        $generateSlots = function (string $startTime, string $endTime, string $rateType, string $badge, bool $isDifferential) use ($interval) {
+            $slots = [];
+            $startMinutes = $this->timeStringToMinutes($startTime);
+            $endMinutes = $this->timeStringToMinutes($endTime);
+
+            $curr = $startMinutes;
+            while ($curr <= $endMinutes) {
+                $hours = intdiv($curr, 60);
+                $mins = $curr % 60;
+                $time24 = sprintf('%02d:%02d', $hours, $mins);
+                $dateTime = Carbon::createFromTime($hours, $mins, 0);
+                $label = $dateTime->format('h:i A');
+
+                $slots[] = [
+                    'id' => $time24,
+                    'time' => $time24,
+                    'label' => $label,
+                    'rate_type' => $rateType,
+                    'badge' => $badge,
+                    'is_differential' => $isDifferential,
+                ];
+
+                $curr += $interval;
+            }
+
+            return $slots;
+        };
+
+        $regular = $config['regular'] ?? [
+            'key' => 'regular',
+            'title' => 'Regular Hours',
+            'subtitle' => 'Standard Business Hours (08:00 AM – 05:00 PM)',
+            'rate_name' => 'Regular Rate',
+            'badge' => 'Regular',
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+            'notice_title' => 'Regular Rate',
+            'notice_message' => 'Standard service rate applies.',
+            'is_differential' => false,
+        ];
+
+        $differential = $config['differential'] ?? [
+            'key' => 'differential',
+            'title' => 'Differential Hours',
+            'subtitle' => 'Early Morning (Kadlawon / 12:00 AM – 05:00 AM)',
+            'rate_name' => 'Differential Rate',
+            'badge' => 'Differential',
+            'start_time' => '00:00',
+            'end_time' => '05:00',
+            'notice_title' => 'Differential Rate Applies',
+            'notice_message' => 'An additional differential charge will be included in your quotation.',
+            'is_differential' => true,
+        ];
+
+        $regular['slots'] = $generateSlots(
+            $regular['start_time'] ?? '08:00',
+            $regular['end_time'] ?? '17:00',
+            'regular',
+            $regular['badge'] ?? 'Regular',
+            false
+        );
+
+        $differential['slots'] = $generateSlots(
+            $differential['start_time'] ?? '00:00',
+            $differential['end_time'] ?? '05:00',
+            'differential',
+            $differential['badge'] ?? 'Differential',
+            true
+        );
+
+        return [
+            'interval_minutes' => $interval,
+            'regular' => $regular,
+            'differential' => $differential,
+        ];
+    }
+
+    private function timeStringToMinutes(string $timeStr): int
+    {
+        $parts = explode(':', $timeStr);
+        $hours = isset($parts[0]) ? (int) $parts[0] : 0;
+        $mins = isset($parts[1]) ? (int) $parts[1] : 0;
+        return ($hours * 60) + $mins;
+    }
 }
+

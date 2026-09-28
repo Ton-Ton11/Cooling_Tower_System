@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatDateTime } from "../../utils/superAdmin";
+import { resolveScheduleSlots, formatTime24To12 } from "../../utils/bookingSchedule";
 
 // Fallback primary services if catalog fetch is delayed
 const DEFAULT_PRIMARY_SERVICES = [
@@ -108,12 +109,7 @@ const COMMERCIAL_CAPACITIES = [
     "4.0 TR", "5.0 TR", "10.0+ TR", "BTU Capacity", "Not Sure"
 ];
 
-const TIME_SLOTS = [
-    { id: "08:00", label: "08:00 AM – 10:00 AM", period: "Morning Slot" },
-    { id: "10:00", label: "10:00 AM – 12:00 PM", period: "Late Morning" },
-    { id: "13:00", label: "01:00 PM – 03:00 PM", period: "Early Afternoon" },
-    { id: "15:00", label: "03:00 PM – 05:00 PM", period: "Late Afternoon" },
-];
+
 
 const REPAIR_PROBLEMS = [
     "Not Cooling",
@@ -151,6 +147,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     const [unitTypes, setUnitTypes] = useState(DEFAULT_UNIT_TYPES);
     const [brands, setBrands] = useState(DEFAULT_BRANDS);
     const [policyData, setPolicyData] = useState(null);
+    const [scheduleConfig, setScheduleConfig] = useState(null);
     const [loadingCatalog, setLoadingCatalog] = useState(true);
 
     // Step 1: Selected Service Category
@@ -244,7 +241,16 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     const [scheduledTime, setScheduledTime] = useState("08:00");
     const [enableAlternativeSchedule, setEnableAlternativeSchedule] = useState(false);
     const [altDate, setAltDate] = useState("");
-    const [altTime, setAltTime] = useState("13:00");
+    const [altTime, setAltTime] = useState("08:30");
+
+    // Dynamic 30-minute interval slots & rate classification from config
+    const scheduleSlotsData = useMemo(() => {
+        return resolveScheduleSlots(scheduleConfig);
+    }, [scheduleConfig]);
+
+    const activeRateInfo = useMemo(() => {
+        return scheduleSlotsData.classifyTime(scheduledTime);
+    }, [scheduleSlotsData, scheduledTime]);
 
     // Step 4: Appointment Reservation Fee & GCash Payment
     const BOOKING_FEE = 300.00;
@@ -281,6 +287,9 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                 }
                 if (data?.policy) {
                     setPolicyData(data.policy);
+                }
+                if (data?.schedule_config) {
+                    setScheduleConfig(data.schedule_config);
                 }
 
                 // Default initial service selection
@@ -445,8 +454,20 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         }
 
         setSubmitting(true);
-        const combinedDateTime = `${scheduledDate} ${scheduledTime}:00`;
-        const altDateTimeStr = enableAlternativeSchedule && altDate ? `${altDate} at ${altTime}` : null;
+        const selectedSlot = scheduleSlotsData.findSlot(scheduledTime);
+        const preferredArrivalLabel = selectedSlot?.label || formatTime24To12(scheduledTime);
+        const isDifferential = Boolean(selectedSlot?.is_differential);
+        const rateTypeLabel = isDifferential ? "Differential Rate" : "Regular Rate";
+
+        // Store exact timestamp
+        const timePart = scheduledTime.length === 5 ? `${scheduledTime}:00` : "08:00:00";
+        const combinedDateTime = `${scheduledDate} ${timePart}`;
+
+        const altSlot = scheduleSlotsData.findSlot(altTime);
+        const altArrivalLabel = altSlot?.label || formatTime24To12(altTime);
+        const altDateTimeStr = enableAlternativeSchedule && altDate
+            ? `${altDate} at ${altArrivalLabel}${altSlot ? ` (${altSlot.is_differential ? 'Differential Rate' : 'Regular Rate'})` : ''}`
+            : null;
 
         // Compile service-specific questionnaire
         let serviceQuestions = {};
@@ -457,6 +478,12 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         } else {
             serviceQuestions = { ...cleaningDetails, category: "Cleaning / Preventive Maintenance" };
         }
+
+        // Attach exact arrival time & rate metadata to service questions
+        serviceQuestions.preferred_arrival_time = preferredArrivalLabel;
+        serviceQuestions.preferred_arrival_time_raw = scheduledTime;
+        serviceQuestions.rate_type = rateTypeLabel;
+        serviceQuestions.is_differential = isDifferential;
 
         // Clean units array for JSON payload
         const cleanUnits = units.map(u => ({
@@ -475,6 +502,9 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         const formData = new FormData();
         formData.append("service_id", selectedServiceId);
         formData.append("scheduled_date", combinedDateTime);
+        formData.append("preferred_arrival_time", preferredArrivalLabel);
+        formData.append("rate_type", rateTypeLabel);
+        formData.append("is_differential", isDifferential ? "1" : "0");
         if (altDateTimeStr) {
             formData.append("alternative_schedule", altDateTimeStr);
         }
@@ -508,7 +538,10 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
             setSubmittedBooking({
                 booking_id: data.booking_id,
                 service_name: currentService.service_name,
-                scheduled_date: `${scheduledDate} at ${scheduledTime}`,
+                scheduled_date: `${scheduledDate} at ${preferredArrivalLabel}`,
+                preferred_arrival_time: preferredArrivalLabel,
+                rate_type: rateTypeLabel,
+                is_differential: isDifferential,
                 units_count: totalUnitQuantity,
                 units: cleanUnits,
                 ref_number: refNumber.trim(),
@@ -574,6 +607,14 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                             <div>
                                 <span className="font-semibold text-gray-400 uppercase text-[10px]">Preferred Schedule</span>
                                 <p className="font-bold text-gray-800 mt-0.5">{submittedBooking.scheduled_date}</p>
+                                {submittedBooking.rate_type && (
+                                    <p className={`text-[11px] font-bold mt-1 flex items-center gap-1 ${
+                                        submittedBooking.is_differential ? "text-amber-800" : "text-emerald-700"
+                                    }`}>
+                                        <span>{submittedBooking.is_differential ? "⚠️" : "✓"}</span>
+                                        <span>{submittedBooking.rate_type}</span>
+                                    </p>
+                                )}
                             </div>
                             <div>
                                 <span className="font-semibold text-gray-400 uppercase text-[10px]">Reservation Fee Status</span>
@@ -1245,7 +1286,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                         </div>
 
                         {/* Preferred Date & Time Selection */}
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                             <div>
                                 <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
                                     Preferred Service Date <span className="text-red-500">*</span>
@@ -1260,35 +1301,161 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                 />
                             </div>
 
+                            {/* Preferred Arrival Time with 30-min Intervals & Rate Identification */}
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">
-                                    Preferred Arrival Window <span className="text-red-500">*</span>
-                                </label>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                                    {TIME_SLOTS.map((slot) => {
-                                        const isSel = scheduledTime === slot.id;
-                                        return (
-                                            <div
-                                                key={slot.id}
-                                                onClick={() => setScheduledTime(slot.id)}
-                                                className={`p-4 rounded-xl border-2 cursor-pointer transition flex items-center justify-between ${
-                                                    isSel
-                                                        ? "border-blue-600 bg-blue-50/50 shadow-sm"
-                                                        : "border-gray-200 hover:border-blue-200 bg-white"
-                                                }`}
-                                            >
-                                                <div>
-                                                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block">{slot.period}</span>
-                                                    <span className="text-sm font-bold text-gray-800">{slot.label}</span>
-                                                </div>
-                                                <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${
-                                                    isSel ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300"
-                                                }`}>
-                                                    {isSel && <div className="w-2 h-2 rounded-full bg-white" />}
-                                                </div>
+                                <div className="flex items-center justify-between mb-3">
+                                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                                        Preferred Arrival Time <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="text-[11px] font-semibold text-gray-500 flex items-center gap-1.5">
+                                        <span>Selected:</span>
+                                        <span className={`px-2 py-0.5 rounded-full font-bold ${
+                                            activeRateInfo.isDifferential
+                                                ? "bg-amber-100 text-amber-900 border border-amber-300"
+                                                : "bg-blue-100 text-blue-900 border border-blue-200"
+                                        }`}>
+                                            {activeRateInfo.label || scheduledTime} ({activeRateInfo.rateName})
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {/* 1. Regular Hours Section */}
+                                    <div className="bg-gray-50/70 rounded-2xl p-4 border border-gray-200">
+                                        <div className="flex flex-wrap items-center justify-between gap-1.5 mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-100" />
+                                                <h5 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                                                    {scheduleSlotsData.regularConfig?.title || "Regular Hours"}
+                                                </h5>
                                             </div>
-                                        );
-                                    })}
+                                            <span className="text-[11px] text-gray-500 font-medium">
+                                                {scheduleSlotsData.regularConfig?.subtitle || "Standard Business Hours (08:00 AM – 05:00 PM)"}
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                                            {scheduleSlotsData.regularSlots.map((slot) => {
+                                                const isSel = scheduledTime === slot.id;
+                                                return (
+                                                    <button
+                                                        key={slot.id}
+                                                        type="button"
+                                                        onClick={() => setScheduledTime(slot.id)}
+                                                        className={`p-2.5 rounded-xl border transition text-left flex flex-col justify-between ${
+                                                            isSel
+                                                                ? "border-blue-600 bg-blue-50 text-blue-950 shadow-sm ring-2 ring-blue-500/20 font-bold"
+                                                                : "border-gray-200 hover:border-blue-300 bg-white hover:bg-gray-50/80 text-gray-800"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center justify-between w-full">
+                                                            <span className="text-xs font-bold tracking-tight">{slot.label}</span>
+                                                            <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                                                                isSel ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300"
+                                                            }`}>
+                                                                {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-1 flex items-center">
+                                                            <span className={`text-[10px] font-semibold ${isSel ? "text-blue-700" : "text-gray-400"}`}>
+                                                                {isSel ? "✓ Regular" : "Regular"}
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* 2. Differential Hours Section (Kadlawon / Early Morning) */}
+                                    <div className="bg-amber-50/40 rounded-2xl p-4 border border-amber-200/80">
+                                        <div className="flex flex-wrap items-center justify-between gap-1.5 mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-100" />
+                                                <h5 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
+                                                    {scheduleSlotsData.differentialConfig?.title || "Differential Hours"}
+                                                </h5>
+                                            </div>
+                                            <span className="text-[11px] text-amber-900/80 font-medium">
+                                                {scheduleSlotsData.differentialConfig?.subtitle || "Early Morning (Kadlawon / 12:00 AM – 05:00 AM)"}
+                                            </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                                            {scheduleSlotsData.differentialSlots.map((slot) => {
+                                                const isSel = scheduledTime === slot.id;
+                                                return (
+                                                    <button
+                                                        key={slot.id}
+                                                        type="button"
+                                                        onClick={() => setScheduledTime(slot.id)}
+                                                        className={`p-2.5 rounded-xl border transition text-left flex flex-col justify-between ${
+                                                            isSel
+                                                                ? "border-amber-500 bg-amber-100/90 text-amber-950 shadow-sm ring-2 ring-amber-400/30 font-bold"
+                                                                : "border-amber-200/80 hover:border-amber-300 bg-white hover:bg-amber-50/50 text-gray-800"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center justify-between w-full">
+                                                            <span className="text-xs font-bold tracking-tight">{slot.label}</span>
+                                                            <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                                                                isSel ? "bg-amber-600 border-amber-600 text-white" : "border-amber-300"
+                                                            }`}>
+                                                                {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-1 flex items-center">
+                                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                                isSel
+                                                                    ? "bg-amber-200 text-amber-900"
+                                                                    : "bg-amber-100/80 text-amber-800"
+                                                            }`}>
+                                                                {isSel ? "⚠️ Differential" : "Differential"}
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* 3. Dynamic Rate Classification Status Banner */}
+                                    {activeRateInfo.isDifferential ? (
+                                        <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/90 text-amber-950 flex items-start gap-3 transition">
+                                            <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700 font-bold text-sm">
+                                                ⚠️
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-xs uppercase tracking-wider text-amber-900">
+                                                        {activeRateInfo.noticeTitle || "Differential Rate Applies"}
+                                                    </span>
+                                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-200 text-amber-900">
+                                                        {activeRateInfo.label || scheduledTime} • Differential
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-amber-800 mt-1 leading-relaxed">
+                                                    {activeRateInfo.noticeMessage || "An additional differential charge will be included in your quotation."}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/70 text-emerald-950 flex items-start gap-3 transition">
+                                            <div className="w-7 h-7 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">
+                                                ✓
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-xs uppercase tracking-wider text-emerald-900">
+                                                        {activeRateInfo.noticeTitle || "Regular Rate"}
+                                                    </span>
+                                                    <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800">
+                                                        {activeRateInfo.label || scheduledTime} • Regular
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                                                    {activeRateInfo.noticeMessage || "Standard service rate applies."}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1321,13 +1488,22 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Alternative Arrival Window</label>
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Alternative Arrival Time</label>
                                         <select
                                             value={altTime}
                                             onChange={(e) => setAltTime(e.target.value)}
                                             className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm"
                                         >
-                                            {TIME_SLOTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                                            <optgroup label="Regular Hours">
+                                                {scheduleSlotsData.regularSlots.map(s => (
+                                                    <option key={s.id} value={s.id}>{s.label} (Regular Rate)</option>
+                                                ))}
+                                            </optgroup>
+                                            <optgroup label="Differential Hours (Early Morning)">
+                                                {scheduleSlotsData.differentialSlots.map(s => (
+                                                    <option key={s.id} value={s.id}>{s.label} (Differential Rate)</option>
+                                                ))}
+                                            </optgroup>
                                         </select>
                                     </div>
                                 </div>
@@ -1590,9 +1766,20 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs border-b border-gray-200 pb-4">
                                 <div>
                                     <span className="font-semibold text-gray-400 uppercase text-[10px]">Preferred Schedule</span>
-                                    <p className="font-bold text-gray-800 mt-0.5">{scheduledDate} at {scheduledTime}</p>
+                                    <p className="font-bold text-gray-800 mt-0.5">{scheduledDate} at {activeRateInfo.label || scheduledTime}</p>
+                                    <div className="mt-1">
+                                        {activeRateInfo.isDifferential ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                                <span>⚠️</span> Differential Rate Applies
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                <span>✓</span> Regular Rate
+                                            </span>
+                                        )}
+                                    </div>
                                     {enableAlternativeSchedule && altDate && (
-                                        <p className="text-[11px] text-gray-500 mt-0.5">Alt: {altDate} at {altTime}</p>
+                                        <p className="text-[11px] text-gray-500 mt-1">Alt: {altDate} at {scheduleSlotsData.findSlot(altTime)?.label || altTime}</p>
                                     )}
                                 </div>
                                 <div>
