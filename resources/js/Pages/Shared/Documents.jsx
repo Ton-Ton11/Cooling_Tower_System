@@ -8,6 +8,19 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
+const DownloadIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+);
+const TrashIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+
 function Documents({ addToast }) {
     const [docs, setDocs] = useState([]);
     const [viewMode, setViewMode] = useState("list");
@@ -486,6 +499,9 @@ function Documents({ addToast }) {
                                                         style={{
                                                             padding: "4px 12px",
                                                             fontSize: 11,
+                                                            display: "inline-flex",
+                                                            alignItems: "center",
+                                                            gap: 4,
                                                         }}
                                                         onClick={() =>
                                                             setExportTarget(
@@ -493,7 +509,8 @@ function Documents({ addToast }) {
                                                             )
                                                         }
                                                     >
-                                                        ⬇ Export
+                                                        <DownloadIcon size={12} />
+                                                        <span>Export</span>
                                                     </button>
                                                 )}
                                                 <button
@@ -501,12 +518,16 @@ function Documents({ addToast }) {
                                                     style={{
                                                         padding: "4px 12px",
                                                         fontSize: 11,
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: 4,
                                                     }}
                                                     onClick={() =>
                                                         setDeleteTarget(document)
                                                     }
                                                 >
-                                                    🗑 Delete
+                                                    <TrashIcon size={12} />
+                                                    <span>Delete</span>
                                                 </button>
                                             </div>
                                         </td>

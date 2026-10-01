@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import StatusBadge from "./StatusBadge";
 const PAGE_SIZE = 8;
 function DataTable({
@@ -60,11 +60,16 @@ function DataTable({
                                 left: 10,
                                 top: "50%",
                                 transform: "translateY(-50%)",
-                                color: "#5A6480",
-                                fontSize: 14,
+                                color: "#8E9BB0",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                pointerEvents: "none",
                             }}
                         >
-                            🔍
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
                         </span>{" "}
                         <input
                             className="input-field"

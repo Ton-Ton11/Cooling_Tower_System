@@ -14,6 +14,17 @@ const icons = {
     warning: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
 };
 
+const ToolSvg = ({ className = "w-5 h-5", strokeWidth = 2 }) => (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d={icons.tool} />
+    </svg>
+);
+const BoxSvg = ({ className = "w-5 h-5", strokeWidth = 2 }) => (
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d={icons.box} />
+    </svg>
+);
+
 export default function ToolsManDashboardOverview({ onNavigate, dashboardData, isLoading, onRefresh }) {
     const [activeTab, setActiveTab] = useState("recent"); // "recent" | "lowstock" | "categories"
 
@@ -95,17 +106,17 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
 
                                 <div className="flex items-center gap-2.5 pt-1 flex-wrap text-[11px] text-slate-300">
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        📦 {stats.total_items ?? 0} Total Items
+                                        {stats.total_items ?? 0} Total Items
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        🔧 {stats.total_tools ?? 0} Tools In Stock
+                                        {stats.total_tools ?? 0} Tools In Stock
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        🧰 {stats.total_materials ?? 0} Materials
+                                        {stats.total_materials ?? 0} Materials
                                     </span>
                                     {(stats.low_stock_items ?? 0) > 0 && (
                                         <span className="flex items-center gap-1 bg-rose-500/30 border border-rose-400/40 text-rose-200 px-2.5 py-1 rounded-lg font-bold">
-                                            ⚠️ {stats.low_stock_items} Low Stock
+                                            {stats.low_stock_items} Low Stock
                                         </span>
                                     )}
                                 </div>
@@ -151,7 +162,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                📋 Recently Updated ({recentItems.length})
+                                Recently Updated ({recentItems.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab("lowstock")}
@@ -161,7 +172,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                ⚠️ Low Stock Alerts ({stats.low_stock_items ?? 0})
+                                Low Stock Alerts ({stats.low_stock_items ?? 0})
                             </button>
                             <button
                                 onClick={() => setActiveTab("categories")}
@@ -171,7 +182,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                🗂️ Categories Breakdown
+                                Categories Breakdown
                             </button>
                         </div>
 
@@ -217,7 +228,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                         >
                                             <div className="flex items-center gap-3">
                                                 <div className="w-10 h-10 rounded-xl bg-blue-100/80 text-blue-700 flex items-center justify-center font-bold text-base shrink-0">
-                                                    {item.item_type === "Tool" ? "🔧" : "📦"}
+                                                    {item.item_type === "Tool" ? <ToolSvg className="w-5 h-5" /> : <BoxSvg className="w-5 h-5" />}
                                                 </div>
                                                 <div className="space-y-0.5">
                                                     <div className="flex items-center gap-2">
@@ -276,8 +287,8 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
 
                             {lowStockItems.length === 0 ? (
                                 <div className="text-center py-12 px-4 rounded-2xl bg-emerald-50/50 border border-dashed border-emerald-200">
-                                    <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2 font-bold text-lg">
-                                        ✓
+                                    <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto mb-2">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                     <p className="text-sm font-bold text-emerald-900">All supplies well stocked!</p>
                                     <p className="text-xs text-emerald-700 mt-0.5">
@@ -333,7 +344,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                 <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold text-slate-500 uppercase">Power & Hand Tools</span>
-                                        <span className="text-base">🔧</span>
+                                        <ToolSvg className="w-5 h-5 text-blue-600" />
                                     </div>
                                     <p className="text-3xl font-black text-[#0E1A33]">{stats.total_tools ?? 0}</p>
                                     <p className="text-xs text-slate-500">
@@ -344,7 +355,7 @@ export default function ToolsManDashboardOverview({ onNavigate, dashboardData, i
                                 <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-bold text-slate-500 uppercase">Materials & Supplies</span>
-                                        <span className="text-base">📦</span>
+                                        <BoxSvg className="w-5 h-5 text-purple-600" />
                                     </div>
                                     <p className="text-3xl font-black text-[#0E1A33]">{stats.total_materials ?? 0}</p>
                                     <p className="text-xs text-slate-500">

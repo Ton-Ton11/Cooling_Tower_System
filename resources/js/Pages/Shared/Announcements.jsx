@@ -8,6 +8,18 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
+const MegaphoneIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 11l18-5v12L3 14v-3z" />
+        <path d="M11.6 16.8a3 3 0 11-5.8-1.6" />
+    </svg>
+);
+const TrashIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+
 function Announcements({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
     const [announcements, setAnnouncements] = useState([]);
@@ -276,8 +288,10 @@ function Announcements({ addToast, onDataChanged, endpoints, readOnly = false })
                                 className="btn-primary"
                                 onClick={() => setConfirmModal(true)}
                                 disabled={!form.title.trim() || !form.message.trim()}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                             >
-                                📢 Send Announcement
+                                <MegaphoneIcon size={14} />
+                                <span>Send Announcement</span>
                             </button>
                             <button
                                 className="btn-secondary"
@@ -347,11 +361,11 @@ function Announcements({ addToast, onDataChanged, endpoints, readOnly = false })
                                                     display: "flex",
                                                     alignItems: "center",
                                                     justifyContent: "center",
-                                                    fontSize: 17,
+                                                    color: "#FFFFFF",
                                                     flexShrink: 0,
                                                 }}
                                             >
-                                                📢
+                                                <MegaphoneIcon size={18} color="#FFFFFF" />
                                             </div>
                                             <div>
                                                 <h4
@@ -421,12 +435,16 @@ function Announcements({ addToast, onDataChanged, endpoints, readOnly = false })
                                             style={{
                                                 padding: "5px 10px",
                                                 fontSize: 11,
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: 4,
                                             }}
                                             onClick={() =>
                                                 setDeleteTarget(announcement)
                                             }
                                         >
-                                            🗑 Delete
+                                            <TrashIcon size={12} />
+                                            <span>Delete</span>
                                         </button>
                                     </div>
                                 </div>

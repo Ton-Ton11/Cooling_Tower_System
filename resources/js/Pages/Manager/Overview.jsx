@@ -119,16 +119,16 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
 
                                 <div className="flex items-center gap-2.5 pt-1 flex-wrap text-[11px] text-slate-300">
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ⚡ {stats.pending_bookings ?? 0} Pending Approvals
+                                        {stats.pending_bookings ?? 0} Pending Approvals
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        🛠️ {stats.active_bookings ?? 0} Active Dispatches
+                                        {stats.active_bookings ?? 0} Active Dispatches
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ✅ {stats.completed_bookings ?? 0} Completed
+                                        {stats.completed_bookings ?? 0} Completed
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        📢 {stats.announcements ?? 0} Memos
+                                        {stats.announcements ?? 0} Memos
                                     </span>
                                 </div>
                             </div>
@@ -173,7 +173,7 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                ⏳ Pending Bookings ({pendingBookings.length})
+                                Pending Bookings ({pendingBookings.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab("active")}
@@ -183,7 +183,7 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                🚀 Active Dispatches ({activeBookings.length})
+                                Active Dispatches ({activeBookings.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab("chart")}
@@ -193,7 +193,7 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                📊 Weekly Trends
+                                Weekly Trends
                             </button>
                         </div>
 
@@ -230,8 +230,8 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
 
                             {pendingBookings.length === 0 ? (
                                 <div className="text-center py-12 px-4 rounded-2xl bg-slate-50 border border-dashed border-slate-200">
-                                    <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 font-bold text-lg">
-                                        ✓
+                                    <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                     </div>
                                     <p className="text-sm font-bold text-slate-800">All caught up!</p>
                                     <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">

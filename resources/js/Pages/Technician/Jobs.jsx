@@ -16,6 +16,58 @@ const Icon = ({ d, size = 16 }) => (
     </svg>
 );
 
+const UsersIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+);
+const UserIcon = ({ size = 16, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+const MapPinIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+        <circle cx="12" cy="10" r="3" />
+    </svg>
+);
+const PhoneIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
+    </svg>
+);
+const CalendarIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+);
+const ClipboardListIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+        <rect x="9" y="3" width="6" height="4" rx="1" />
+        <line x1="9" y1="12" x2="15" y2="12" />
+        <line x1="9" y1="16" x2="15" y2="16" />
+    </svg>
+);
+const StarIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    </svg>
+);
+const CheckIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+
 const ic = {
     play: "M5 3l14 9-14 9V3z",
     check: "M20 6L9 17l-5-5",
@@ -255,7 +307,8 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                 <StatusBadge status={job.booking_status} />
                                                 {job.assigned_team_name && (
                                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid #BFDBFE" }}>
-                                                        👥 {job.assigned_team_name}
+                                                        <UsersIcon size={12} color="#1D4ED8" />
+                                                        <span>{job.assigned_team_name}</span>
                                                     </span>
                                                 )}
                                                 {latestChecklist && (
@@ -267,18 +320,23 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                         background: latestChecklist.status === "Approved" ? "#ECFDF5" : latestChecklist.status === "Completed" ? "#F0FDF4" : "#FEF3C7",
                                                         color: latestChecklist.status === "Approved" ? "#065F46" : latestChecklist.status === "Completed" ? "#166534" : "#92400E",
                                                         border: "1px solid currentColor",
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: 4,
                                                     }}>
-                                                        📋 Checklist: {latestChecklist.status}
+                                                        <ClipboardListIcon size={12} />
+                                                        <span>Checklist: {latestChecklist.status}</span>
                                                     </span>
                                                 )}
                                                 {job.rating && (
                                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#FEF3C7", color: "#D97706", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
-                                                        ★ {job.rating}.0
+                                                        <StarIcon size={12} color="#D97706" />
+                                                        <span>{job.rating}.0</span>
                                                     </span>
                                                 )}
                                             </div>
                                             <p style={{ margin: "6px 0 0", fontSize: 13, color: "#4B5563" }}>
-                                                🛠 <strong>Service:</strong> {job.service}
+                                                <strong>Service:</strong> {job.service}
                                             </p>
                                             {job.assigned_by_name && (
                                                 <p style={{ margin: "2px 0 0", fontSize: 11, color: "#6B7280" }}>
@@ -378,19 +436,28 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                         }}
                                     >
                                         <div>
-                                            <span style={{ color: "#9CA3AF" }}>📍 Client Address:</span>
+                                            <span style={{ color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                <MapPinIcon size={12} color="#9CA3AF" />
+                                                <span>Client Address:</span>
+                                            </span>
                                             <p style={{ margin: "2px 0 0", fontWeight: 600, color: "#1E2F5F" }}>
                                                 {job.client_address || "Contact customer for landmark"}
                                             </p>
                                         </div>
                                         <div>
-                                            <span style={{ color: "#9CA3AF" }}>📞 Phone Number:</span>
+                                            <span style={{ color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                <PhoneIcon size={12} color="#9CA3AF" />
+                                                <span>Phone Number:</span>
+                                            </span>
                                             <p style={{ margin: "2px 0 0", fontWeight: 600, color: "#1E2F5F" }}>
                                                 {job.client_contact_number || "—"}
                                             </p>
                                         </div>
                                         <div>
-                                            <span style={{ color: "#9CA3AF" }}>📅 Scheduled Date:</span>
+                                            <span style={{ color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                <CalendarIcon size={12} color="#9CA3AF" />
+                                                <span>Scheduled Date:</span>
+                                            </span>
                                             <p style={{ margin: "2px 0 0", fontWeight: 600, color: "#1E2F5F" }}>
                                                 {formatDateTime(job.scheduled_date)}
                                             </p>
@@ -411,12 +478,14 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                             }}
                                         >
                                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
-                                                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748B" }}>
-                                                    👥 Assigned Technician Team
+                                                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748B", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                                    <UsersIcon size={13} color="#64748B" />
+                                                    <span>Assigned Technician Team</span>
                                                 </span>
                                                 {job.lead_technician_name && job.assistant_technician_name && (
-                                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 8px", borderRadius: 9999 }}>
-                                                        ✓ 2 Technicians Assigned
+                                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 8px", borderRadius: 9999, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                        <CheckIcon size={12} color="#16A34A" />
+                                                        <span>2 Technicians Assigned</span>
                                                     </span>
                                                 )}
                                             </div>
@@ -433,7 +502,9 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                             borderRadius: 10,
                                                         }}
                                                     >
-                                                        <span style={{ fontSize: 20 }}>👤</span>
+                                                        <div style={{ width: 34, height: 34, borderRadius: 8, background: "#DBEAFE", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                            <UserIcon size={18} color="#1D4ED8" />
+                                                        </div>
                                                         <div style={{ minWidth: 0 }}>
                                                             <div style={{ fontSize: 13, fontWeight: 700, color: "#1E3A8A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                                                 {job.lead_technician_name} {job.lead_technician_id === currentUserId && <span style={{ fontSize: 11, color: "#2563EB", fontWeight: 700 }}>(You)</span>}
@@ -469,7 +540,9 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                             borderRadius: 10,
                                                         }}
                                                     >
-                                                        <span style={{ fontSize: 20 }}>👤</span>
+                                                        <div style={{ width: 34, height: 34, borderRadius: 8, background: "#DCFCE7", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                            <UserIcon size={18} color="#166534" />
+                                                        </div>
                                                         <div style={{ minWidth: 0 }}>
                                                             <div style={{ fontSize: 13, fontWeight: 700, color: "#166534", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                                                 {job.assistant_technician_name} {job.assistant_technician_id === currentUserId && <span style={{ fontSize: 11, color: "#16A34A", fontWeight: 700 }}>(You)</span>}

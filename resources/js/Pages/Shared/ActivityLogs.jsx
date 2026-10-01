@@ -8,6 +8,13 @@ import {
     getInitials,
 } from "../../utils/superAdmin";
 
+const SearchIcon = ({ size = 14, color = "#9CA3AF" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+);
+
 function ActivityLogs({ addToast }) {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -127,10 +134,12 @@ function ActivityLogs({ addToast }) {
                             top: "50%",
                             transform: "translateY(-50%)",
                             color: "#9CA3AF",
-                            fontSize: 13,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            pointerEvents: "none",
                         }}
                     >
-                        🔍
+                        <SearchIcon size={14} />
                     </span>
                     <input
                         className="input-field"

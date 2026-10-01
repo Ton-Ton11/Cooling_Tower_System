@@ -7,6 +7,71 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
+const LockIcon = ({ size = 16, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0110 0v4" />
+    </svg>
+);
+const InfoIcon = ({ size = 16, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="16" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+);
+const ClipboardIcon = ({ size = 16, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </svg>
+);
+const UserIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+const UsersIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+);
+const PackageIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16.5 9.4L7.55 4.24a1.78 1.78 0 00-2.5 1.55v12.42a1.78 1.78 0 002.5 1.55l8.95-5.16a1.78 1.78 0 000-3.1z" />
+        <polyline points="3.29 7 12 12 20.71 7" />
+        <line x1="12" y1="22" x2="12" y2="12" />
+    </svg>
+);
+const EyeIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+    </svg>
+);
+const EditIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+);
+const AlertCircleIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+);
+const MessageSquareIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+);
+
 export default function TechnicianTools({ addToast, onNavigate }) {
     const [viewTab, setViewTab] = useState("checklists"); // 'checklists' | 'catalog'
     const [checklists, setChecklists] = useState([]);
@@ -298,7 +363,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     className={`tab-item ${viewTab === "checklists" ? "active" : ""}`}
                     onClick={() => setViewTab("checklists")}
                 >
-                    📋 Task Checklists
+                    Task Checklists
                     <span style={{ marginLeft: 6, fontSize: 10, color: viewTab === "checklists" ? "#3F7DFF" : "#9CA3AF" }}>
                         {checklists.length}
                     </span>
@@ -307,7 +372,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     className={`tab-item ${viewTab === "catalog" ? "active" : ""}`}
                     onClick={() => setViewTab("catalog")}
                 >
-                    🔒 Inventory Catalog (View-Only)
+                    Inventory Catalog (View-Only)
                     <span style={{ marginLeft: 6, fontSize: 10, color: viewTab === "catalog" ? "#3F7DFF" : "#9CA3AF" }}>
                         {catalog.length}
                     </span>
@@ -331,7 +396,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     {/* Task Assignment Status Notice */}
                     {assignedBookings.length === 0 && (
                         <div style={{ padding: "12px 16px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#1E40AF" }}>
-                            <span style={{ fontSize: 18 }}>ℹ️</span>
+                            <InfoIcon size={18} color="#1E40AF" />
                             <div>
                                 <strong>Manager Assignment Required:</strong> Technicians can create a tool checklist once a task is assigned to them by the manager. Once a booking is assigned to you, it will appear here for checklist preparation.
                             </div>
@@ -344,7 +409,9 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                         </div>
                     ) : checklists.length === 0 ? (
                         <div style={{ padding: 40, textAlign: "center", color: "#64748B", background: "#F8FAFC", borderRadius: 12 }}>
-                            <div style={{ fontSize: 36, marginBottom: 8 }}>📋</div>
+                            <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, color: "#9CA3AF" }}>
+                                <ClipboardIcon size={36} />
+                            </div>
                             <p style={{ fontWeight: 600, margin: "0 0 6px", color: "#1E2F5F" }}>
                                 No task checklists created yet
                             </p>
@@ -410,17 +477,22 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                 </td>
                                                 <td style={{ padding: "12px 14px", fontSize: 12 }}>
                                                     {cl.team_name ? (
-                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#1D4ED8", fontWeight: 600 }}>
-                                                            👥 {cl.team_name}
+                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#1D4ED8", fontWeight: 600 }}>
+                                                            <UsersIcon size={14} color="#1D4ED8" />
+                                                            <span>{cl.team_name}</span>
                                                         </span>
                                                     ) : (
-                                                        <span style={{ color: "#4B5563" }}>
-                                                            👤 {cl.technician_name}
+                                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#4B5563" }}>
+                                                            <UserIcon size={14} color="#6B7280" />
+                                                            <span>{cl.technician_name}</span>
                                                         </span>
                                                     )}
                                                 </td>
                                                 <td style={{ padding: "12px 14px", fontSize: 12, color: "#374151", fontWeight: 600 }}>
-                                                    📦 {cl.total_items_count} items
+                                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                                        <PackageIcon size={14} color="#64748B" />
+                                                        <span>{cl.total_items_count} items</span>
+                                                    </span>
                                                 </td>
                                                 <td style={{ padding: "12px 14px" }}>
                                                     <StatusBadge status={cl.status} />
@@ -432,32 +504,38 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                                                         <button
                                                             className="btn-secondary"
-                                                            style={{ padding: "5px 10px", fontSize: 11 }}
+                                                            style={{ padding: "5px 10px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 5 }}
                                                             onClick={() => setViewChecklistModal(cl)}
                                                         >
-                                                            👁 Items
+                                                            <EyeIcon size={12} />
+                                                            <span>Items</span>
                                                         </button>
                                                         {isPending ? (
                                                             <button
                                                                 className="btn-primary"
-                                                                style={{ padding: "5px 10px", fontSize: 11 }}
+                                                                style={{ padding: "5px 10px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 5 }}
                                                                 onClick={() => openEditChecklistModal(cl)}
                                                             >
-                                                                ✏️ Edit
+                                                                <EditIcon size={12} />
+                                                                <span>Edit</span>
                                                             </button>
                                                         ) : (
                                                             <span
                                                                 style={{
                                                                     fontSize: 11,
-                                                                    color: "#9CA3AF",
+                                                                    color: "#6B7280",
                                                                     background: "#F3F4F6",
                                                                     padding: "4px 8px",
                                                                     borderRadius: 6,
                                                                     cursor: "help",
+                                                                    display: "inline-flex",
+                                                                    alignItems: "center",
+                                                                    gap: 4,
                                                                 }}
                                                                 title="Approved checklists are locked for technicians. Only Tools Man can modify items."
                                                             >
-                                                                🔒 Locked
+                                                                <LockIcon size={11} color="#9CA3AF" />
+                                                                <span>Locked</span>
                                                             </span>
                                                         )}
                                                     </div>
@@ -488,7 +566,9 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                             gap: 12,
                         }}
                     >
-                        <span style={{ fontSize: 24 }}>🔒</span>
+                        <div style={{ width: 40, height: 40, borderRadius: 10, background: "#FEE2E2", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <LockIcon size={20} color="#DC2626" />
+                        </div>
                         <div>
                             <strong style={{ color: "#991B1B", fontSize: 13, display: "block" }}>
                                 View-Only Equipment & Material Inventory
@@ -605,7 +685,8 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                 <td style={{ padding: "12px 14px" }}>
                                                     {isDamaged ? (
                                                         <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "#FEE2E2", color: "#DC2626", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                                            ⚠️ Damaged / Lost
+                                                            <AlertCircleIcon size={12} color="#DC2626" />
+                                                            <span>Damaged / Lost</span>
                                                         </span>
                                                     ) : isBorrowed ? (
                                                         <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "#DBEAFE", color: "#1E40AF", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -613,7 +694,8 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                         </span>
                                                     ) : isOutOfStock ? (
                                                         <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "#FEF3C7", color: "#D97706", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                                            ⚠️ Out of Stock
+                                                            <AlertCircleIcon size={12} color="#D97706" />
+                                                            <span>Out of Stock</span>
                                                         </span>
                                                     ) : (
                                                         <StatusBadge status={item.status} />
@@ -621,7 +703,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                 </td>
                                                 <td style={{ padding: "12px 14px", fontSize: 11, color: "#64748B" }}>
                                                     <span style={{ background: "#F1F5F9", padding: "3px 8px", borderRadius: 6, border: "1px solid #E2E8F0" }}>
-                                                        📋 Via Task Checklist
+                                                        Via Task Checklist
                                                     </span>
                                                 </td>
                                             </tr>
@@ -652,8 +734,9 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                             Assigned Task / Booking (Required)
                         </label>
                         {assignedBookings.length === 0 ? (
-                            <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13 }}>
-                                ⚠️ <strong>No Assigned Tasks:</strong> You can create a checklist once a service booking is assigned to you by the manager.
+                            <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                                <AlertCircleIcon size={16} color="#DC2626" />
+                                <span><strong>No Assigned Tasks:</strong> You can create a checklist once a service booking is assigned to you by the manager.</span>
                             </div>
                         ) : (
                             <select
@@ -757,18 +840,20 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                             {item.item_name}
                                                         </span>
                                                         {isDamaged && (
-                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEE2E2", color: "#DC2626" }}>
-                                                                ⚠️ Damaged / Broken — Unavailable
+                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEE2E2", color: "#DC2626", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                                                <AlertCircleIcon size={10} color="#DC2626" />
+                                                                <span>Damaged / Broken — Unavailable</span>
                                                             </span>
                                                         )}
                                                         {isBorrowed && !isDamaged && (
                                                             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#DBEAFE", color: "#1E40AF" }}>
-                                                                ⚠️ In Use / Borrowed
+                                                                In Use / Borrowed
                                                             </span>
                                                         )}
                                                         {isOutOfStock && !isDamaged && !isBorrowed && (
-                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEF3C7", color: "#D97706" }}>
-                                                                ⚠️ Out of Stock — Unavailable
+                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEF3C7", color: "#D97706", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                                                <AlertCircleIcon size={10} color="#D97706" />
+                                                                <span>Out of Stock — Unavailable</span>
                                                             </span>
                                                         )}
                                                     </div>
@@ -858,8 +943,9 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                         </div>
 
                         {viewChecklistModal.notes && (
-                            <p style={{ fontSize: 12, color: "#475569", background: "#F1F5F9", padding: "8px 12px", borderRadius: 8, margin: "0 0 14px" }}>
-                                💬 <strong>Technician Note:</strong> {viewChecklistModal.notes}
+                            <p style={{ fontSize: 12, color: "#475569", background: "#F1F5F9", padding: "8px 12px", borderRadius: 8, margin: "0 0 14px", display: "flex", alignItems: "center", gap: 6 }}>
+                                <MessageSquareIcon size={14} color="#64748B" />
+                                <span><strong>Technician Note:</strong> {viewChecklistModal.notes}</span>
                             </p>
                         )}
 

@@ -672,19 +672,24 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                             setShowNewRoleModal(true);
                         }}
                     >
-                        ⚡ + New Role Category
+                        + New Role Category
                     </button>
                     <button
                         className="btn-secondary"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                         onClick={() => setShowManageRolesModal(true)}
                     >
-                        ⚙️ Manage Roles
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="3" />
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+                        </svg>
+                        <span>Manage Roles</span>
                     </button>
                     <button
                         className="btn-secondary"
                         onClick={() => setViewMode(viewMode === "deactivated" ? "active" : "deactivated")}
                     >
-                        {viewMode === "deactivated" ? "← Active Staff" : "🗃 View Deactivated"}
+                        {viewMode === "deactivated" ? "Active Staff" : "View Deactivated"}
                     </button>
                     {viewMode === "active" && (
                         <button className="btn-primary" onClick={() => openAddForm(selectedCategory)}>
@@ -850,7 +855,7 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                     <input
                         type="text"
                         className="input-field"
-                        placeholder="🔍 Search staff by name, email, phone, or role..."
+                        placeholder="Search staff by name, email, phone, or role..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         style={{ padding: "9px 14px", fontSize: 13 }}
@@ -1005,7 +1010,7 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                                                                         style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600 }}
                                                                         onClick={() => openEditForm(user)}
                                                                     >
-                                                                        ✏️ Edit
+                                                                        Edit
                                                                     </button>
                                                                 ) : (
                                                                     <span
@@ -1178,7 +1183,7 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                                                     setShowNewRoleModal(true);
                                                 }}
                                             >
-                                                ✏️ Edit
+                                                Edit
                                             </button>
                                         )}
                                         {!isCore && (
@@ -1190,7 +1195,7 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                                                     setShowManageRolesModal(false);
                                                 }}
                                             >
-                                                🗑 Delete
+                                                Delete
                                             </button>
                                         )}
                                     </div>

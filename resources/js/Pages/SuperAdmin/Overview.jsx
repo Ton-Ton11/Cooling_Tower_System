@@ -119,16 +119,16 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
 
                                 <div className="flex items-center gap-2.5 pt-1 flex-wrap text-[11px] text-slate-300">
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        👥 {stats.active_staff ?? 0} Staff
+                                        {stats.active_staff ?? 0} Staff
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        📋 {stats.pending_bookings ?? 0} Pending
+                                        {stats.pending_bookings ?? 0} Pending
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ❄️ {stats.available_ac_units ?? 0} AC Units
+                                        {stats.available_ac_units ?? 0} AC Units
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg font-bold text-emerald-300">
-                                        💰 {formatCurrency(stats.paid_revenue_this_month ?? 0)}
+                                        {formatCurrency(stats.paid_revenue_this_month ?? 0)}
                                     </span>
                                 </div>
                             </div>
@@ -173,7 +173,7 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                📊 Revenue & Trends
+                                Revenue & Trends
                             </button>
                             <button
                                 onClick={() => setActiveTab("pending")}
@@ -183,7 +183,7 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                ⏳ Pending Bookings ({pendingBookings.length})
+                                Pending Bookings ({pendingBookings.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab("activity")}
@@ -193,7 +193,7 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                🛡️ Audit Trail ({recentActivity.length})
+                                Audit Trail ({recentActivity.length})
                             </button>
                         </div>
 

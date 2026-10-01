@@ -12,6 +12,12 @@ import {
     toInputDate,
 } from "../../utils/superAdmin";
 
+const ZapIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+);
+
 // Constants
 const PART_NAMES = [
     'Capacitor 35+5 MFD', 'Contactor 25A', 'Fan Motor 1/5HP', 'Thermistor Sensor',
@@ -1265,10 +1271,9 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                 borderRadius: 7,
                                 background: "#EFF6FF",
                                 color: "#3F7DFF",
-                                fontSize: 14,
                             }}
                         >
-                            ⚡
+                            <ZapIcon size={14} color="#3F7DFF" />
                         </span>
                         <div>
                             <h3

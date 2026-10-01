@@ -255,7 +255,10 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                                 onClick={() => setViewDetailsBooking(b)}
                                                 className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-1.5"
                                             >
-                                                <span>📋 Review Quotation</span>
+                                                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <span>Review Quotation</span>
                                             </button>
                                         )}
 
@@ -289,7 +292,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                                 }`}
                                             >
                                                 <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
-                                                {b.feedback ? `Rated (${b.feedback.rating}★)` : "Submit Feedback"}
+                                                {b.feedback ? `Rated (${b.feedback.rating}/5)` : "Submit Feedback"}
                                             </button>
                                         )}
 
@@ -319,24 +322,37 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                                 <div className="space-y-1">
                                                     {b.lead_technician_name && (
                                                         <div className="flex items-center gap-1.5 text-blue-800 font-semibold">
-                                                            <span>👤 {b.lead_technician_name}</span>
+                                                            <svg className="w-3.5 h-3.5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                            </svg>
+                                                            <span>{b.lead_technician_name}</span>
                                                             <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded">Lead</span>
                                                         </div>
                                                     )}
                                                     {b.assistant_technician_name && (
                                                         <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
-                                                            <span>👤 {b.assistant_technician_name}</span>
+                                                            <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                            </svg>
+                                                            <span>{b.assistant_technician_name}</span>
                                                             <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded">Assistant</span>
                                                         </div>
                                                     )}
                                                 </div>
                                             ) : b.assigned_team_name ? (
-                                                <span className="text-blue-700 font-bold flex items-center gap-1">
-                                                    <span>👥</span>
+                                                <span className="text-blue-700 font-bold flex items-center gap-1.5">
+                                                    <svg className="w-3.5 h-3.5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                                    </svg>
                                                     <span>{b.assigned_team_name}</span>
                                                 </span>
                                             ) : b.assigned_tech_name ? (
-                                                <span className="text-blue-700 font-bold">👤 {b.assigned_tech_name}</span>
+                                                <span className="text-blue-700 font-bold flex items-center gap-1.5">
+                                                    <svg className="w-3.5 h-3.5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                    </svg>
+                                                    <span>{b.assigned_tech_name}</span>
+                                                </span>
                                             ) : (
                                                 <span className="text-amber-600 font-semibold italic">Waiting for Assessment</span>
                                             )}
@@ -439,17 +455,27 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                         {(viewDetailsBooking.lead_technician_name || viewDetailsBooking.assistant_technician_name) && (
                             <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4">
                                 <div className="flex items-center justify-between mb-2.5">
-                                    <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
-                                        👥 Assigned Technician Team
+                                    <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <svg className="w-3.5 h-3.5 text-blue-700 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                        </svg>
+                                        <span>Assigned Technician Team</span>
                                     </span>
-                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                                        ✓ 2 Technicians Assigned
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        <span>2 Technicians Assigned</span>
                                     </span>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                                     {viewDetailsBooking.lead_technician_name && (
                                         <div className="bg-white p-2.5 rounded-xl border border-blue-100 flex items-center gap-2.5 shadow-xs">
-                                            <span className="text-lg">👤</span>
+                                            <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0 text-blue-600">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                </svg>
+                                            </div>
                                             <div>
                                                 <div className="font-bold text-gray-900">{viewDetailsBooking.lead_technician_name}</div>
                                                 <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">Lead Technician</span>
@@ -458,7 +484,11 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                     )}
                                     {viewDetailsBooking.assistant_technician_name && (
                                         <div className="bg-white p-2.5 rounded-xl border border-emerald-100 flex items-center gap-2.5 shadow-xs">
-                                            <span className="text-lg">👤</span>
+                                            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0 text-emerald-600">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                </svg>
+                                            </div>
                                             <div>
                                                 <div className="font-bold text-gray-900">{viewDetailsBooking.assistant_technician_name}</div>
                                                 <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Assistant Technician</span>
@@ -559,10 +589,12 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             <button
                                                 type="button"
                                                 disabled={quotationActionLoading}
-                                                onClick={() => handleQuotationResponse("accept", viewDetailsBooking.booking_id)}
                                                 className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md transition flex items-center gap-1.5"
                                             >
-                                                <span>✓ Accept & Agree</span>
+                                                <svg className="w-4 h-4 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                                </svg>
+                                                <span>Accept & Agree</span>
                                             </button>
                                             <button
                                                 type="button"

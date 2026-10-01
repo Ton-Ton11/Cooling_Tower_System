@@ -14,6 +14,22 @@ const ICON_PRESETS = [
     { label: "Industrial Cooler", path: "M13 10V3L4 14h7v7l9-11h-7z" },
 ];
 
+const ArchiveIcon = ({ className = "w-3.5 h-3.5" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+    </svg>
+);
+const RestoreIcon = ({ className = "w-3.5 h-3.5" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+);
+const TrashIcon = ({ className = "w-3.5 h-3.5" }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+
 export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SUPER_ADMIN_ENDPOINTS }) {
     const { auth } = usePage().props;
     const isSuperAdmin = Number(auth?.user?.role_id) === 1;
@@ -562,7 +578,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                             : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                                                     }`}
                                                 >
-                                                    {service.is_active ? "● Active" : "📦 Archived"}
+                                                    {service.is_active ? "● Active" : "● Archived"}
                                                 </span>
                                             </div>
 
@@ -597,10 +613,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                 title: service.service_name,
                                                                 action: "archive",
                                                             })}
-                                                            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                             title="Archive this service"
                                                         >
-                                                            <span>📦</span>
+                                                            <ArchiveIcon />
                                                             <span>Archive</span>
                                                         </button>
                                                     ) : (
@@ -613,10 +629,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                     title: service.service_name,
                                                                     action: "restore",
                                                                 })}
-                                                                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                                className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                                 title="Restore this service to active"
                                                             >
-                                                                <span>🔄</span>
+                                                                <RestoreIcon />
                                                                 <span>Restore</span>
                                                             </button>
                                                             {isSuperAdmin && (
@@ -628,10 +644,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                         title: service.service_name,
                                                                         hasBookings: (service.bookings_count ?? 0) > 0,
                                                                     })}
-                                                                    className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                                    className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                                     title="Permanently delete this service from database (Super Admin only)"
                                                                 >
-                                                                    <span>🗑️</span>
+                                                                    <TrashIcon />
                                                                     <span>Delete</span>
                                                                 </button>
                                                             )}
@@ -690,7 +706,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                             : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                                                     }`}
                                                 >
-                                                    {unit.is_active ? "● Active" : "📦 Archived"}
+                                                    {unit.is_active ? "● Active" : "● Archived"}
                                                 </span>
                                             </div>
 
@@ -717,10 +733,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                             title: unit.name,
                                                             action: "archive",
                                                         })}
-                                                        className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                        className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                         title="Archive this unit type"
                                                     >
-                                                        <span>📦</span>
+                                                        <ArchiveIcon />
                                                         <span>Archive</span>
                                                     </button>
                                                 ) : (
@@ -733,10 +749,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                 title: unit.name,
                                                                 action: "restore",
                                                             })}
-                                                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                            className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                             title="Restore this unit type"
                                                         >
-                                                            <span>🔄</span>
+                                                            <RestoreIcon />
                                                             <span>Restore</span>
                                                         </button>
                                                         {isSuperAdmin && (
@@ -748,10 +764,10 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                     title: unit.name,
                                                                     hasBookings: false,
                                                                 })}
-                                                                className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/60 font-bold transition text-xs inline-flex items-center gap-1"
+                                                                className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/60 font-bold transition text-xs inline-flex items-center gap-1.5"
                                                                 title="Permanently delete this unit type from database (Super Admin only)"
                                                             >
-                                                                <span>🗑️</span>
+                                                                <TrashIcon />
                                                                 <span>Delete</span>
                                                             </button>
                                                         )}
@@ -798,7 +814,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                             : "bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                                                     }`}
                                                 >
-                                                    {brand.is_active ? "● Active" : "📦 Archived"}
+                                                    {brand.is_active ? "● Active" : "● Archived"}
                                                 </span>
                                             </div>
 
@@ -836,7 +852,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                         className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200/60 font-bold transition text-[11px] inline-flex items-center gap-1"
                                                         title="Archive this brand"
                                                     >
-                                                        <span>📦</span>
+                                                        <ArchiveIcon className="w-3 h-3" />
                                                         <span>Archive</span>
                                                     </button>
                                                 ) : (
@@ -852,7 +868,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                             className="px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 font-bold transition text-[11px] inline-flex items-center gap-1"
                                                             title="Restore this brand"
                                                         >
-                                                            <span>🔄</span>
+                                                            <RestoreIcon className="w-3 h-3" />
                                                             <span>Restore</span>
                                                         </button>
                                                         {isSuperAdmin && (
@@ -867,7 +883,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                                                 className="px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/60 font-bold transition text-[11px] inline-flex items-center gap-1"
                                                                 title="Permanently delete this brand from database (Super Admin only)"
                                                             >
-                                                                <span>🗑️</span>
+                                                                <TrashIcon className="w-3 h-3" />
                                                                 <span>Delete</span>
                                                             </button>
                                                         )}

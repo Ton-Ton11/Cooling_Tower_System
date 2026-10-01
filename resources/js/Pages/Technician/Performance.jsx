@@ -25,6 +25,26 @@ const ic = {
 
 const PERIODS = ["Weekly", "Monthly", "Yearly"];
 
+const StarRating = ({ rating = 5 }) => (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+        {[1, 2, 3, 4, 5].map((star) => (
+            <svg
+                key={star}
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill={star <= rating ? "#F59E0B" : "none"}
+                stroke={star <= rating ? "#F59E0B" : "#D1D5DB"}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+        ))}
+    </div>
+);
+
 const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
     return (
@@ -219,10 +239,7 @@ export default function TechnicianPerformance({ addToast }) {
                                             · {rev.service} (Job #{rev.booking_id})
                                         </span>
                                     </div>
-                                    <span style={{ display: "inline-flex", gap: 2, color: "#F59E0B", fontSize: 14 }}>
-                                        {"★".repeat(rev.rating)}
-                                        {"☆".repeat(Math.max(0, 5 - rev.rating))}
-                                    </span>
+                                    <StarRating rating={rev.rating} />
                                 </div>
                                 {rev.feedback && (
                                     <p style={{ margin: 0, fontSize: 13, color: "#374151", fontStyle: "italic" }}>

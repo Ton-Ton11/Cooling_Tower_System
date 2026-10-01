@@ -8,6 +8,55 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
+const RestoreIcon = ({ size = 12 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+);
+const TrashIcon = ({ size = 12 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+const ArchiveIcon = ({ size = 12 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+    </svg>
+);
+const EditIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+);
+const SearchIcon = ({ size = 13, color = "#9CA3AF" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+);
+const UsersIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+);
+const LockIcon = ({ size = 11, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0110 0v4" />
+    </svg>
+);
+const AlertCircleIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+);
+
 export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
     const { auth } = usePage().props;
     const isSuperAdmin = Number(auth?.user?.role_id) === 1;
@@ -562,7 +611,9 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                     </div>
                 ) : filteredTeams.length === 0 ? (
                     <div style={{ padding: 32, textAlign: "center", color: "#6B7280", background: "#F9FAFB", borderRadius: 12 }}>
-                        <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
+                        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, color: "#9CA3AF" }}>
+                            <UsersIcon size={36} />
+                        </div>
                         <p style={{ fontWeight: 600, margin: "0 0 4px" }}>No technician teams found</p>
                         <p style={{ fontSize: 12, margin: 0 }}>Create a new team to group regular technicians under a squad leader.</p>
                     </div>
@@ -610,7 +661,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                     gap: 6,
                                                 }}
                                             >
-                                                <span>👥</span>
+                                                <UsersIcon size={16} color="#3B82F6" />
                                                 <span>{team.team_name}</span>
                                             </h3>
                                             <span style={{ fontSize: 11, color: "#9CA3AF" }}>
@@ -723,11 +774,11 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                                 gap: 4,
                                                             }}
                                                         >
-                                                            <span>
-                                                                {isLead
-                                                                    ? "👑"
-                                                                    : "🔧"}
-                                                            </span>
+                                                            {isLead && (
+                                                                <span style={{ fontSize: 9, fontWeight: 800, background: "#FEF3C7", color: "#B45309", padding: "1px 4px", borderRadius: 3, letterSpacing: "0.02em" }}>
+                                                                    LEAD
+                                                                </span>
+                                                            )}
                                                             <span>{mName}</span>
                                                             <button
                                                                 type="button"
@@ -822,9 +873,13 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                 background: "#FEF3C7",
                                                 padding: "4px 8px",
                                                 borderRadius: 6,
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: 4,
                                             }}
                                         >
-                                            📦 Archived Squad
+                                            <ArchiveIcon size={12} />
+                                            <span>Archived Squad</span>
                                         </span>
                                     )}
                                     <div style={{ display: "flex", gap: 6 }}>
@@ -833,10 +888,14 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                             style={{
                                                 padding: "5px 10px",
                                                 fontSize: 12,
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: 4,
                                             }}
                                             onClick={() => openEditModal(team)}
                                         >
-                                            ✏️ Edit
+                                            <EditIcon size={12} />
+                                            <span>Edit</span>
                                         </button>
                                         {team.status === "Archived" ? (
                                             <>
@@ -854,7 +913,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                     onClick={() => handleRestore(team)}
                                                     title="Restore this squad to active status"
                                                 >
-                                                    <span>🔄</span>
+                                                    <RestoreIcon size={12} />
                                                     <span>Restore</span>
                                                 </button>
                                                 {isSuperAdmin && (
@@ -872,7 +931,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                         onClick={() => setForceDeleteModal(team)}
                                                         title="Permanently delete this squad from database (Super Admin only)"
                                                     >
-                                                        <span>🗑️</span>
+                                                        <TrashIcon size={12} />
                                                         <span>Delete</span>
                                                     </button>
                                                 )}
@@ -892,7 +951,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                 onClick={() => setArchiveModal(team)}
                                                 title="Archive this squad and release technicians"
                                             >
-                                                <span>📦</span>
+                                                <ArchiveIcon size={12} />
                                                 <span>Archive</span>
                                             </button>
                                         )}
@@ -1051,7 +1110,11 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                 fontWeight: 600,
                                             }}
                                         >
-                                            <span>{isLeader ? "👑" : "🔧"}</span>
+                                            {isLeader && (
+                                                <span style={{ fontSize: 9, fontWeight: 800, background: "#FEF3C7", color: "#B45309", padding: "1px 4px", borderRadius: 3, letterSpacing: "0.02em" }}>
+                                                    LEAD
+                                                </span>
+                                            )}
                                             <span>{displayName}</span>
                                             <button
                                                 type="button"
@@ -1088,11 +1151,12 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                         top: "50%",
                                         transform: "translateY(-50%)",
                                         color: "#9CA3AF",
-                                        fontSize: 13,
+                                        display: "inline-flex",
+                                        alignItems: "center",
                                         pointerEvents: "none",
                                     }}
                                 >
-                                    🔍
+                                    <SearchIcon size={13} />
                                 </span>
                                 <input
                                     type="text"
@@ -1335,8 +1399,8 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                             </span>
                                                         )}
                                                         {isLeader && (
-                                                            <span style={{ fontSize: 10, background: "#FEF3C7", color: "#92400E", padding: "1px 5px", borderRadius: 4, fontWeight: 600 }}>
-                                                                👑 Leader
+                                                            <span style={{ fontSize: 10, background: "#FEF3C7", color: "#92400E", padding: "1px 5px", borderRadius: 4, fontWeight: 700 }}>
+                                                                Leader
                                                             </span>
                                                         )}
                                                     </div>
@@ -1362,7 +1426,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                             gap: 4,
                                                         }}
                                                     >
-                                                        🔒 In {otherTeams.map((t) => t.team_name).join(", ")}
+                                                        <LockIcon size={10} color="#991B1B" /> In {otherTeams.map((t) => t.team_name).join(", ")}
                                                     </span>
                                                 ) : (
                                                     <>
@@ -1379,7 +1443,7 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                                                 background: isSelected ? "#DCFCE7" : "#EFF6FF",
                                                             }}
                                                         >
-                                                            {isSelected ? "✓ Added" : "+ Add"}
+                                                            {isSelected ? "Added" : "+ Add"}
                                                         </span>
                                                     </>
                                                 )}
@@ -1416,9 +1480,15 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                 borderRadius: 8,
                                 fontSize: 12,
                                 lineHeight: 1.4,
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: 8,
                             }}
                         >
-                            ⚠️ <strong>All active technicians are currently assigned to squads.</strong> Each technician can only belong to one squad at a time. To add someone to this team, first remove them from their current squad.
+                            <AlertCircleIcon size={16} color="#B45309" />
+                            <div>
+                                <strong>All active technicians are currently assigned to squads.</strong> Each technician can only belong to one squad at a time. To add someone to this team, first remove them from their current squad.
+                            </div>
                         </div>
                     )}
 
@@ -1440,11 +1510,12 @@ export default function TeamManagement({ addToast, endpoints, onDataChanged }) {
                                     top: "50%",
                                     transform: "translateY(-50%)",
                                     color: "#9CA3AF",
-                                    fontSize: 13,
+                                    display: "inline-flex",
+                                    alignItems: "center",
                                     pointerEvents: "none",
                                 }}
                             >
-                                🔍
+                                <SearchIcon size={13} />
                             </span>
                             <input
                                 type="text"

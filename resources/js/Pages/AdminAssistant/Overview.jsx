@@ -111,13 +111,13 @@ export default function AdminAssistantDashboardOverview({ onNavigate, dashboardD
 
                                 <div className="flex items-center gap-2.5 pt-1 flex-wrap text-[11px] text-slate-300">
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        👥 {stats.active_staff ?? 0} Staff Personnel
+                                        {stats.active_staff ?? 0} Staff Personnel
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ❄️ {stats.available_ac_units ?? 0} AC Units Ready
+                                        {stats.available_ac_units ?? 0} AC Units Ready
                                     </span>
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg font-bold text-emerald-300">
-                                        💰 {formatCurrency(stats.paid_revenue_this_month ?? 0)} Paid This Month
+                                        {formatCurrency(stats.paid_revenue_this_month ?? 0)} Paid This Month
                                     </span>
                                 </div>
                             </div>
@@ -162,7 +162,7 @@ export default function AdminAssistantDashboardOverview({ onNavigate, dashboardD
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                📈 Revenue Trends (7 Days)
+                                Revenue Trends (7 Days)
                             </button>
                             <button
                                 onClick={() => setActiveTab("sales")}
@@ -172,7 +172,7 @@ export default function AdminAssistantDashboardOverview({ onNavigate, dashboardD
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                🧾 Recent Payments ({recentSales.length})
+                                Recent Payments ({recentSales.length})
                             </button>
                             <button
                                 onClick={() => setActiveTab("inventory")}
@@ -182,7 +182,7 @@ export default function AdminAssistantDashboardOverview({ onNavigate, dashboardD
                                         : "bg-transparent text-slate-600 hover:bg-slate-100"
                                 }`}
                             >
-                                ❄️ AC Inventory Summary
+                                AC Inventory Summary
                             </button>
                         </div>
 

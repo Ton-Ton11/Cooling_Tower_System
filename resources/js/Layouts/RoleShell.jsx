@@ -26,6 +26,8 @@ const menuIcon   = "M3 6h18 M3 12h18 M3 18h18";
 const closeIcon  = "M18 6L6 18 M6 6l12 12";
 const chevL      = "M15 18l-6-6 6-6";
 const chevR      = "M9 18l6-6-6-6";
+const calendarPlusIcon = "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm7-7v6m-3-3h6";
+const chatSupportIcon = "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z";
 
 // ── Role-aware Sidebar (inline, not shared with SuperAdmin Sidebar) ───────────
 function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, badges = {}, isMobile, mobileOpen, onMobileClose }) {
@@ -127,7 +129,7 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
                         onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
                     >
-                        <span>⭐</span>
+                        <span style={{ flexShrink: 0, display: "flex", color: "#60A5FA" }}><Icon d={calendarPlusIcon} size={15} /></span>
                         <span>Quick Book Service</span>
                     </button>
                     <button
@@ -136,7 +138,7 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
                         onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
                     >
-                        <span>💬</span>
+                        <span style={{ flexShrink: 0, display: "flex", color: "#94A3B8" }}><Icon d={chatSupportIcon} size={15} /></span>
                         <span>Help & Support</span>
                     </button>
                 </div>

@@ -19,6 +19,26 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
+const StarRating = ({ rating = 5 }) => (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+        {[1, 2, 3, 4, 5].map((star) => (
+            <svg
+                key={star}
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill={star <= rating ? "#F59E0B" : "none"}
+                stroke={star <= rating ? "#F59E0B" : "#D1D5DB"}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+        ))}
+    </div>
+);
+
 function SalesRecords({ addToast, endpoints }) {
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
     const [period, setPeriod] = useState("Monthly");
@@ -470,20 +490,8 @@ function SalesRecords({ addToast, endpoints }) {
                                         >
                                             <div>{record.service}</div>
                                             {record.rating && (
-                                                <div
-                                                    style={{
-                                                        fontSize: 11,
-                                                        color: "#F58A07",
-                                                        marginTop: 4,
-                                                    }}
-                                                >
-                                                    {"★".repeat(record.rating)}
-                                                    {"☆".repeat(
-                                                        Math.max(
-                                                            0,
-                                                            5 - record.rating,
-                                                        ),
-                                                    )}
+                                                <div style={{ marginTop: 4 }}>
+                                                    <StarRating rating={record.rating} />
                                                 </div>
                                             )}
                                         </td>

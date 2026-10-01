@@ -608,10 +608,18 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                 <span className="font-semibold text-gray-400 uppercase text-[10px]">Preferred Schedule</span>
                                 <p className="font-bold text-gray-800 mt-0.5">{submittedBooking.scheduled_date}</p>
                                 {submittedBooking.rate_type && (
-                                    <p className={`text-[11px] font-bold mt-1 flex items-center gap-1 ${
+                                    <p className={`text-[11px] font-bold mt-1 flex items-center gap-1.5 ${
                                         submittedBooking.is_differential ? "text-amber-800" : "text-emerald-700"
                                     }`}>
-                                        <span>{submittedBooking.is_differential ? "⚠️" : "✓"}</span>
+                                        {submittedBooking.is_differential ? (
+                                            <svg className="w-3.5 h-3.5 text-amber-600 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                        ) : (
+                                            <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                            </svg>
+                                        )}
                                         <span>{submittedBooking.rate_type}</span>
                                     </p>
                                 )}
@@ -879,8 +887,10 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                         {/* Selected Service Brief Banner */}
                         <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 border border-blue-100 rounded-2xl p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <span className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-                                    ✓
+                                <span className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                                    <svg className="w-4 h-4 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                    </svg>
                                 </span>
                                 <div>
                                     <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Requested Service Category</span>
@@ -1355,9 +1365,14 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                                                 {isSel && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                                                             </div>
                                                         </div>
-                                                        <div className="mt-1 flex items-center">
-                                                            <span className={`text-[10px] font-semibold ${isSel ? "text-blue-700" : "text-gray-400"}`}>
-                                                                {isSel ? "✓ Regular" : "Regular"}
+                                                        <div className="mt-1 flex items-center gap-1">
+                                                            {isSel && (
+                                                                <svg className="w-2.5 h-2.5 text-blue-600 shrink-0 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                                                </svg>
+                                                            )}
+                                                            <span className={`text-[10px] font-semibold ${isSel ? "text-blue-700 font-bold" : "text-gray-400"}`}>
+                                                                Regular
                                                             </span>
                                                         </div>
                                                     </button>
@@ -1402,12 +1417,17 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                                             </div>
                                                         </div>
                                                         <div className="mt-1 flex items-center">
-                                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
                                                                 isSel
                                                                     ? "bg-amber-200 text-amber-900"
                                                                     : "bg-amber-100/80 text-amber-800"
                                                             }`}>
-                                                                {isSel ? "⚠️ Differential" : "Differential"}
+                                                                {isSel && (
+                                                                    <svg className="w-2.5 h-2.5 text-amber-900 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                                    </svg>
+                                                                )}
+                                                                Differential
                                                             </span>
                                                         </div>
                                                     </button>
@@ -1419,8 +1439,10 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                     {/* 3. Dynamic Rate Classification Status Banner */}
                                     {activeRateInfo.isDifferential ? (
                                         <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/90 text-amber-950 flex items-start gap-3 transition">
-                                            <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700 font-bold text-sm">
-                                                ⚠️
+                                            <div className="w-7 h-7 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-700">
+                                                <svg className="w-4 h-4 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
                                             </div>
                                             <div>
                                                 <div className="flex items-center gap-2">
@@ -1438,8 +1460,10 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                         </div>
                                     ) : (
                                         <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/70 text-emerald-950 flex items-start gap-3 transition">
-                                            <div className="w-7 h-7 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">
-                                                ✓
+                                            <div className="w-7 h-7 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center shrink-0 text-emerald-700">
+                                                <svg className="w-4 h-4 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                                </svg>
                                             </div>
                                             <div>
                                                 <div className="flex items-center gap-2">
@@ -1666,7 +1690,9 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                         {/* Configurable Cancellation & Rescheduling Policy Card */}
                         <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 space-y-3">
                             <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wide">
-                                <span>⚠️</span>
+                                <svg className="w-4 h-4 text-amber-700 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
                                 <span>Cancellation, Rescheduling & No-Show Policy</span>
                             </div>
                             <p className="text-xs text-amber-900/90 leading-relaxed">
@@ -1769,12 +1795,18 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                     <p className="font-bold text-gray-800 mt-0.5">{scheduledDate} at {activeRateInfo.label || scheduledTime}</p>
                                     <div className="mt-1">
                                         {activeRateInfo.isDifferential ? (
-                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                                                <span>⚠️</span> Differential Rate Applies
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                                <svg className="w-3 h-3 text-amber-700 shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                </svg>
+                                                <span>Differential Rate Applies</span>
                                             </span>
                                         ) : (
-                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                                <span>✓</span> Regular Rate
+                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                <svg className="w-3 h-3 text-emerald-700 shrink-0 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                                </svg>
+                                                <span>Regular Rate</span>
                                             </span>
                                         )}
                                     </div>

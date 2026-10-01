@@ -9,6 +9,57 @@ import {
 
 const tabs = ["All", "Pending", "Approved", "Completed", "History"];
 
+const WrenchIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+);
+const UsersIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+);
+const PackageIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16.5 9.4L7.55 4.24a1.78 1.78 0 00-2.5 1.55v12.42a1.78 1.78 0 002.5 1.55l8.95-5.16a1.78 1.78 0 000-3.1z" />
+        <polyline points="3.29 7 12 12 20.71 7" />
+        <line x1="12" y1="22" x2="12" y2="12" />
+    </svg>
+);
+const SearchIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+);
+const ClipboardIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </svg>
+);
+const ClockIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+    </svg>
+);
+const AlertCircleIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+);
+const ZapIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+);
+
 export default function ToolsManChecklists({ addToast, onDataChanged, currentUser }) {
     let authUser = currentUser || null;
     if (!authUser && typeof window !== 'undefined') {
@@ -719,10 +770,9 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                     borderRadius: 7,
                                     background: "#EFF6FF",
                                     color: "#3F7DFF",
-                                    fontSize: 14,
                                 }}
                             >
-                                ⚡
+                                <ZapIcon size={14} color="#3F7DFF" />
                             </span>
                             <div>
                                 <h3
@@ -896,9 +946,13 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                     overflow: "hidden",
                                                     textOverflow: "ellipsis",
                                                     whiteSpace: "nowrap",
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    gap: 4,
                                                 }}
                                             >
-                                                🛠 {serviceName}
+                                                <WrenchIcon size={12} color="#64748B" />
+                                                <span>{serviceName}</span>
                                             </div>
                                         </div>
 
@@ -924,11 +978,19 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                     textOverflow: "ellipsis",
                                                     whiteSpace: "nowrap",
                                                     maxWidth: 130,
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    gap: 4,
                                                 }}
                                             >
-                                                {cl.team_name
-                                                    ? `👥 ${cl.team_name}`
-                                                    : "No team"}
+                                                {cl.team_name ? (
+                                                    <>
+                                                        <UsersIcon size={12} color="#1D4ED8" />
+                                                        <span>{cl.team_name}</span>
+                                                    </>
+                                                ) : (
+                                                    "No team"
+                                                )}
                                             </span>
                                             <span
                                                 style={{
@@ -987,7 +1049,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                 className={`tab-item ${tab === t ? "active" : ""}`}
                                 onClick={() => setTab(t)}
                             >
-                                {t === "History" ? "📜 History" : t}
+                                {t}
                                 <span
                                     style={{
                                         marginLeft: 6,
@@ -1080,7 +1142,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                     justifyContent: "center",
                                 }}
                             >
-                                ✕
+                                <span style={{ fontSize: 16, lineHeight: 1 }}>&times;</span>
                             </button>
                         )}
                     </div>
@@ -1122,7 +1184,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                     }}
                 >
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span>📜</span>
+                        <ClockIcon size={16} color="#64748B" />
                         <span>
                             <strong>Dispatched & Completed History:</strong> Displaying all completed checklists and verified dispatches ordered chronologically.
                         </span>
@@ -1154,7 +1216,9 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                     >
                         {searchQuery.trim() ? (
                             <div>
-                                <div style={{ fontSize: 28, marginBottom: 8 }}>🔍</div>
+                                <div style={{ width: 44, height: 44, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", color: "#64748B" }}>
+                                    <SearchIcon size={22} />
+                                </div>
                                 <div
                                     style={{
                                         fontSize: 15,
@@ -1189,7 +1253,9 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                             </div>
                         ) : (
                             <div>
-                                <div style={{ fontSize: 24, marginBottom: 6 }}>📋</div>
+                                <div style={{ width: 44, height: 44, borderRadius: 12, background: "#F1F5F9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px", color: "#64748B" }}>
+                                    <ClipboardIcon size={22} />
+                                </div>
                                 <div
                                     style={{
                                         fontSize: 14,
@@ -1316,9 +1382,13 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                     style={{
                                                         color: "#4B5563",
                                                         marginTop: 2,
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 5,
                                                     }}
                                                 >
-                                                    🛠 {cl.service_name || cl.booking?.service_name || "Aircon Service"}
+                                                    <WrenchIcon size={12} color="#64748B" />
+                                                    <span>{cl.service_name || cl.booking?.service_name || "Aircon Service"}</span>
                                                 </div>
                                             </td>
                                             <td
@@ -1335,10 +1405,10 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                             display: "flex",
                                                             alignItems:
                                                                 "center",
-                                                            gap: 4,
+                                                            gap: 5,
                                                         }}
                                                     >
-                                                        <span>👥</span>
+                                                        <UsersIcon size={13} color="#1D4ED8" />
                                                         <span>
                                                             {cl.team_name}
                                                         </span>
@@ -1370,17 +1440,23 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                     fontWeight: 600,
                                                 }}
                                             >
-                                                📦 {cl.items_count} items
+                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                                                    <PackageIcon size={13} color="#64748B" />
+                                                    <span>{cl.items_count} items</span>
+                                                </span>
                                                 {cl.has_unresolved_tools && (
                                                     <span
                                                         style={{
-                                                            display: "block",
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 4,
                                                             fontSize: 10,
                                                             color: "#D97706",
                                                             marginTop: 2,
                                                         }}
                                                     >
-                                                        ⏳ Tools in custody
+                                                        <ClockIcon size={11} color="#D97706" />
+                                                        <span>Tools in custody</span>
                                                     </span>
                                                 )}
                                             </td>
@@ -1420,6 +1496,9 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                             padding:
                                                                 "6px 12px",
                                                             fontSize: 12,
+                                                            display: "inline-flex",
+                                                            alignItems: "center",
+                                                            gap: 5,
                                                         }}
                                                         onClick={() =>
                                                             handleOpenManageModal(
@@ -1427,7 +1506,8 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                             )
                                                         }
                                                     >
-                                                        🛠 Inspect & Manage
+                                                        <WrenchIcon size={12} color="#FFFFFF" />
+                                                        <span>Inspect & Manage</span>
                                                     </button>
                                                 </div>
                                             </td>
@@ -1512,9 +1592,13 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                 padding: "2px 8px",
                                                 borderRadius: 6,
                                                 fontWeight: 600,
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                gap: 4,
                                             }}
                                         >
-                                            👥 {managingChecklist.team_name}
+                                            <UsersIcon size={12} color="#1E40AF" />
+                                            <span>{managingChecklist.team_name}</span>
                                         </span>
                                     )}
                                 </div>
@@ -1555,7 +1639,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                 >
                                     {approving
                                         ? "Approving..."
-                                        : "✅ Approve & Issue Tools"}
+                                        : "Approve & Issue Tools"}
                                 </button>
                             )}
 
@@ -1592,7 +1676,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                 >
                                     {completing
                                         ? "Completing..."
-                                        : "🏁 Declare Checklist Complete"}
+                                        : "Declare Checklist Complete"}
                                 </button>
                             )}
                         </div>
@@ -1613,7 +1697,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                         gap: 8,
                                     }}
                                 >
-                                    <span>⚠️</span>
+                                    <AlertCircleIcon size={16} color="#DC2626" />
                                     <span>
                                         <strong>
                                             {unresolvedToolsCount} tool(s)
@@ -1972,11 +2056,12 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                 top: "50%",
                                                 transform: "translateY(-50%)",
                                                 color: "#9CA3AF",
-                                                fontSize: 12,
                                                 pointerEvents: "none",
+                                                display: "flex",
+                                                alignItems: "center",
                                             }}
                                         >
-                                            🔍
+                                            <SearchIcon size={13} />
                                         </span>
                                         <input
                                             type="text"
@@ -2009,7 +2094,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                     fontSize: 11,
                                                 }}
                                             >
-                                                ✕
+                                                <span style={{ fontSize: 14, lineHeight: 1 }}>&times;</span>
                                             </button>
                                         )}
                                     </div>
@@ -2054,9 +2139,9 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                         const isOutOfStock = catItem.quantity_on_hand <= 0;
                                                         const isUnavailable = !catItem.is_available || isDamaged || isBorrowed || isOutOfStock;
                                                         const statusText = isDamaged
-                                                            ? "⚠️ DAMAGED / BROKEN"
+                                                            ? "DAMAGED / BROKEN"
                                                             : isBorrowed
-                                                            ? "⚠️ CURRENTLY IN USE"
+                                                            ? "CURRENTLY IN USE"
                                                             : isOutOfStock
                                                             ? "OUT OF STOCK"
                                                             : `Stock: ${catItem.quantity_on_hand} / Total: ${catItem.initial_stock || catItem.quantity_on_hand} ${catItem.unit || "pcs"}`;
@@ -2222,20 +2307,23 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                             </div>
                                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                                 {selIsDamaged ? (
-                                                    <span style={{ color: "#DC2626", fontWeight: 700 }}>
-                                                        ⚠️ Damaged / Broken in inventory
+                                                    <span style={{ color: "#DC2626", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                        <AlertCircleIcon size={12} color="#DC2626" />
+                                                        <span>Damaged / Broken in inventory</span>
                                                     </span>
                                                 ) : selIsBorrowed ? (
-                                                    <span style={{ color: "#1E40AF", fontWeight: 700 }}>
-                                                        ⚠️ Currently in use / borrowed
+                                                    <span style={{ color: "#1E40AF", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                        <AlertCircleIcon size={12} color="#1E40AF" />
+                                                        <span>Currently in use / borrowed</span>
                                                     </span>
                                                 ) : availableStock > 0 ? (
                                                     <span style={{ color: "#166534", fontWeight: 600 }}>
                                                         Available in Inventory: <strong>{availableStock}</strong> / Total: {selectedCatalogItem.initial_stock || availableStock} {selectedCatalogItem.unit || "pcs"}
                                                     </span>
                                                 ) : (
-                                                    <span style={{ color: "#DC2626", fontWeight: 700 }}>
-                                                        ⚠️ Out of stock (0 available)
+                                                    <span style={{ color: "#DC2626", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                        <AlertCircleIcon size={12} color="#DC2626" />
+                                                        <span>Out of stock (0 available)</span>
                                                     </span>
                                                 )}
                                                 <button

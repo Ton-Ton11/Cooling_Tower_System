@@ -49,7 +49,7 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
         {
             id: 4,
             title: "Review customer service satisfaction rating",
-            sub: `Current rating: ${stats.avg_rating ?? 5.0} ★ Average score`,
+            sub: `Current rating: ${stats.avg_rating ?? 5.0} Average score`,
             target: "performance",
             badge: "Quality",
         },
@@ -95,14 +95,17 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                                 </p>
                                 
                                 <div className="flex items-center gap-2.5 pt-1 flex-wrap text-[11px] text-slate-300">
-                                    <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        📋 {stats.assigned_bookings ?? 0} Assigned Jobs
+                                    <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
+                                        <svg className="w-3.5 h-3.5 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                        {stats.assigned_bookings ?? 0} Assigned Jobs
                                     </span>
-                                    <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ⚡ {stats.in_progress_bookings ?? 0} In-Progress
+                                    <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
+                                        <svg className="w-3.5 h-3.5 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                        {stats.in_progress_bookings ?? 0} In-Progress
                                     </span>
-                                    <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
-                                        ★ {stats.avg_rating ?? 5.0} Rating
+                                    <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
+                                        <svg className="w-3.5 h-3.5 text-yellow-300" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                                        {stats.avg_rating ?? 5.0} Rating
                                     </span>
                                 </div>
                             </div>
@@ -242,7 +245,7 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                                                 </p>
                                             </div>
                                             <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                                Completed ✓
+                                                Completed
                                             </span>
                                         </div>
                                     ))
@@ -253,8 +256,8 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
 
                     {/* SECTION 3: SAFETY & WORKMANSHIP PROTOCOLS BANNER */}
                     <div className="bg-gradient-to-r from-amber-50/90 to-orange-50/90 rounded-2xl p-5 border border-amber-200/80 flex items-start gap-4">
-                        <span className="text-2xl p-2 rounded-xl bg-white shadow-sm border border-amber-100 shrink-0">
-                            🛡️
+                        <span className="p-2 rounded-xl bg-white shadow-sm border border-amber-100 shrink-0 text-amber-600 flex items-center justify-center">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                         </span>
                         <div className="space-y-1 text-xs">
                             <h4 className="font-extrabold text-amber-950">Field Safety & Customer Courtesy Protocol</h4>
@@ -275,7 +278,7 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                             <div className="flex items-center gap-2">
                                 <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">
-                                    ✓
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
                                 </span>
                                 <h3 className="text-sm font-extrabold text-slate-900">To-do</h3>
                             </div>
@@ -329,8 +332,9 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                                     <p className="text-slate-600 text-[11px]">
                                         Customer: <strong>{nextJob.client_name || "Valued Client"}</strong>
                                     </p>
-                                    <p className="text-slate-500 text-[11px] truncate">
-                                        📍 {nextJob.client_address || "Service Location"}
+                                    <p className="text-slate-500 text-[11px] truncate flex items-center gap-1">
+                                        <svg className="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                        <span>{nextJob.client_address || "Service Location"}</span>
                                     </p>
                                     <button
                                         onClick={() => onNavigate("bookings")}

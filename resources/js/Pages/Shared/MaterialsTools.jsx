@@ -9,6 +9,59 @@ import {
     normalizeInventoryItem,
 } from "../../utils/superAdmin";
 
+const ZapIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+);
+const PackageIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="16.5" y1="9.4" x2="7.5" y2="4.21" />
+        <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+        <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+);
+const WrenchIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+);
+const RotateCcwIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="1 4 1 10 7 10" />
+        <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+    </svg>
+);
+const UserIcon = ({ size = 14, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+const MailIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+        <polyline points="22,6 12,13 2,6" />
+    </svg>
+);
+const PhoneIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
+    </svg>
+);
+const LockIcon = ({ size = 11, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+        <path d="M7 11V7a5 5 0 0110 0v4" />
+    </svg>
+);
+const CheckIcon = ({ size = 12, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+
 // Constants
 const WORKER_MATERIAL_NAMES = [
     'Refrigerant R32 (1kg)', 'Refrigerant R410A (1kg)', 'Copper Pipe 1/4"', 'Copper Pipe 3/8"',
@@ -1216,10 +1269,9 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 borderRadius: 7,
                                 background: "#EFF6FF",
                                 color: "#3F7DFF",
-                                fontSize: 14,
                             }}
                         >
-                            ⚡
+                            <ZapIcon size={14} color="#3F7DFF" />
                         </span>
                         <div>
                             <h3
@@ -1441,7 +1493,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     For Sale ({saleItems.length})
                 </button>
                 <button className={`tab-item ${mainTab === 'archived' ? 'active' : ''}`} onClick={() => setMainTab('archived')}>
-                    📦 Archived Items ({archivedItems.length})
+                    Archived Items ({archivedItems.length})
                 </button>
             </div>
 
@@ -2404,7 +2456,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                             <div>
                                 <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                                    📦 Archived Inventory Items ({archivedItems.length})
+                                    Archived Inventory Items ({archivedItems.length})
                                 </h3>
                                 <p style={{ fontSize: 12, color: '#64748B', margin: '3px 0 0' }}>
                                     These items are hidden from active technician checklists and worker inventory. You can restore any item to active inventory at any time.
@@ -2718,7 +2770,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 </label>
                                 {selectedCustomer ? (
                                     <span style={{ fontSize: 11, background: '#DCFCE7', color: '#15803D', padding: '2px 8px', borderRadius: 6, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                        ✓ Verified Registered Customer
+                                        <CheckIcon size={12} color="#15803D" />
+                                        <span>Verified Registered Customer</span>
                                     </span>
                                 ) : (
                                     <span style={{ fontSize: 11, background: '#FEF2F2', color: '#DC2626', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
@@ -2735,14 +2788,25 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 }}>
                                     <div>
                                         <div style={{ fontSize: 14, fontWeight: 700, color: '#14532D', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                            <span>👤</span> {selectedCustomer.name}
+                                            <UserIcon size={14} color="#15803D" />
+                                            <span>{selectedCustomer.name}</span>
                                             <span style={{ fontSize: 11, fontWeight: 600, color: '#15803D', background: '#DCFCE7', padding: '1px 6px', borderRadius: 4 }}>
                                                 ID #{selectedCustomer.user_id}
                                             </span>
                                         </div>
-                                        <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
-                                            {selectedCustomer.email && <span>📧 {selectedCustomer.email}</span>}
-                                            {selectedCustomer.contact_number && <span style={{ marginLeft: 8 }}>📞 {selectedCustomer.contact_number}</span>}
+                                        <div style={{ fontSize: 12, color: '#475569', marginTop: 3, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                                            {selectedCustomer.email && (
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                    <MailIcon size={12} color="#64748B" />
+                                                    <span>{selectedCustomer.email}</span>
+                                                </span>
+                                            )}
+                                            {selectedCustomer.contact_number && (
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                                    <PhoneIcon size={12} color="#64748B" />
+                                                    <span>{selectedCustomer.contact_number}</span>
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                     <button
@@ -2761,7 +2825,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     <input
                                         type="text"
                                         className="input-field"
-                                        placeholder="🔍 Type customer name, email, or phone number to search database..."
+                                        placeholder="Type customer name, email, or phone number to search database..."
                                         value={customerSearch}
                                         onChange={(e) => {
                                             setCustomerSearch(e.target.value);
@@ -3218,7 +3282,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <div style={{ gridColumn: '1 / -1' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                                 <p className="section-label" style={{ margin: 0 }}>Managed By</p>
-                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6 }}>🔒 Locked to Tools Man</span>
+                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}><LockIcon size={11} color="#64748B" /><span>Locked to Tools Man</span></span>
                             </div>
                             <input
                                 className="input-field"
@@ -3315,7 +3379,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <div>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                                 <p className="section-label" style={{ margin: 0 }}>Managed By</p>
-                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6 }}>🔒 Locked to Tools Man</span>
+                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}><LockIcon size={11} color="#64748B" /><span>Locked to Tools Man</span></span>
                             </div>
                             <input
                                 className="input-field"
@@ -3400,7 +3464,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <div style={{ gridColumn: '1 / -1' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                                 <p className="section-label" style={{ margin: 0 }}>Managed By</p>
-                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6 }}>🔒 Locked to Tools Man</span>
+                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}><LockIcon size={11} color="#64748B" /><span>Locked to Tools Man</span></span>
                             </div>
                             <input
                                 className="input-field"
@@ -3548,7 +3612,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <div style={{ gridColumn: '1 / -1' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                                 <p className="section-label" style={{ margin: 0 }}>Managed By</p>
-                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6 }}>🔒 Locked to Tools Man</span>
+                                <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, background: '#F1F5F9', padding: '2px 8px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', gap: 4 }}><LockIcon size={11} color="#64748B" /><span>Locked to Tools Man</span></span>
                             </div>
                             <input
                                 className="input-field"
@@ -3613,7 +3677,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                             color: checkoutModal.mode === 'material' ? '#9333EA' : '#2563EB',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
                         }}>
-                            {checkoutModal.mode === 'material' ? '📦' : checkoutModal.mode === 'power_tool' ? '⚡' : '🔧'}
+                            {checkoutModal.mode === 'material' ? <PackageIcon size={20} /> : checkoutModal.mode === 'power_tool' ? <ZapIcon size={20} /> : <WrenchIcon size={20} />}
                         </div>
                         <div>
                             <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
@@ -3802,7 +3866,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                             background: 'rgba(22,163,74,0.1)', color: '#16A34A',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
                         }}>
-                            🔄
+                            <RotateCcwIcon size={20} color="#16A34A" />
                         </div>
                         <div>
                             <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>

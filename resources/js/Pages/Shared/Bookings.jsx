@@ -20,6 +20,62 @@ const tabs = [
     "All",
 ];
 
+const PhoneIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
+    </svg>
+);
+const MapPinIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+        <circle cx="12" cy="10" r="3" />
+    </svg>
+);
+const CalendarIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+);
+const CreditCardIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+        <line x1="1" y1="10" x2="23" y2="10" />
+    </svg>
+);
+const MailIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+        <polyline points="22,6 12,13 2,6" />
+    </svg>
+);
+const UserIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+const FileTextIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+    </svg>
+);
+const CheckIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+const WrenchIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+);
+
 function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const { auth } = usePage().props;
     const currentUser = auth?.user;
@@ -406,7 +462,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                 {booking.lead_technician_name || booking.assigned_tech_name ? (
                                                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                                                         <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "#0E1A33" }}>
-                                                            <span>👤</span>
+                                                            <UserIcon size={12} color="#2563EB" />
                                                             <span>{booking.lead_technician_name || booking.assigned_tech_name}</span>
                                                             <span style={{ fontSize: 9, fontWeight: 800, background: "#EFF6FF", color: "#1D4ED8", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
                                                                 Lead
@@ -414,7 +470,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                         </div>
                                                         {booking.assistant_technician_name && (
                                                             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#475569", fontWeight: 600 }}>
-                                                                <span>👤</span>
+                                                                <UserIcon size={12} color="#64748B" />
                                                                 <span>{booking.assistant_technician_name}</span>
                                                                 <span style={{ fontSize: 9, fontWeight: 800, background: "#F1F5F9", color: "#64748B", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
                                                                     Assistant
@@ -468,8 +524,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                         >
                                                             {booking.booking_status ===
                                                                 "Pending"
-                                                                ? "✅ Assign Team"
-                                                                : "🛠 Reassign"}
+                                                                ? "Assign Team"
+                                                                : "Reassign"}
                                                         </button>
                                                     )}
                                                     {canComplete && !readOnly && (
@@ -485,7 +541,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                             }}
                                                             onClick={() => setCompleteModal(booking)}
                                                         >
-                                                            🏁 Complete
+                                                            Complete
                                                         </button>
                                                     )}
                                                     <button
@@ -498,7 +554,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                             setClientPanel(booking)
                                                         }
                                                     >
-                                                        👤 Client
+                                                        Client
                                                     </button>
                                                 </div>
                                             </td>
@@ -546,14 +602,26 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                     <div>
                                         <span style={{ color: "#64748B", fontWeight: 700, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em" }}>Customer Details</span>
                                         <div style={{ fontWeight: 800, color: "#1E2F5F", marginTop: 2, fontSize: 13 }}>{approveModal.client_name}</div>
-                                        <div style={{ color: "#475569", marginTop: 2 }}>📞 {approveModal.client_contact_number || "No contact"}</div>
-                                        <div style={{ color: "#475569", marginTop: 2 }}>📍 {approveModal.client_address || "No address"}</div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <PhoneIcon size={13} color="#64748B" />
+                                            <span>{approveModal.client_contact_number || "No contact"}</span>
+                                        </div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <MapPinIcon size={13} color="#64748B" />
+                                            <span>{approveModal.client_address || "No address"}</span>
+                                        </div>
                                     </div>
                                     <div>
                                         <span style={{ color: "#64748B", fontWeight: 700, textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em" }}>Requested Service</span>
                                         <div style={{ fontWeight: 800, color: "#2563EB", marginTop: 2, fontSize: 13 }}>{approveModal.service}</div>
-                                        <div style={{ color: "#475569", marginTop: 2 }}>📅 {formatDateTime(approveModal.scheduled_date)}</div>
-                                        <div style={{ color: "#475569", marginTop: 2 }}>💳 {approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)})</div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <CalendarIcon size={13} color="#64748B" />
+                                            <span>{formatDateTime(approveModal.scheduled_date)}</span>
+                                        </div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <CreditCardIcon size={13} color="#64748B" />
+                                            <span>{approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)})</span>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -693,7 +761,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                     </span>
                                     {isBothSelected ? (
                                         <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", display: "flex", alignItems: "center", gap: 4 }}>
-                                            ✓ 2 Technicians Assigned
+                                            <CheckIcon size={12} color="#16A34A" /> 2 Technicians Assigned
                                         </span>
                                     ) : (
                                         <span style={{ fontSize: 11, fontWeight: 600, color: "#D97706" }}>
@@ -705,8 +773,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 {isBothSelected ? (
                                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                                         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
-                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
-                                                👤
+                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                <UserIcon size={16} color="#2563EB" />
                                             </div>
                                             <div style={{ minWidth: 0 }}>
                                                 <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
@@ -719,8 +787,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                         </div>
 
                                         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
-                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#F1F5F9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
-                                                👤
+                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#F1F5F9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                                <UserIcon size={16} color="#64748B" />
                                             </div>
                                             <div style={{ minWidth: 0 }}>
                                                 <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
@@ -735,9 +803,9 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 ) : (
                                     <div style={{ padding: "12px", textAlign: "center", color: "#94A3B8", fontSize: 12, background: "#FFFFFF", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
                                         {assignment.lead_technician_id && !assignment.assistant_technician_id
-                                            ? "👤 Lead selected. Please select an Assistant Technician to complete the pair."
+                                            ? "Lead selected. Please select an Assistant Technician to complete the pair."
                                             : !assignment.lead_technician_id && assignment.assistant_technician_id
-                                                ? "👤 Assistant selected. Please select a Lead Technician to complete the pair."
+                                                ? "Assistant selected. Please select a Lead Technician to complete the pair."
                                                 : "Select both a Lead Technician and an Assistant Technician above."}
                                     </div>
                                 )}
@@ -810,7 +878,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 color: "#065F46",
                             }}
                         >
-                            🏁 Declaring this booking completed will close the active service cycle and update the status across Super Admin, Manager, Technician, and Customer views immediately.
+                            Declaring this booking completed will close the active service cycle and update the status across Super Admin, Manager, Technician, and Customer views immediately.
                         </div>
                     </div>
                 )}
@@ -901,11 +969,10 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                         display: "flex",
                                         alignItems: "center",
                                         justifyContent: "center",
-                                        fontSize: 18,
                                         color: "#fff",
                                     }}
                                 >
-                                    👤
+                                    <UserIcon size={20} color="#fff" />
                                 </div>
                                 <div>
                                     <p
@@ -933,57 +1000,36 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 style={{
                                     fontSize: 13,
                                     color: "#6B7280",
-                                    lineHeight: 1.9,
+                                    lineHeight: 2.1,
                                 }}
                             >
-                                <p style={{ margin: 0 }}>
-                                    📋 Service:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.service}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <FileTextIcon size={14} color="#64748B" />
+                                    <span>Service: <strong style={{ color: "#1E2F5F" }}>{clientPanel.service}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    📅 Scheduled:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {formatDateTime(clientPanel.scheduled_date)}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <CalendarIcon size={14} color="#64748B" />
+                                    <span>Scheduled: <strong style={{ color: "#1E2F5F" }}>{formatDateTime(clientPanel.scheduled_date)}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    📞 Contact:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.client_contact_number ||
-                                            "Not provided"}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <PhoneIcon size={14} color="#64748B" />
+                                    <span>Contact: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_contact_number || "Not provided"}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    ✉️ Email:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.client_email ||
-                                            "Not provided"}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <MailIcon size={14} color="#64748B" />
+                                    <span>Email: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_email || "Not provided"}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    📍 Address:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.client_address ||
-                                            "Not provided"}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <MapPinIcon size={14} color="#64748B" />
+                                    <span>Address: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_address || "Not provided"}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    💳 Payment:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.payment_status}
-                                        {clientPanel.amount_paid
-                                            ? ` · ${formatCurrency(clientPanel.amount_paid)}`
-                                            : ""}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <CreditCardIcon size={14} color="#64748B" />
+                                    <span>Payment: <strong style={{ color: "#1E2F5F" }}>{clientPanel.payment_status}{clientPanel.amount_paid ? ` · ${formatCurrency(clientPanel.amount_paid)}` : ""}</strong></span>
                                 </p>
-                                <p style={{ margin: 0 }}>
-                                    🧑‍🔧 Assigned Tech:{" "}
-                                    <strong style={{ color: "#1E2F5F" }}>
-                                        {clientPanel.assigned_tech_name ||
-                                            "Unassigned"}
-                                    </strong>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <WrenchIcon size={14} color="#64748B" />
+                                    <span>Assigned Tech: <strong style={{ color: "#1E2F5F" }}>{clientPanel.assigned_tech_name || "Unassigned"}</strong></span>
                                 </p>
                             </div>
                         </div>
