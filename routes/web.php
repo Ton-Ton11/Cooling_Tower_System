@@ -629,11 +629,18 @@ Route::middleware(['auth', 'verified'])
     });
 
 // ══════════════════════════════════════════════════════════════════
-// Profile
+// Profile Display & Settings (All 7 Roles)
 // ══════════════════════════════════════════════════════════════════
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::get('/profile/data', [ProfileController::class, 'data'])->name('profile.data');
+    Route::post('/profile/update', [ProfileController::class, 'update'])->name('profile.update.post');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('/profile/photo', [ProfileController::class, 'updatePhoto'])->name('profile.photo.update');
+    Route::delete('/profile/photo', [ProfileController::class, 'destroyPhoto'])->name('profile.photo.destroy');
+    Route::get('/profile/avatar/{filename}', [ProfileController::class, 'servePhoto'])->name('profile.avatar');
+    Route::get('/uploads/profile-photos/{filename}', [ProfileController::class, 'servePhoto']);
+    Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 

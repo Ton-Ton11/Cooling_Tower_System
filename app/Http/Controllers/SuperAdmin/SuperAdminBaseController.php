@@ -615,12 +615,14 @@ abstract class SuperAdminBaseController extends Controller
         })->values();
     }
 
-    protected function buildMonthlyRevenueSeries(Collection $records): Collection
+    protected function buildMonthlyRevenueSeries(iterable $records): Collection
     {
-        return collect(range(11, 0))->map(function (int $monthsAgo) use ($records) {
+        $rows = collect($records);
+
+        return collect(range(11, 0))->map(function (int $monthsAgo) use ($rows) {
             $month = now()->startOfMonth()->subMonths($monthsAgo);
-            $matches = $records->filter(function ($record) use ($month) {
-                $paymentDate = $record['payment_date'] ?? null;
+            $matches = $rows->filter(function ($record) use ($month) {
+                $paymentDate = data_get($record, 'payment_date');
 
                 if (! $paymentDate) {
                     return false;
@@ -632,7 +634,9 @@ abstract class SuperAdminBaseController extends Controller
             return [
                 'month' => $month->format('M'),
                 'year_month' => $month->format('Y-m'),
-                'revenue' => (float) $matches->sum('amount_paid'),
+                'revenue' => (float) $matches->sum(function ($record) {
+                    return (float) data_get($record, 'amount_paid', 0);
+                }),
                 'bookings' => $matches->count(),
             ];
         })->values();

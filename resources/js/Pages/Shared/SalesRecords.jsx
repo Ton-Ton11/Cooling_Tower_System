@@ -90,7 +90,7 @@ function SalesRecords({ addToast, endpoints }) {
                 setLoading(false);
             }
         },
-        [addToast],
+        [addToast, ep.salesRecords],
     );
 
     useEffect(() => {

@@ -32,7 +32,23 @@ const ic = {
 
 function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addToast }) {
     const { auth = {} } = usePage().props;
-    const user = auth.user || {};
+    const [liveUser, setLiveUser] = useState(auth.user || {});
+
+    useEffect(() => {
+        setLiveUser(auth.user || {});
+    }, [auth.user]);
+
+    useEffect(() => {
+        const handleProfileUpdate = (e) => {
+            if (e.detail) {
+                setLiveUser((prev) => ({ ...prev, ...e.detail }));
+            }
+        };
+        window.addEventListener("profile-updated", handleProfileUpdate);
+        return () => window.removeEventListener("profile-updated", handleProfileUpdate);
+    }, []);
+
+    const user = liveUser || {};
     const displayName =
         user.name ||
         [user.given_name, user.middle_name, user.last_name]
@@ -40,6 +56,7 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
             .join(" ") ||
         user.email ||
         "User";
+    const profilePhotoUrl = user.profile_photo_url || null;
     const isHeadTech =
         Boolean(auth.isHeadTechnician) ||
         Boolean(user.is_head_technician) ||
@@ -821,8 +838,31 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
                     }}
                 />
 
-                {/* User Profile Avatar with Online Ring */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {/* User Profile Avatar with Online Ring (Click to open Profile & Settings) */}
+                <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("profile")}
+                    title="My Profile & Settings"
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        background: "transparent",
+                        border: "1px solid transparent",
+                        borderRadius: 12,
+                        padding: "4px 8px",
+                        cursor: "pointer",
+                        transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "#F8FAFC";
+                        e.currentTarget.style.borderColor = "#E2E8F0";
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                        e.currentTarget.style.borderColor = "transparent";
+                    }}
+                >
                     {!isMobile && (
                         <div style={{ textAlign: "right" }}>
                             <p
@@ -850,24 +890,46 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
                         </div>
                     )}
                     <div style={{ position: "relative" }}>
-                        <div
-                            style={{
-                                width: 38,
-                                height: 38,
-                                borderRadius: "50%",
-                                background: "linear-gradient(135deg,#2563EB,#0E1A33)",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "#fff",
-                                fontSize: 13,
-                                fontWeight: 800,
-                                flexShrink: 0,
-                                boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
-                            }}
-                        >
-                            {initials}
-                        </div>
+                        {profilePhotoUrl ? (
+                            <img
+                                src={profilePhotoUrl}
+                                alt={displayName}
+                                onError={() =>
+                                    setLiveUser((prev) => ({
+                                        ...prev,
+                                        profile_photo_url: null,
+                                    }))
+                                }
+                                style={{
+                                    width: 38,
+                                    height: 38,
+                                    borderRadius: "50%",
+                                    objectFit: "cover",
+                                    border: "2px solid #DBEAFE",
+                                    flexShrink: 0,
+                                    boxShadow: "0 2px 8px rgba(37,99,235,0.2)",
+                                }}
+                            />
+                        ) : (
+                            <div
+                                style={{
+                                    width: 38,
+                                    height: 38,
+                                    borderRadius: "50%",
+                                    background: "linear-gradient(135deg,#2563EB,#0E1A33)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: "#fff",
+                                    fontSize: 13,
+                                    fontWeight: 800,
+                                    flexShrink: 0,
+                                    boxShadow: "0 2px 8px rgba(37,99,235,0.25)",
+                                }}
+                            >
+                                {initials}
+                            </div>
+                        )}
                         <span
                             style={{
                                 position: "absolute",
@@ -881,7 +943,7 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
                             }}
                         />
                     </div>
-                </div>
+                </button>
             </div>
         </header>
     );

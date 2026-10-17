@@ -50,6 +50,7 @@ const navItems = [
     { id: "announcements", label: "Announcements", icon: ic.announcements },
     { id: "logs", label: "Activity Logs", icon: ic.logs },
     { id: "performance", label: "Performance", icon: ic.performance },
+    { id: "profile", label: "My Profile", icon: ic.staff },
 ];
 
 function Sidebar({

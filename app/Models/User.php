@@ -28,8 +28,14 @@ class User extends Authenticatable implements MustVerifyEmail
         'address',
         'contact_number',
         'email',
+        'profile_photo_path',
         'password',
         'is_active',
+    ];
+
+    protected $appends = [
+        'name',
+        'profile_photo_url',
     ];
 
     protected $hidden = [
@@ -39,7 +45,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'birthdate' => 'date',
+        'birthdate' => 'date:Y-m-d',
         'role_id' => 'integer',
         'is_head_technician' => 'boolean',
         'is_active' => 'boolean',
@@ -116,6 +122,24 @@ class User extends Authenticatable implements MustVerifyEmail
     public function getFullNameAttribute(): string
     {
         return $this->name;
+    }
+
+    public function getProfilePhotoUrlAttribute(): ?string
+    {
+        if (empty($this->profile_photo_path)) {
+            return null;
+        }
+
+        if (str_starts_with($this->profile_photo_path, 'http://') || str_starts_with($this->profile_photo_path, 'https://')) {
+            return $this->profile_photo_path;
+        }
+
+        $relativePath = ltrim($this->profile_photo_path, '/');
+        if (! \Illuminate\Support\Facades\File::exists(public_path($relativePath))) {
+            return null;
+        }
+
+        return '/profile/avatar/' . basename($relativePath);
     }
 
     public function isSuperAdmin(): bool
