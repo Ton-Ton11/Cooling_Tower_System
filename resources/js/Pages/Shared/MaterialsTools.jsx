@@ -538,15 +538,20 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             if (checkoutFilterStatus !== 'all') {
                 if (checkoutFilterStatus === 'active' && c.status !== 'Checked Out') return false;
                 if (checkoutFilterStatus === 'returned' && c.status !== 'Returned') return false;
-                if (checkoutFilterStatus === 'material' && c.log_type !== 'material_usage') return false;
+                if (checkoutFilterStatus === 'lost_damaged' && !['Lost/Damaged', 'Damaged', 'Lost'].includes(c.status)) return false;
+                if (checkoutFilterStatus === 'material' && c.log_type !== 'material_usage' && c.status !== 'Used / Consumed') return false;
             }
             if (checkoutSearch.trim()) {
                 const q = checkoutSearch.toLowerCase();
+                const checklistLabel = c.checklist_id ? `checklist #${c.checklist_id}` : '';
                 const matches = (c.item_name || '').toLowerCase().includes(q) ||
                     (c.technician_name || '').toLowerCase().includes(q) ||
                     (c.service_name || '').toLowerCase().includes(q) ||
                     (c.serial_number || '').toLowerCase().includes(q) ||
-                    (c.notes || '').toLowerCase().includes(q);
+                    (c.description || c.notes || '').toLowerCase().includes(q) ||
+                    (c.client_name || '').toLowerCase().includes(q) ||
+                    (c.team_name || '').toLowerCase().includes(q) ||
+                    checklistLabel.includes(q);
                 if (!matches) return false;
             }
             return true;
@@ -2086,16 +2091,17 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         Worker Materials & Tools Usage / Borrowing Logs
                                     </p>
                                     <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                                        Track who borrowed tools, what service technician is working on, checkout timestamps, and return dates
+                                        Synced with Technician / Head Technician & Tools Man Checklists — tracks consumed materials, borrowed tools, returns, and lost/damaged inspections
                                     </p>
                                 </div>
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                                    <div style={{ display: 'inline-flex', gap: 4, background: '#F1F5F9', padding: 3, borderRadius: 8 }}>
+                                    <div style={{ display: 'inline-flex', gap: 4, background: '#F1F5F9', padding: 3, borderRadius: 8, flexWrap: 'wrap' }}>
                                         {[
                                             { key: 'all', label: `All Logs (${checkouts.length})` },
                                             { key: 'active', label: `Active / Borrowed (${checkouts.filter(c => c.status === 'Checked Out').length})` },
                                             { key: 'returned', label: `Returned (${checkouts.filter(c => c.status === 'Returned').length})` },
-                                            { key: 'material', label: `Materials Used (${checkouts.filter(c => c.log_type === 'material_usage').length})` },
+                                            { key: 'lost_damaged', label: `Lost / Damaged (${checkouts.filter(c => ['Lost/Damaged', 'Damaged', 'Lost'].includes(c.status)).length})` },
+                                            { key: 'material', label: `Materials Consumed (${checkouts.filter(c => c.log_type === 'material_usage' || c.status === 'Used / Consumed').length})` },
                                         ].map(f => (
                                             <button
                                                 key={f.key}
@@ -2111,7 +2117,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                             </button>
                                         ))}
                                     </div>
-                                    <SearchBar value={checkoutSearch} onChange={setCheckoutSearch} placeholder="Search worker, service, item..." />
+                                    <SearchBar value={checkoutSearch} onChange={setCheckoutSearch} placeholder="Search checklist, worker, item..." />
                                 </div>
                             </div>
 
@@ -2119,7 +2125,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 920 }}>
                                     <thead>
                                         <tr style={{ background: '#F8FAFC' }}>
-                                            {['Date & Time', 'Item & Category', 'Qty', 'Technician / Worker', 'Service Working On', 'Status', 'Returned At', 'Notes', 'Actions'].map(h => (
+                                            {['Date & Time', 'Item & Category', 'Qty', 'Technician / Worker', 'Service Working On', 'Status', 'Returned / Resolved At', 'Description'].map(h => (
                                                 <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
                                             ))}
                                         </tr>
@@ -2127,20 +2133,23 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     <tbody>
                                         {filteredCheckouts.length === 0 ? (
                                             <tr>
-                                                <td colSpan={9} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                <td colSpan={8} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
                                                     No usage or borrowing logs recorded yet.
                                                 </td>
                                             </tr>
                                         ) : filteredCheckouts.map(log => {
-                                            const isBorrowed = log.status === 'Checked Out';
-                                            const isMaterial = log.log_type === 'material_usage';
-                                            const badgeStyle = isBorrowed
-                                                ? { bg: 'rgba(59,130,246,0.1)', color: '#2563EB', text: 'Checked Out' }
-                                                : isMaterial
+                                            const isMaterial = log.log_type === 'material_usage' || log.status === 'Used / Consumed' || (log.item_type || '').toLowerCase() === 'material';
+                                            const isLostOrDamaged = ['Lost/Damaged', 'Damaged', 'Lost'].includes(log.status);
+                                            const isBorrowed = !isMaterial && !isLostOrDamaged && log.status === 'Checked Out';
+                                            const badgeStyle = isMaterial
                                                 ? { bg: 'rgba(147,51,234,0.1)', color: '#9333EA', text: 'Used / Consumed' }
+                                                : isLostOrDamaged
+                                                ? { bg: 'rgba(220,38,38,0.12)', color: '#DC2626', text: log.status }
+                                                : isBorrowed
+                                                ? { bg: 'rgba(59,130,246,0.1)', color: '#2563EB', text: 'Checked Out' }
                                                 : { bg: 'rgba(22,163,74,0.1)', color: '#16A34A', text: 'Returned' };
 
-                                            const matchingItem = items.find(i => i.item_id === log.item_id);
+                                            const descriptionText = log.description || log.notes || '—';
 
                                             return (
                                                 <tr key={log.checkout_id} style={{ borderTop: '1px solid #F1F5F9' }}
@@ -2171,7 +2180,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                             <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#DBEAFE', color: '#1D4ED8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>
                                                                 {(log.technician_name || 'T')[0].toUpperCase()}
                                                             </span>
-                                                            {log.technician_name}
+                                                            <div>
+                                                                <div>{log.technician_name}</div>
+                                                                {log.team_name && (
+                                                                    <div style={{ fontSize: 10, color: '#64748B', fontWeight: 500 }}>
+                                                                        {log.team_name}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </td>
                                                     <td style={{ padding: '10px 12px' }}>
@@ -2181,26 +2197,56 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                         }}>
                                                             {log.service_name || 'General Service'}
                                                         </span>
+                                                        {log.booking_id && (
+                                                            <div style={{ fontSize: 10, color: '#64748B', marginTop: 3 }}>
+                                                                Booking #{log.booking_id}{log.client_name ? ` • ${log.client_name}` : ''}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td style={{ padding: '10px 12px' }}>
-                                                        <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: badgeStyle.bg, color: badgeStyle.color }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: badgeStyle.bg, color: badgeStyle.color, whiteSpace: 'nowrap' }}>
                                                             {badgeStyle.text}
                                                         </span>
                                                     </td>
                                                     <td style={{ padding: '10px 12px', fontSize: 11, color: '#64748B', whiteSpace: 'nowrap' }}>
-                                                        {log.return_date ? formatDate(log.return_date) : (isBorrowed ? <span style={{ color: '#D97706', fontWeight: 600 }}>In Use</span> : '—')}
+                                                        {isMaterial ? (
+                                                            <span style={{ color: '#9333EA', fontWeight: 600 }}>Consumed in Field</span>
+                                                        ) : log.return_date ? (
+                                                            formatDate(log.return_date)
+                                                        ) : isBorrowed ? (
+                                                            <span style={{ color: '#D97706', fontWeight: 600 }}>In Use (Checklist Custody)</span>
+                                                        ) : (
+                                                            '—'
+                                                        )}
                                                     </td>
-                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', maxWidth: 160 }}>
-                                                        {log.notes || '—'}
-                                                    </td>
-                                                    <td style={{ padding: '10px 12px' }}>
-                                                        {isBorrowed && (
-                                                            <button
-                                                                className="btn-primary"
-                                                                style={{ padding: '4px 10px', fontSize: 11, background: '#16A34A', borderColor: '#15803D' }}
-                                                                onClick={() => handleOpenReturn(matchingItem || { item_id: log.item_id, item_name: log.item_name }, log)}>
-                                                                Return Tool
-                                                            </button>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155', maxWidth: 280, lineHeight: 1.45 }}>
+                                                        {log.checklist_id ? (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                                                    <span style={{
+                                                                        fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 5,
+                                                                        background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE',
+                                                                    }}>
+                                                                        Checklist #{log.checklist_id} ({log.checklist_status || 'Approved'})
+                                                                    </span>
+                                                                    {log.checklist_item_status && (
+                                                                        <span style={{
+                                                                            fontSize: 10, fontWeight: 700, textTransform: 'capitalize',
+                                                                            color: log.checklist_item_status === 'returned' ? '#16A34A'
+                                                                                : (log.checklist_item_status === 'damaged' || log.checklist_item_status === 'lost') ? '#DC2626'
+                                                                                : log.checklist_item_status === 'consumed' ? '#9333EA'
+                                                                                : '#2563EB',
+                                                                        }}>
+                                                                            • {log.checklist_item_status}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <div style={{ fontSize: 11, color: '#475569' }}>
+                                                                    {descriptionText}
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <span style={{ color: '#64748B' }}>{descriptionText}</span>
                                                         )}
                                                     </td>
                                                 </tr>

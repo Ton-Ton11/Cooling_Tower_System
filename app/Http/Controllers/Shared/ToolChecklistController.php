@@ -460,7 +460,7 @@ class ToolChecklistController extends Controller
             abort(403, 'Only Tools Man or Admin can approve checklists.');
         }
 
-        $checklist = ToolChecklist::with(['booking', 'items.inventoryItem'])->findOrFail($checklistId);
+        $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem'])->findOrFail($checklistId);
 
         $userId = (int) $user->user_id;
 
@@ -491,13 +491,16 @@ class ToolChecklistController extends Controller
                 ]);
             }
 
+            $freshChecklist = $checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem']);
+
             // Create tool checkouts record for custody tracking and deduct stock / update status in inventory
-            foreach ($checklist->items as $item) {
+            foreach ($freshChecklist->items as $item) {
                 $qty = $item->quantity_approved ?: $item->quantity_requested;
                 $inv = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
+                $isTool = strtolower($item->item_type ?? '') === 'tool';
 
                 if ($inv) {
-                    if (strtolower($item->item_type ?? '') === 'tool') {
+                    if ($isTool) {
                         if (($inv->tool_subtype ?? '') === 'power') {
                             DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                                 'status' => 'Borrowed',
@@ -523,17 +526,17 @@ class ToolChecklistController extends Controller
 
                 DB::table('tool_checkouts')->insert([
                     'item_id' => $item->item_id,
-                    'technician_id' => $checklist->technician_id,
-                    'technician_name' => $checklist->technician ? $checklist->technician->name : 'Assigned Technician',
-                    'service_name' => $checklist->booking?->service?->service_name ?? 'Aircon Service',
-                    'booking_id' => $checklist->booking_id,
+                    'technician_id' => $freshChecklist->technician_id,
+                    'technician_name' => $freshChecklist->technician ? $freshChecklist->technician->name : 'Assigned Technician',
+                    'service_name' => $freshChecklist->booking?->service?->service_name ?? 'Aircon Service',
+                    'booking_id' => $freshChecklist->booking_id,
                     'item_name' => $item->inventoryItem?->item_name ?? 'Tool',
                     'item_type' => $item->item_type,
-                    'log_type' => $item->item_type === 'Tool' ? 'borrow' : 'material_usage',
+                    'log_type' => $isTool ? 'borrow' : 'material_usage',
                     'quantity' => $qty,
                     'checkout_date' => now(),
-                    'status' => 'Checked Out',
-                    'notes' => sprintf('Issued via Checklist #%d', $checklist->checklist_id),
+                    'status' => $isTool ? 'Checked Out' : 'Used / Consumed',
+                    'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
@@ -643,22 +646,40 @@ class ToolChecklistController extends Controller
                         'notes' => $itemData['notes'] ?? $existing->notes,
                     ]);
                 } else {
+                    $qty = (int) $itemData['quantity_approved'];
                     ToolChecklistItem::create([
                         'checklist_id' => $checklist->checklist_id,
                         'item_id' => $itemData['item_id'],
                         'item_type' => $invItem ? $invItem->item_type : 'Tool',
-                        'quantity_requested' => (int) $itemData['quantity_approved'],
-                        'quantity_approved' => (int) $itemData['quantity_approved'],
+                        'quantity_requested' => $qty,
+                        'quantity_approved' => $qty,
                         'status' => $isTool ? ($itemData['status'] ?? 'assigned') : 'consumed',
                         'notes' => $itemData['notes'] ?? null,
                     ]);
+
+                    // If checklist is already approved, deduct stock / update status for newly added item
+                    if ($checklist->status === 'Approved' && $invItem) {
+                        if ($isTool && ($invItem->tool_subtype ?? '') === 'power') {
+                            DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
+                                'status' => 'Borrowed',
+                                'last_updated' => now(),
+                            ]);
+                        } else {
+                            $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
+                            DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
+                                'quantity_on_hand' => $newQty,
+                                'last_updated' => now(),
+                            ]);
+                        }
+                    }
                 }
             }
 
             // If checklist is already approved, ensure newly added or updated items are synced with tool_checkouts
             if ($checklist->status === 'Approved') {
-                $freshChecklist = $checklist->fresh(['booking.service', 'technician', 'items.inventoryItem']);
+                $freshChecklist = $checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem']);
                 foreach ($freshChecklist->items as $item) {
+                    $isTool = strtolower($item->item_type ?? '') === 'tool';
                     $existingCheckout = DB::table('tool_checkouts')
                         ->where('booking_id', $freshChecklist->booking_id)
                         ->where('item_id', $item->item_id)
@@ -673,11 +694,11 @@ class ToolChecklistController extends Controller
                             'booking_id' => $freshChecklist->booking_id,
                             'item_name' => $item->inventoryItem?->item_name ?? 'Tool',
                             'item_type' => $item->item_type,
-                            'log_type' => strtolower($item->item_type ?? '') === 'tool' ? 'borrow' : 'material_usage',
+                            'log_type' => $isTool ? 'borrow' : 'material_usage',
                             'quantity' => $item->quantity_approved ?: $item->quantity_requested,
                             'checkout_date' => now(),
-                            'status' => 'Checked Out',
-                            'notes' => sprintf('Issued via Checklist #%d', $freshChecklist->checklist_id),
+                            'status' => $isTool ? 'Checked Out' : 'Used / Consumed',
+                            'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
                             'created_at' => now(),
                             'updated_at' => now(),
                         ]);
@@ -686,6 +707,7 @@ class ToolChecklistController extends Controller
                             ->where('checkout_id', $existingCheckout->checkout_id)
                             ->update([
                                 'quantity' => $item->quantity_approved ?: $item->quantity_requested,
+                                'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
                                 'updated_at' => now(),
                             ]);
                     }
@@ -714,7 +736,8 @@ class ToolChecklistController extends Controller
             'notes' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $item = ToolChecklistItem::where('checklist_id', $checklistId)
+        $item = ToolChecklistItem::with(['checklist.booking.client', 'checklist.booking.service', 'checklist.team', 'checklist.technician', 'inventoryItem'])
+            ->where('checklist_id', $checklistId)
             ->where('id', $itemId)
             ->firstOrFail();
 
@@ -730,27 +753,38 @@ class ToolChecklistController extends Controller
 
         $item->update([
             'status' => $newStatus,
-            'notes' => $validated['notes'] ?? $item->notes,
+            'notes' => array_key_exists('notes', $validated) && $validated['notes'] !== null ? $validated['notes'] : $item->notes,
         ]);
 
         // Synchronize tool_checkouts and inventory status
         if ($item->checklist && $item->checklist->booking_id) {
             $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
             $itemQty = (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1);
+            $description = $this->buildChecklistLogDescription($item->checklist, $item);
+
+            // If transitioning away from 'returned' on a hand tool, deduct the previously returned stock
+            if ($previousStatus === 'returned' && $newStatus !== 'returned' && $invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') !== 'power') {
+                $newQty = max(0, (int) $invItem->quantity_on_hand - $itemQty);
+                DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                    'quantity_on_hand' => $newQty,
+                    'last_updated' => now(),
+                ]);
+                $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
+            }
 
             if ($newStatus === 'returned' && $previousStatus !== 'returned') {
                 DB::table('tool_checkouts')
                     ->where('booking_id', $item->checklist->booking_id)
                     ->where('item_id', $item->item_id)
-                    ->where('status', 'Checked Out')
                     ->update([
                         'status' => 'Returned',
                         'return_date' => now(),
+                        'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
                 // Restore power tool / available status in inventory
-                if ($invItem && $invItem->item_type === 'Tool') {
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
                     if (($invItem->tool_subtype ?? '') === 'power') {
                         DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                             'status' => 'Available',
@@ -767,16 +801,15 @@ class ToolChecklistController extends Controller
                 DB::table('tool_checkouts')
                     ->where('booking_id', $item->checklist->booking_id)
                     ->where('item_id', $item->item_id)
-                    ->where('status', 'Checked Out')
                     ->update([
                         'status' => 'Lost/Damaged',
                         'return_date' => now(),
-                        'notes' => 'Marked damaged on return',
+                        'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
                 // Mark power tool as Lost/Damaged in inventory so it cannot be used again
-                if ($invItem && $invItem->item_type === 'Tool' && ($invItem->tool_subtype ?? '') === 'power') {
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') === 'power') {
                     DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                         'status' => 'Lost/Damaged',
                         'last_updated' => now(),
@@ -786,16 +819,15 @@ class ToolChecklistController extends Controller
                 DB::table('tool_checkouts')
                     ->where('booking_id', $item->checklist->booking_id)
                     ->where('item_id', $item->item_id)
-                    ->where('status', 'Checked Out')
                     ->update([
                         'status' => 'Lost/Damaged',
                         'return_date' => now(),
-                        'notes' => 'Marked lost (task completed without tool return)',
+                        'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
                 // Mark power tool as Lost/Damaged in inventory
-                if ($invItem && $invItem->item_type === 'Tool' && ($invItem->tool_subtype ?? '') === 'power') {
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') === 'power') {
                     DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                         'status' => 'Lost/Damaged',
                         'last_updated' => now(),
@@ -809,10 +841,11 @@ class ToolChecklistController extends Controller
                     ->update([
                         'status' => 'Checked Out',
                         'return_date' => null,
+                        'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
-                if ($invItem && $invItem->item_type === 'Tool' && ($invItem->tool_subtype ?? '') === 'power') {
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') === 'power') {
                     DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                         'status' => 'Borrowed',
                         'last_updated' => now(),
@@ -864,6 +897,20 @@ class ToolChecklistController extends Controller
             'completed_at' => now(),
         ]);
 
+        $freshChecklist = $checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy', 'completedBy']);
+
+        if ($freshChecklist && $freshChecklist->booking_id) {
+            foreach ($freshChecklist->items as $item) {
+                DB::table('tool_checkouts')
+                    ->where('booking_id', $freshChecklist->booking_id)
+                    ->where('item_id', $item->item_id)
+                    ->update([
+                        'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
+                        'updated_at' => now(),
+                    ]);
+            }
+        }
+
         // Activity log
         DB::table('activity_logs')->insert([
             'user_id' => $userId,
@@ -875,8 +922,50 @@ class ToolChecklistController extends Controller
 
         return response()->json([
             'message' => 'Checklist successfully declared complete and recorded!',
-            'data' => $this->formatChecklist($checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy', 'completedBy'])),
+            'data' => $this->formatChecklist($freshChecklist),
         ]);
+    }
+
+    /**
+     * Build a detailed log description from the checklist and checklist item details.
+     */
+    protected function buildChecklistLogDescription(ToolChecklist $checklist, ToolChecklistItem $item): string
+    {
+        $isTool = strtolower($item->item_type ?? '') === 'tool';
+        $itemStatus = strtolower($item->status ?? ($isTool ? 'assigned' : 'consumed'));
+
+        $disposition = match (true) {
+            ! $isTool || $itemStatus === 'consumed' => 'Material consumed during service work',
+            $itemStatus === 'returned' => 'Tool returned & verified in good condition',
+            $itemStatus === 'damaged' => 'Tool reported damaged during return inspection',
+            $itemStatus === 'lost' => 'Tool unreturned / reported lost after service',
+            default => 'Tool issued to field crew (awaiting return)',
+        };
+
+        $parts = [
+            sprintf('Checklist #%d (%s)', $checklist->checklist_id, $checklist->status ?: 'Approved'),
+        ];
+
+        if ($checklist->booking_id) {
+            $clientName = $checklist->booking?->client ? $checklist->booking->client->name : null;
+            $parts[] = $clientName
+                ? sprintf('Booking #%d (%s)', $checklist->booking_id, $clientName)
+                : sprintf('Booking #%d', $checklist->booking_id);
+        }
+
+        if ($checklist->team?->team_name) {
+            $parts[] = 'Squad: ' . $checklist->team->team_name;
+        }
+
+        $parts[] = $disposition;
+
+        if (! empty($item->notes)) {
+            $parts[] = 'Item Note: ' . trim($item->notes);
+        } elseif (! empty($checklist->notes)) {
+            $parts[] = 'Checklist Note: ' . trim($checklist->notes);
+        }
+
+        return implode(' • ', $parts);
     }
 
     /**

@@ -405,6 +405,14 @@ class ToolsManInventoryController extends ToolsManBaseController
         $logs = DB::table('tool_checkouts')
             ->leftJoin('inventory_items', 'inventory_items.item_id', '=', 'tool_checkouts.item_id')
             ->leftJoin('users', 'users.user_id', '=', 'tool_checkouts.technician_id')
+            ->leftJoin('bookings', 'bookings.booking_id', '=', 'tool_checkouts.booking_id')
+            ->leftJoin('users as clients', 'clients.user_id', '=', 'bookings.client_id')
+            ->leftJoin('tool_checklists', 'tool_checklists.booking_id', '=', 'tool_checkouts.booking_id')
+            ->leftJoin('technician_teams', 'technician_teams.team_id', '=', 'tool_checklists.team_id')
+            ->leftJoin('tool_checklist_items', function ($join) {
+                $join->on('tool_checklist_items.checklist_id', '=', 'tool_checklists.checklist_id')
+                    ->on('tool_checklist_items.item_id', '=', 'tool_checkouts.item_id');
+            })
             ->select([
                 'tool_checkouts.*',
                 'inventory_items.item_name as inventory_item_name',
@@ -415,6 +423,14 @@ class ToolsManInventoryController extends ToolsManBaseController
                 'users.given_name as tech_given_name',
                 'users.last_name as tech_last_name',
                 'users.email as tech_email',
+                'clients.given_name as client_given_name',
+                'clients.last_name as client_last_name',
+                'tool_checklists.checklist_id as linked_checklist_id',
+                'tool_checklists.status as checklist_status',
+                'tool_checklists.notes as checklist_notes',
+                'technician_teams.team_name as checklist_team_name',
+                'tool_checklist_items.status as checklist_item_status',
+                'tool_checklist_items.notes as checklist_item_notes',
             ])
             ->orderByDesc('tool_checkouts.checkout_date')
             ->orderByDesc('tool_checkouts.checkout_id')
@@ -425,23 +441,84 @@ class ToolsManInventoryController extends ToolsManBaseController
                     $techName = trim("{$row->tech_given_name} {$row->tech_last_name}");
                 }
 
+                $itemType = $row->item_type ?: ($row->inventory_item_type ?: 'Tool');
+                $isMaterial = strtolower($itemType) === 'material' || ($row->log_type ?? '') === 'material_usage';
+                $itemClStatus = strtolower($row->checklist_item_status ?? '');
+
+                $status = $row->status ?: 'Checked Out';
+                if ($isMaterial) {
+                    $status = 'Used / Consumed';
+                } elseif ($itemClStatus === 'returned') {
+                    $status = 'Returned';
+                } elseif ($itemClStatus === 'damaged') {
+                    $status = 'Damaged';
+                } elseif ($itemClStatus === 'lost') {
+                    $status = 'Lost';
+                }
+
+                $clientName = trim(($row->client_given_name ?? '') . ' ' . ($row->client_last_name ?? ''));
+                $description = $row->notes;
+
+                if (! empty($row->linked_checklist_id)) {
+                    $disposition = match (true) {
+                        $isMaterial || $itemClStatus === 'consumed' => 'Material consumed during service work',
+                        $itemClStatus === 'returned' || $status === 'Returned' => 'Tool returned & verified in good condition',
+                        $itemClStatus === 'damaged' || $status === 'Damaged' => 'Tool reported damaged during return inspection',
+                        $itemClStatus === 'lost' || $status === 'Lost' || $status === 'Lost/Damaged' => 'Tool unreturned / reported lost after service',
+                        default => 'Tool issued to field crew (awaiting return)',
+                    };
+
+                    $parts = [
+                        sprintf('Checklist #%d (%s)', (int) $row->linked_checklist_id, $row->checklist_status ?: 'Approved'),
+                    ];
+
+                    if (! empty($row->booking_id)) {
+                        $parts[] = $clientName !== ''
+                            ? sprintf('Booking #%d (%s)', (int) $row->booking_id, $clientName)
+                            : sprintf('Booking #%d', (int) $row->booking_id);
+                    }
+
+                    if (! empty($row->checklist_team_name)) {
+                        $parts[] = 'Squad: ' . $row->checklist_team_name;
+                    }
+
+                    $parts[] = $disposition;
+
+                    if (! empty($row->checklist_item_notes)) {
+                        $parts[] = 'Item Note: ' . trim($row->checklist_item_notes);
+                    } elseif (! empty($row->checklist_notes)) {
+                        $parts[] = 'Checklist Note: ' . trim($row->checklist_notes);
+                    }
+
+                    $description = implode(' • ', $parts);
+                }
+
                 return [
                     'checkout_id' => (int) $row->checkout_id,
+                    'booking_id' => $row->booking_id ? (int) $row->booking_id : null,
+                    'checklist_id' => $row->linked_checklist_id ? (int) $row->linked_checklist_id : null,
+                    'checklist_status' => $row->checklist_status ?? null,
+                    'checklist_item_status' => $row->checklist_item_status ?? null,
+                    'team_name' => $row->checklist_team_name ?? null,
+                    'client_name' => $clientName ?: null,
+                    'checklist_notes' => $row->checklist_notes ?? null,
+                    'checklist_item_notes' => $row->checklist_item_notes ?? null,
                     'item_id' => (int) $row->item_id,
                     'item_name' => $row->item_name ?: $row->inventory_item_name,
-                    'item_type' => $row->item_type ?: ($row->inventory_item_type ?: 'Tool'),
+                    'item_type' => $itemType,
                     'tool_subtype' => $row->tool_subtype ?? null,
                     'serial_number' => $row->serial_number ?? null,
                     'unit' => $row->unit ?? 'pcs',
-                    'log_type' => $row->log_type ?? 'borrow',
+                    'log_type' => $isMaterial ? 'material_usage' : ($row->log_type ?? 'borrow'),
                     'technician_id' => $row->technician_id ? (int) $row->technician_id : null,
                     'technician_name' => $techName ?: 'Unassigned Worker',
                     'service_name' => $row->service_name ?: 'General Service Job',
                     'quantity' => (int) ($row->quantity ?: 1),
                     'checkout_date' => $row->checkout_date,
                     'return_date' => $row->return_date,
-                    'status' => $row->status,
-                    'notes' => $row->notes,
+                    'status' => $status,
+                    'notes' => $description,
+                    'description' => $description,
                     'created_at' => $row->created_at,
                 ];
             });
