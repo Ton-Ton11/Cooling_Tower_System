@@ -18,9 +18,10 @@ abstract class SuperAdminBaseController extends Controller
         4 => 'Tools Man',
         5 => 'Technician',
         6 => 'Customer',
+        7 => 'Head Technician',
     ];
 
-    protected const STAFF_ROLE_IDS = [2, 3, 4, 5];
+    protected const STAFF_ROLE_IDS = [2, 3, 4, 5, 7];
 
     protected const BOOKING_ASSIGNABLE_STATUSES = ['Approved', 'Dispatched'];
 

@@ -193,6 +193,20 @@ class CustomerDashboardController extends Controller
         $brands = \App\Models\Brand::active()->orderBy('display_order')->orderBy('name')->get();
 
         $unitDetail = CustomerUnitDetail::where('user_id', $userId)->first();
+        $serviceForecasts = app(\App\Services\ForecastingService::class)->getCustomerForecasts($userId);
+
+        if (! empty($serviceForecasts)) {
+            $primaryForecast = $serviceForecasts[0];
+            array_unshift($toDoItems, [
+                'id' => 'forecast_' . ($primaryForecast['forecast_id'] ?? 0),
+                'title' => 'Forecasted: ' . $primaryForecast['recommended_service_name'] . ' (' . $primaryForecast['unit_summary'] . ')',
+                'sub' => 'Recommended by ' . $primaryForecast['predicted_due_date'] . ' • Following ' . $primaryForecast['source_service_name'],
+                'target' => 'book',
+                'recommended_service_id' => $primaryForecast['recommended_service_id'],
+                'badge' => $primaryForecast['urgency_level'],
+                'badge_color' => $primaryForecast['urgency_level'] === 'Overdue' ? 'rose' : 'amber',
+            ]);
+        }
 
         return response()->json([
             'stats' => [
@@ -213,6 +227,7 @@ class CustomerDashboardController extends Controller
                 'booking_status' => $upcomingBooking->booking_status,
                 'assigned_tech_name' => $upcomingBooking->technician ? trim("{$upcomingBooking->technician->given_name} {$upcomingBooking->technician->last_name}") : 'Pending Assignment',
             ] : null,
+            'service_forecasts' => $serviceForecasts,
             'to_do_items' => $toDoItems,
             'online_technicians' => $onlineTechnicians,
             'services' => $services,

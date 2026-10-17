@@ -287,8 +287,10 @@ class TechnicianBookingController extends TechnicianBaseController
             sprintf('Technician completed service report for Booking #%d.', $bookingId)
         );
 
+        app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
+
         return response()->json([
-            'message' => 'Job marked as Completed and service report submitted.',
+            'message' => 'Job marked as Completed, service report submitted, and next maintenance forecast generated.',
             'booking_status' => 'Completed',
         ]);
     }

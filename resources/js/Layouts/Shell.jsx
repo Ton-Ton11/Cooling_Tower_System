@@ -225,6 +225,8 @@ function Shell() {
                 <Topbar
                     collapsed={collapsed}
                     isMobile={isMobile}
+                    onNavigate={onNavigate}
+                    addToast={addToast}
                     onToggleSidebar={() => {
                         if (isMobile) {
                             setMobileSidebarOpen((open) => !open);

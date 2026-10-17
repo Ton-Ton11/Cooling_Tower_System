@@ -156,10 +156,12 @@ class ManagerBookingController extends ManagerBaseController
             sprintf('Manager declared Booking #%d as Completed.', $bookingId)
         );
 
+        app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
+
         $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
 
         return response()->json([
-            'message' => 'Booking marked as Completed by Manager.',
+            'message' => 'Booking marked as Completed by Manager and maintenance forecast generated.',
             'data'    => $this->mapBookings(collect([$updated]))->first(),
         ]);
     }

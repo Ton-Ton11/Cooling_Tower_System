@@ -58,12 +58,15 @@ class ManagerDashboardController extends ManagerBaseController
             ->limit(4)
             ->get();
 
+        $forecastAnalytics = app(\App\Services\ForecastingService::class)->getManagerForecastAnalytics();
+
         return response()->json([
-            'stats'            => $stats,
-            'pending_bookings' => $this->mapBookings($pendingBookings),
-            'active_bookings'  => $this->mapBookings($activeDispatches),
-            'announcements'    => $announcements,
-            'weekly_revenue'   => $this->buildWeeklyRevenueSeries($paidPayments),
+            'stats'              => $stats,
+            'pending_bookings'   => $this->mapBookings($pendingBookings),
+            'active_bookings'    => $this->mapBookings($activeDispatches),
+            'announcements'      => $announcements,
+            'weekly_revenue'     => $this->buildWeeklyRevenueSeries($paidPayments),
+            'forecast_analytics' => $forecastAnalytics,
         ]);
     }
 }

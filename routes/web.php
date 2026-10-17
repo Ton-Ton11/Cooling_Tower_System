@@ -602,6 +602,33 @@ Route::prefix('customer')
     });
 
 // ══════════════════════════════════════════════════════════════════
+// Predictive Maintenance & Certification Forecasting (Shared Auth)
+// ══════════════════════════════════════════════════════════════════
+Route::middleware(['auth', 'verified'])
+    ->prefix('forecasting')
+    ->name('forecasting.')
+    ->controller(\App\Http\Controllers\Shared\ForecastingController::class)
+    ->group(function () {
+        Route::post('/certifications', 'storeCertification')->name('certifications.store');
+        Route::patch('/certifications/{certificationId}/renew', 'renewCertification')->name('certifications.renew');
+        Route::post('/evaluate-reminders', 'triggerReminderEvaluation')->name('evaluate');
+    });
+
+// ══════════════════════════════════════════════════════════════════
+// Topbar Widgets: Notifications, Employee Messages & Calendar
+// ══════════════════════════════════════════════════════════════════
+Route::middleware(['auth', 'verified'])
+    ->prefix('topbar')
+    ->name('topbar.')
+    ->controller(\App\Http\Controllers\Shared\TopbarWidgetController::class)
+    ->group(function () {
+        Route::get('/widgets', 'index')->name('widgets');
+        Route::post('/messages', 'sendMessage')->name('messages.send');
+        Route::post('/messages/mark-read', 'markMessagesRead')->name('messages.read');
+        Route::post('/notifications/mark-read', 'markNotificationsRead')->name('notifications.read');
+    });
+
+// ══════════════════════════════════════════════════════════════════
 // Profile
 // ══════════════════════════════════════════════════════════════════
 Route::middleware('auth')->group(function () {

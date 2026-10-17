@@ -82,6 +82,16 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasOne(CustomerUnitDetail::class, 'user_id', 'user_id');
     }
 
+    public function serviceForecasts()
+    {
+        return $this->hasMany(ServiceForecast::class, 'user_id', 'user_id');
+    }
+
+    public function certifications()
+    {
+        return $this->hasMany(TechnicianCertification::class, 'user_id', 'user_id');
+    }
+
     public function rescheduleBookings()
     {
         return $this->hasMany(RescheduleBooking::class, 'client_id', 'user_id');

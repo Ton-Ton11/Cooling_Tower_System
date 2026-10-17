@@ -254,6 +254,8 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
                 <Topbar
                     collapsed={collapsed}
                     isMobile={isMobile}
+                    onNavigate={onNavigate}
+                    addToast={addToast}
                     onToggleSidebar={() => {
                         if (isMobile) { setMobileSidebarOpen((o) => !o); return; }
                         setCollapsed((c) => !c);

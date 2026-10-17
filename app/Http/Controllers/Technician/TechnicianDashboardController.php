@@ -79,10 +79,13 @@ class TechnicianDashboardController extends TechnicianBaseController
             ->limit(5)
             ->get();
 
+        $certifications = app(\App\Services\ForecastingService::class)->getTechnicianCertifications($userId);
+
         return response()->json([
-            'stats'            => $stats,
+            'stats'             => $stats,
             'assigned_bookings' => $this->mapBookings($activeJobs),
             'recent_completed'  => $this->mapBookings($recentCompleted),
+            'certifications'    => $certifications,
         ]);
     }
 }

@@ -26,14 +26,46 @@ const icons = {
     clock: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
 };
 
-export default function ManagerDashboardOverview({ onNavigate, dashboardData, isLoading, onRefresh }) {
-    const [activeTab, setActiveTab] = useState("pending"); // "pending" | "active" | "chart"
+export default function ManagerDashboardOverview({ addToast, onNavigate, dashboardData, isLoading, onRefresh }) {
+    const [activeTab, setActiveTab] = useState("pending"); // "pending" | "active" | "chart" | "forecasting"
+    const [evaluatingReminders, setEvaluatingReminders] = useState(false);
 
     const stats = dashboardData?.stats ?? {};
     const pendingBookings = dashboardData?.pending_bookings ?? [];
     const activeBookings = dashboardData?.active_bookings ?? [];
     const announcements = dashboardData?.announcements ?? [];
     const weeklyRevenue = dashboardData?.weekly_revenue ?? [];
+    const forecastAnalytics = dashboardData?.forecast_analytics ?? {};
+    const forecastSummary = forecastAnalytics?.summary ?? {};
+    const customerForecasts = forecastAnalytics?.customer_forecasts ?? [];
+    const technicianAlerts = forecastAnalytics?.technician_alerts ?? [];
+    const demandProjection = forecastAnalytics?.demand_projection ?? [];
+
+    const handleTriggerReminderEvaluation = async () => {
+        try {
+            setEvaluatingReminders(true);
+            const res = await window.axios.post("/forecasting/evaluate-reminders");
+            if (addToast) addToast(res.data?.message || "Automated reminders dispatched.", "success");
+            if (onRefresh) onRefresh();
+        } catch (err) {
+            if (addToast) addToast(err?.response?.data?.message || "Could not evaluate reminders.", "error");
+        } finally {
+            setEvaluatingReminders(false);
+        }
+    };
+
+    const handleManagerRenewTechCert = async (certId) => {
+        try {
+            const res = await window.axios.patch(`/forecasting/certifications/${certId}/renew`, {
+                action: "update_dates",
+                new_expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+            });
+            if (addToast) addToast(res.data?.message || "Technician certification renewed.", "success");
+            if (onRefresh) onRefresh();
+        } catch (err) {
+            if (addToast) addToast(err?.response?.data?.message || "Failed to update certification.", "error");
+        }
+    };
 
     const weekRevenueTotal = weeklyRevenue.reduce(
         (sum, row) => sum + Number(row.revenue ?? 0),
@@ -48,6 +80,13 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
 
     // Realistic Manager To-do items
     const managerToDos = [
+        {
+            id: "forecast_todo",
+            title: "Review Predictive Maintenance & License Alerts",
+            sub: `${forecastSummary.due_soon_customers ?? 0} customer reminders & ${forecastSummary.expiring_certifications ?? 0} tech renewals due`,
+            target: "forecasting_tab",
+            badge: "Forecast",
+        },
         {
             id: 1,
             title: "Review & assign pending booking requests",
@@ -194,6 +233,19 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                                 }`}
                             >
                                 Weekly Trends
+                            </button>
+                            <button
+                                onClick={() => setActiveTab("forecasting")}
+                                className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-1.5 ${
+                                    activeTab === "forecasting"
+                                        ? "bg-indigo-600 text-white shadow-sm"
+                                        : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                                }`}
+                            >
+                                <span>Forecasting & Compliance</span>
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === "forecasting" ? "bg-white/20 text-white" : "bg-indigo-200/80 text-indigo-900"}`}>
+                                    {(forecastSummary.due_soon_customers ?? 0) + (forecastSummary.expiring_certifications ?? 0)}
+                                </span>
                             </button>
                         </div>
 
@@ -389,6 +441,195 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                             </div>
                         </div>
                     )}
+
+                    {activeTab === "forecasting" && (
+                        <div className="space-y-6">
+                            {/* TOP SUMMARY & SCAN BUTTON */}
+                            <div className="bg-white rounded-3xl p-6 border border-indigo-100 shadow-sm space-y-5">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                                    <div>
+                                        <span className="text-[11px] font-extrabold text-indigo-600 uppercase tracking-wider">
+                                            Predictive Intelligence Engine
+                                        </span>
+                                        <h2 className="text-lg font-extrabold text-[#0E1A33] mt-0.5">
+                                            Customer Predictive Maintenance & Technician License Forecasting
+                                        </h2>
+                                        <p className="text-xs text-slate-500 mt-0.5">
+                                            Automated reminders for customer next-service cycles and technician certification renewals.
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        disabled={evaluatingReminders}
+                                        onClick={handleTriggerReminderEvaluation}
+                                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold shadow-md shadow-indigo-500/20 transition shrink-0"
+                                    >
+                                        {evaluatingReminders ? "Dispatching Notices..." : "Run Automated Reminder Scan"}
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                                    <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/70">
+                                        <p className="text-[10px] font-extrabold uppercase text-amber-800">Units Due / Overdue</p>
+                                        <p className="text-xl font-black text-amber-900 mt-1">{forecastSummary.due_soon_customers ?? 0}</p>
+                                    </div>
+                                    <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200/70">
+                                        <p className="text-[10px] font-extrabold uppercase text-rose-800">Tech Licenses Expiring</p>
+                                        <p className="text-xl font-black text-rose-900 mt-1">{forecastSummary.expiring_certifications ?? 0}</p>
+                                    </div>
+                                    <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/70">
+                                        <p className="text-[10px] font-extrabold uppercase text-blue-800">Tracked Client Units</p>
+                                        <p className="text-xl font-black text-blue-900 mt-1">{forecastSummary.total_tracked_units ?? 0}</p>
+                                    </div>
+                                    <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/70">
+                                        <p className="text-[10px] font-extrabold uppercase text-emerald-800">Pipeline Revenue</p>
+                                        <p className="text-lg font-black text-emerald-800 mt-1">
+                                            {formatCurrency(forecastSummary.projected_pipeline_revenue ?? 0)}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* 4-WEEK DEMAND PROJECTION CHART */}
+                                {demandProjection.length > 0 && (
+                                    <div className="pt-2">
+                                        <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider mb-2">
+                                            4-Week Service Demand Projection (Baseline + Predictive Reminders)
+                                        </h3>
+                                        <div className="h-52 w-full">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={demandProjection} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                                                    <XAxis dataKey="period" tick={{ fontSize: 11, fill: "#64748B" }} axisLine={false} tickLine={false} />
+                                                    <YAxis tick={{ fontSize: 11, fill: "#64748B" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                                                    <Tooltip />
+                                                    <Bar dataKey="baseline_demand" name="Baseline Bookings" stackId="a" fill="#94A3B8" radius={[0, 0, 0, 0]} maxBarSize={38} />
+                                                    <Bar dataKey="predictive_reminders" name="Forecasted Maintenance" stackId="a" fill="#4F46E5" radius={[8, 8, 0, 0]} maxBarSize={38} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* CUSTOMER PREDICTIVE MAINTENANCE PIPELINE */}
+                            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
+                                <div>
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600">
+                                        Customer Retention & Preventive Care
+                                    </span>
+                                    <h3 className="text-base font-extrabold text-slate-900">
+                                        Upcoming Customer Predictive Maintenance Reminders
+                                    </h3>
+                                </div>
+
+                                {customerForecasts.length === 0 ? (
+                                    <p className="text-xs text-slate-400 py-4 text-center">
+                                        No completed bookings to forecast yet. Complete a booking to automatically generate customer maintenance schedules.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {customerForecasts.slice(0, 6).map((cf) => (
+                                            <div
+                                                key={cf.forecast_id}
+                                                className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                            >
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="text-xs font-extrabold text-slate-900">
+                                                            {cf.customer_name}
+                                                        </span>
+                                                        <span className="text-[11px] text-slate-500">
+                                                            ({cf.unit_summary})
+                                                        </span>
+                                                        <span
+                                                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                                                cf.urgency_level === "Overdue"
+                                                                    ? "bg-rose-100 text-rose-800"
+                                                                    : cf.urgency_level === "Due Soon"
+                                                                    ? "bg-amber-100 text-amber-800"
+                                                                    : "bg-emerald-100 text-emerald-800"
+                                                            }`}
+                                                        >
+                                                            {cf.urgency_level}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-600">
+                                                        Previous: <strong>{cf.source_service_name}</strong> &rarr; Suggested Next:{" "}
+                                                        <strong className="text-indigo-700">{cf.recommended_service_name}</strong>
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-500">
+                                                        {cf.recommendation_reason}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <span className="text-xs font-black text-slate-900 block">
+                                                        Due: {cf.predicted_due_date}
+                                                    </span>
+                                                    <span className="text-[11px] font-semibold text-slate-500 block">
+                                                        {cf.days_remaining < 0
+                                                            ? `${Math.abs(cf.days_remaining)}d overdue`
+                                                            : `in ${cf.days_remaining} days`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* TECHNICIAN CERTIFICATION COMPLIANCE MATRIX */}
+                            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
+                                <div>
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">
+                                        Workforce Qualification & Safety Compliance
+                                    </span>
+                                    <h3 className="text-base font-extrabold text-slate-900">
+                                        Technician Certification Expiry & Renewal Forecast
+                                    </h3>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {technicianAlerts.slice(0, 8).map((ta) => (
+                                        <div
+                                            key={ta.certification_id}
+                                            className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                        >
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-xs font-extrabold text-slate-900">
+                                                        {ta.technician_name}
+                                                    </span>
+                                                    <span
+                                                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                                            ta.status === "Expired" || ta.status === "Critical"
+                                                                ? "bg-rose-100 text-rose-800"
+                                                                : ta.status === "Expiring Soon"
+                                                                ? "bg-amber-100 text-amber-800"
+                                                                : "bg-emerald-100 text-emerald-800"
+                                                        }`}
+                                                    >
+                                                        {ta.status}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-slate-700 font-semibold">
+                                                    {ta.certification_name} ({ta.issuing_body})
+                                                </p>
+                                                <p className="text-[11px] text-slate-500">
+                                                    Expires: <strong>{ta.expiry_date}</strong> ({ta.days_until_expiry < 0 ? `${Math.abs(ta.days_until_expiry)}d ago` : `${ta.days_until_expiry} days left`})
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleManagerRenewTechCert(ta.certification_id)}
+                                                className="px-3 py-1.5 rounded-xl bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold transition shrink-0 self-end sm:self-center"
+                                            >
+                                                Verify & Renew (+1 Yr)
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* ──────────────────────────────────────────────────────────────
@@ -422,7 +663,13 @@ export default function ManagerDashboardOverview({ onNavigate, dashboardData, is
                             {managerToDos.map((todo) => (
                                 <div
                                     key={todo.id}
-                                    onClick={() => onNavigate(todo.target)}
+                                    onClick={() => {
+                                        if (todo.target === "forecasting_tab") {
+                                            setActiveTab("forecasting");
+                                        } else {
+                                            onNavigate(todo.target);
+                                        }
+                                    }}
                                     className="p-3.5 rounded-2xl bg-slate-50 hover:bg-blue-50/60 border border-slate-100 hover:border-blue-200 transition cursor-pointer flex items-center justify-between gap-3 group"
                                 >
                                     <div className="space-y-0.5 min-w-0">

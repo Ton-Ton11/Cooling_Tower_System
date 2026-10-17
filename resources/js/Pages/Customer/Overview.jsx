@@ -22,6 +22,8 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
     const announcements = dashboardData?.announcements ?? [];
     const user = dashboardData?.user ?? {};
     const upcoming = dashboardData?.upcoming_appointment ?? null;
+    const serviceForecasts = dashboardData?.service_forecasts ?? [];
+    const primaryForecast = serviceForecasts[0] || null;
     const toDoItems = dashboardData?.to_do_items ?? [];
     const onlineTechnicians = dashboardData?.online_technicians ?? [
         { id: 1, name: "Mark Anthony", role: "Head Technician" },
@@ -159,6 +161,104 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             <span className="w-2 h-2 rounded-full bg-white/20 transition-all cursor-pointer hover:bg-white/40" />
                         </div>
                     </div>
+
+                    {/* SECTION 1.5: PREDICTIVE MAINTENANCE & AUTOMATED NEXT-SERVICE FORECAST */}
+                    {primaryForecast && (
+                        <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-blue-200/80 relative overflow-hidden space-y-5">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-blue-50 via-indigo-50/40 to-transparent rounded-bl-full pointer-events-none" />
+
+                            <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                                <div className="space-y-1">
+                                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-extrabold uppercase tracking-wider">
+                                        <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping" />
+                                        <span>Smart Predictive Maintenance Forecast</span>
+                                    </div>
+                                    <h2 className="text-lg font-black text-slate-900 tracking-tight pt-1">
+                                        Recommended Next Service: {primaryForecast.recommended_service_name}
+                                    </h2>
+                                    <p className="text-xs text-slate-500">
+                                        Automated reminder based on your previous <strong>{primaryForecast.source_service_name}</strong> ({primaryForecast.last_service_date}) for <strong>{primaryForecast.unit_summary}</strong>.
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <div className="text-right">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                            Forecasted Due Date
+                                        </span>
+                                        <span className="text-sm font-black text-slate-900">
+                                            {primaryForecast.predicted_due_date}
+                                        </span>
+                                        <span
+                                            className={`block text-[11px] font-extrabold ${
+                                                primaryForecast.days_remaining < 0
+                                                    ? "text-rose-600"
+                                                    : primaryForecast.days_remaining <= 14
+                                                    ? "text-amber-600"
+                                                    : "text-emerald-600"
+                                            }`}
+                                        >
+                                            {primaryForecast.days_remaining < 0
+                                                ? `${Math.abs(primaryForecast.days_remaining)} days overdue`
+                                                : primaryForecast.days_remaining === 0
+                                                ? "Due today"
+                                                : `Due in ${primaryForecast.days_remaining} days`}
+                                        </span>
+                                    </div>
+
+                                    <div className="w-14 h-14 rounded-2xl bg-slate-900 text-white flex flex-col items-center justify-center shrink-0 shadow-md">
+                                        <span className="text-sm font-black text-emerald-400">
+                                            {primaryForecast.health_score ?? 82}%
+                                        </span>
+                                        <span className="text-[9px] uppercase font-bold text-slate-300">
+                                            Unit Health
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="relative z-10 bg-slate-50/90 rounded-2xl p-4 border border-slate-200/70 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="space-y-1.5 max-w-xl">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span
+                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                                primaryForecast.urgency_level === "Overdue"
+                                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                                    : primaryForecast.urgency_level === "Due Soon"
+                                                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                                    : primaryForecast.urgency_level === "Scheduled"
+                                                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                                    : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                            }`}
+                                        >
+                                            Status: {primaryForecast.urgency_level}
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-slate-500">
+                                            Cycle Interval: {primaryForecast.adjusted_interval_days} days (Wear factor: {primaryForecast.wear_factor}x)
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-slate-600 leading-relaxed">
+                                        {primaryForecast.recommendation_reason}
+                                    </p>
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        if (onSelectServiceToBook && primaryForecast.recommended_service_id) {
+                                            onSelectServiceToBook(primaryForecast.recommended_service_id);
+                                        }
+                                        onNavigate("book");
+                                    }}
+                                    className="px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold shadow-md shadow-indigo-500/20 transition flex items-center justify-center gap-2 shrink-0"
+                                >
+                                    <span>Book Recommended Service</span>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={icons.arrow} />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {/* SECTION 2: COURSES / SERVICES SHOWCASE WITH FILTER PILLS */}
                     <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 space-y-6">
@@ -372,7 +472,12 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             {toDoItems.map((item) => (
                                 <div
                                     key={item.id}
-                                    onClick={() => onNavigate(item.target || "bookings")}
+                                    onClick={() => {
+                                        if (item.recommended_service_id && onSelectServiceToBook) {
+                                            onSelectServiceToBook(item.recommended_service_id);
+                                        }
+                                        onNavigate(item.target || "bookings");
+                                    }}
                                     className="p-3 rounded-2xl bg-slate-50 hover:bg-blue-50/60 border border-slate-100 hover:border-blue-200 transition cursor-pointer flex items-start justify-between gap-3 group"
                                 >
                                     <div className="space-y-1">

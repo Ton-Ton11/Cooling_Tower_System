@@ -13,18 +13,124 @@ const icons = {
     star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
 };
 
-export default function TechnicianDashboardOverview({ onNavigate, dashboardData, isLoading, onRefresh }) {
-    const [activeTab, setActiveTab] = useState("assigned"); // "assigned" | "completed"
+export default function TechnicianDashboardOverview({ addToast, onNavigate, dashboardData, isLoading, onRefresh }) {
+    const [activeTab, setActiveTab] = useState("assigned"); // "assigned" | "completed" | "certifications"
+    const [certScope, setCertScope] = useState("crew"); // "crew" | "personal" (for Head Technician)
+    const [showAddCertModal, setShowAddCertModal] = useState(false);
+    const [submittingCert, setSubmittingCert] = useState(false);
+    const [scanningReminders, setScanningReminders] = useState(false);
+    const [certForm, setCertForm] = useState({
+        technician_user_id: "",
+        certification_name: "TESDA RAC Servicing NC III (Commercial HVAC)",
+        issuing_body: "TESDA Philippines",
+        certificate_number: "",
+        issued_date: new Date().toISOString().slice(0, 10),
+        expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        renewal_lead_days: 45,
+        notes: "",
+    });
 
+    const isHeadTechnician = Boolean(dashboardData?.is_head_technician);
     const stats = dashboardData?.stats ?? {};
     const assignedBookings = dashboardData?.assigned_bookings ?? [];
     const recentCompleted = dashboardData?.recent_completed ?? [];
     const announcements = dashboardData?.announcements ?? [];
+    const certifications = dashboardData?.certifications ?? [];
+    const teamCertifications = dashboardData?.team_certifications ?? [];
+    const technicianList = dashboardData?.technician_list ?? [];
+
+    const displayedCertifications =
+        isHeadTechnician && certScope === "crew" && teamCertifications.length > 0
+            ? teamCertifications
+            : certifications;
+
+    const allRelevantCerts =
+        isHeadTechnician && teamCertifications.length > 0 ? teamCertifications : certifications;
+
+    const expiringCerts = allRelevantCerts.filter((c) =>
+        ["Expired", "Critical", "Expiring Soon"].includes(c.status),
+    );
+    const urgentCert = expiringCerts[0] || null;
+
+    const handleTriggerCrewReminderScan = async () => {
+        try {
+            setScanningReminders(true);
+            const res = await window.axios.post("/forecasting/evaluate-reminders");
+            if (addToast) {
+                addToast(res.data?.message || "Crew certification & service reminder scan completed.", "success");
+            }
+            if (onRefresh) onRefresh();
+        } catch (err) {
+            if (addToast) {
+                addToast(err?.response?.data?.message || "Failed to run reminder scan.", "error");
+            }
+        } finally {
+            setScanningReminders(false);
+        }
+    };
+
+    const handleRenewCertification = async (certId, action = "submit_renewal") => {
+        try {
+            setSubmittingCert(true);
+            const payload =
+                action === "update_dates"
+                    ? {
+                          action: "update_dates",
+                          new_expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+                              .toISOString()
+                              .slice(0, 10),
+                      }
+                    : { action: "submit_renewal" };
+
+            const res = await window.axios.patch(`/forecasting/certifications/${certId}/renew`, payload);
+            if (addToast) addToast(res.data?.message || "Certification status updated.", "success");
+            if (onRefresh) onRefresh();
+        } catch (err) {
+            if (addToast) addToast(err?.response?.data?.message || "Failed to update certification.", "error");
+        } finally {
+            setSubmittingCert(false);
+        }
+    };
+
+    const handleAddCertification = async (e) => {
+        e.preventDefault();
+        try {
+            setSubmittingCert(true);
+            const payload = { ...certForm };
+            if (!payload.technician_user_id) {
+                delete payload.technician_user_id;
+            }
+            const res = await window.axios.post("/forecasting/certifications", payload);
+            if (addToast) addToast(res.data?.message || "Certification added.", "success");
+            setShowAddCertModal(false);
+            if (onRefresh) onRefresh();
+        } catch (err) {
+            if (addToast) addToast(err?.response?.data?.message || "Could not save certification.", "error");
+        } finally {
+            setSubmittingCert(false);
+        }
+    };
 
     const nextJob = assignedBookings[0] || null;
 
-    // Realistic technician to-do items
+    // Realistic technician to-do items (with dynamic certification renewal alert at top!)
     const technicianToDos = [
+        ...(urgentCert
+            ? [
+                  {
+                      id: `cert_${urgentCert.certification_id}`,
+                      title: urgentCert.technician_name
+                          ? `${urgentCert.technician_name}: Renew ${urgentCert.certification_name}`
+                          : `Renew ${urgentCert.certification_name}`,
+                      sub:
+                          urgentCert.days_until_expiry < 0
+                              ? `Expired ${Math.abs(urgentCert.days_until_expiry)} days ago • ${urgentCert.issuing_body}`
+                              : `Expires in ${urgentCert.days_until_expiry} days (${urgentCert.expiry_date})`,
+                      target: "certifications_tab",
+                      badge: urgentCert.status,
+                  },
+              ]
+            : []),
         {
             id: 1,
             title: "Submit diagnostic findings for active jobs",
@@ -136,12 +242,81 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                         </div>
                     </div>
 
-                    {/* SECTION 2: JOB QUEUE WITH FILTER PILLS */}
+                    {/* SECTION 1.5: AUTOMATED CERTIFICATION EXPIRY FORECAST ALERT */}
+                    {urgentCert && (
+                        <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-amber-200 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div className="flex items-start gap-4">
+                                <div
+                                    className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 font-black text-xs shadow-sm ${
+                                        urgentCert.days_until_expiry < 0 || urgentCert.status === "Critical"
+                                            ? "bg-rose-100 text-rose-700 border border-rose-200"
+                                            : "bg-amber-100 text-amber-800 border border-amber-200"
+                                    }`}
+                                >
+                                    {urgentCert.days_until_expiry < 0
+                                        ? "EXP"
+                                        : `${urgentCert.days_until_expiry}d`}
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
+                                            {isHeadTechnician
+                                                ? "Head Tech Crew Certification Alert"
+                                                : "Automated Certification Renewal Notice"}
+                                        </span>
+                                        {urgentCert.technician_name && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                                {urgentCert.technician_name}
+                                            </span>
+                                        )}
+                                        <span className="text-[11px] font-bold text-slate-500">
+                                            {urgentCert.issuing_body} • #{urgentCert.certificate_number}
+                                        </span>
+                                    </div>
+                                    <h3 className="text-sm sm:text-base font-black text-slate-900">
+                                        {urgentCert.certification_name}
+                                    </h3>
+                                    <p className="text-xs text-slate-600 leading-relaxed">
+                                        {urgentCert.action_notice} (Expiry: <strong>{urgentCert.expiry_date}</strong>)
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                                {isHeadTechnician && (
+                                    <button
+                                        type="button"
+                                        disabled={scanningReminders}
+                                        onClick={handleTriggerCrewReminderScan}
+                                        className="px-3.5 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-extrabold transition"
+                                    >
+                                        {scanningReminders ? "Scanning..." : "Remind Crew"}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setActiveTab("certifications")}
+                                    className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-sm transition"
+                                >
+                                    Manage & Renew &rarr;
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* SECTION 2: JOB QUEUE & CERTIFICATIONS WITH FILTER PILLS */}
                     <div className="bg-white rounded-3xl p-6 sm:p-7 shadow-sm border border-slate-100 space-y-6">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
                             <div>
-                                <h2 className="text-lg font-black text-slate-900 tracking-tight">Active Assignments & Service Schedule</h2>
-                                <p className="text-xs text-slate-500 mt-0.5">Dispatched jobs, technical questionnaires, and customer appointments.</p>
+                                <h2 className="text-lg font-black text-slate-900 tracking-tight">
+                                    {isHeadTechnician
+                                        ? "Head Technician Dispatch & Crew Compliance Forecast"
+                                        : "Active Assignments & Compliance Forecast"}
+                                </h2>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {isHeadTechnician
+                                        ? "Oversee squad dispatches, service reports, and all technicians' valid certifications."
+                                        : "Dispatched jobs, service history, and valid technician certification renewal tracking."}
+                                </p>
                             </div>
 
                             {/* Filter Pills */}
@@ -171,6 +346,20 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                                     <span>Recently Serviced</span>
                                     <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === "completed" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"}`}>
                                         {recentCompleted.length}
+                                    </span>
+                                </button>
+
+                                <button
+                                    onClick={() => setActiveTab("certifications")}
+                                    className={`px-4 py-2 rounded-full text-xs font-bold transition flex items-center gap-1.5 ${
+                                        activeTab === "certifications"
+                                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/25"
+                                            : "bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
+                                    }`}
+                                >
+                                    <span>{isHeadTechnician ? "Crew Certifications" : "Certifications"}</span>
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === "certifications" ? "bg-white/20 text-white" : "bg-amber-200/80 text-amber-900"}`}>
+                                        {allRelevantCerts.length}
                                     </span>
                                 </button>
                             </div>
@@ -252,6 +441,234 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                                 )}
                             </div>
                         )}
+
+                        {/* TAB 3: TECHNICIAN CERTIFICATIONS & EXPIRY FORECAST */}
+                        {activeTab === "certifications" && (
+                            <div className="space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/70">
+                                    <div>
+                                        <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700">
+                                            {isHeadTechnician
+                                                ? "Head Technician • Crew & Personal License Compliance Tracker"
+                                                : "Automated License & Certification Tracker"}
+                                        </h3>
+                                        <p className="text-xs text-slate-600 mt-0.5">
+                                            {isHeadTechnician
+                                                ? "Monitor all technicians' valid certifications, send renewal reminders, and update licenses before expiry."
+                                                : "The system forecasts renewal dates and reminds you 45 days before any HVAC or safety license expires."}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap shrink-0">
+                                        {isHeadTechnician && (
+                                            <button
+                                                type="button"
+                                                disabled={scanningReminders}
+                                                onClick={handleTriggerCrewReminderScan}
+                                                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold transition shadow-sm"
+                                            >
+                                                {scanningReminders ? "Scanning..." : "Send Crew Renewal Reminders"}
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => setShowAddCertModal(!showAddCertModal)}
+                                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shrink-0 transition shadow-sm"
+                                        >
+                                            {showAddCertModal ? "Cancel" : "+ Add Certification"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {isHeadTechnician && teamCertifications.length > 0 && (
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setCertScope("crew")}
+                                            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition ${
+                                                certScope === "crew"
+                                                    ? "bg-indigo-600 text-white shadow-xs"
+                                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                            }`}
+                                        >
+                                            All Crew Technicians ({teamCertifications.length})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setCertScope("personal")}
+                                            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition ${
+                                                certScope === "personal"
+                                                    ? "bg-indigo-600 text-white shadow-xs"
+                                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                            }`}
+                                        >
+                                            My Personal Licenses ({certifications.length})
+                                        </button>
+                                    </div>
+                                )}
+
+                                {showAddCertModal && (
+                                    <form
+                                        onSubmit={handleAddCertification}
+                                        className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3 text-xs"
+                                    >
+                                        <h4 className="font-extrabold text-indigo-950">Register New HVAC / Safety Certification</h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            {isHeadTechnician && technicianList.length > 0 && (
+                                                <div className="sm:col-span-2">
+                                                    <label className="block font-bold text-slate-700 mb-1">
+                                                        Assign to Technician (Crew Member)
+                                                    </label>
+                                                    <select
+                                                        value={certForm.technician_user_id}
+                                                        onChange={(e) =>
+                                                            setCertForm({ ...certForm, technician_user_id: e.target.value })
+                                                        }
+                                                        className="w-full rounded-xl border-slate-300 text-xs px-3 py-2 bg-white"
+                                                    >
+                                                        <option value="">Myself (Head Technician)</option>
+                                                        {technicianList.map((tech) => (
+                                                            <option key={tech.user_id} value={tech.user_id}>
+                                                                {tech.name} ({tech.role_label})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+                                            <div>
+                                                <label className="block font-bold text-slate-700 mb-1">Certification Title</label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={certForm.certification_name}
+                                                    onChange={(e) => setCertForm({ ...certForm, certification_name: e.target.value })}
+                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block font-bold text-slate-700 mb-1">Issuing Body</label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={certForm.issuing_body}
+                                                    onChange={(e) => setCertForm({ ...certForm, issuing_body: e.target.value })}
+                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block font-bold text-slate-700 mb-1">Certificate Number</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="e.g. TESDA-NC3-9921"
+                                                    value={certForm.certificate_number}
+                                                    onChange={(e) => setCertForm({ ...certForm, certificate_number: e.target.value })}
+                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label className="block font-bold text-slate-700 mb-1">Issued Date</label>
+                                                    <input
+                                                        type="date"
+                                                        required
+                                                        value={certForm.issued_date}
+                                                        onChange={(e) => setCertForm({ ...certForm, issued_date: e.target.value })}
+                                                        className="w-full rounded-xl border-slate-300 text-xs px-2.5 py-2"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block font-bold text-slate-700 mb-1">Expiry Date</label>
+                                                    <input
+                                                        type="date"
+                                                        required
+                                                        value={certForm.expiry_date}
+                                                        onChange={(e) => setCertForm({ ...certForm, expiry_date: e.target.value })}
+                                                        className="w-full rounded-xl border-slate-300 text-xs px-2.5 py-2"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end gap-2 pt-2">
+                                            <button
+                                                type="submit"
+                                                disabled={submittingCert}
+                                                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm"
+                                            >
+                                                {submittingCert ? "Saving..." : "Save Certification"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
+
+                                <div className="space-y-3">
+                                    {displayedCertifications.map((cert) => {
+                                        const isUrgent = ["Expired", "Critical", "Expiring Soon"].includes(cert.status);
+                                        return (
+                                            <div
+                                                key={cert.certification_id}
+                                                className={`p-4 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                                                    isUrgent
+                                                        ? "bg-amber-50/40 border-amber-200"
+                                                        : "bg-white border-slate-200/80"
+                                                }`}
+                                            >
+                                                <div className="space-y-1.5">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        {cert.technician_name && (
+                                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                                                {cert.technician_name}
+                                                                {cert.technician_role ? ` • ${cert.technician_role}` : ""}
+                                                            </span>
+                                                        )}
+                                                        <h4 className="text-sm font-extrabold text-slate-900">
+                                                            {cert.certification_name}
+                                                        </h4>
+                                                        <span
+                                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                                                cert.status === "Expired" || cert.status === "Critical"
+                                                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                                                    : cert.status === "Expiring Soon"
+                                                                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                                                    : cert.status === "Renewal Submitted"
+                                                                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                                                    : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                                            }`}
+                                                        >
+                                                            {cert.status}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-500">
+                                                        Issuer: <strong>{cert.issuing_body}</strong> • Cert #:{" "}
+                                                        <strong>{cert.certificate_number || "On File"}</strong> • Valid:{" "}
+                                                        {cert.issued_date} to <strong>{cert.expiry_date}</strong>
+                                                    </p>
+                                                    <p className="text-xs text-slate-700 font-medium bg-white/80 px-3 py-1.5 rounded-xl border border-slate-200/60">
+                                                        {cert.action_notice}
+                                                    </p>
+                                                </div>
+
+                                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+                                                    {cert.status !== "Renewal Submitted" && isUrgent && (
+                                                        <button
+                                                            disabled={submittingCert}
+                                                            onClick={() => handleRenewCertification(cert.certification_id, "submit_renewal")}
+                                                            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition shadow-xs"
+                                                        >
+                                                            Mark Renewal Filed
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        disabled={submittingCert}
+                                                        onClick={() => handleRenewCertification(cert.certification_id, "update_dates")}
+                                                        className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition"
+                                                    >
+                                                        Renew (+1 Yr)
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     {/* SECTION 3: SAFETY & WORKMANSHIP PROTOCOLS BANNER */}
@@ -291,7 +708,13 @@ export default function TechnicianDashboardOverview({ onNavigate, dashboardData,
                             {technicianToDos.map((item) => (
                                 <div
                                     key={item.id}
-                                    onClick={() => onNavigate(item.target)}
+                                    onClick={() => {
+                                        if (item.target === "certifications_tab") {
+                                            setActiveTab("certifications");
+                                        } else {
+                                            onNavigate(item.target);
+                                        }
+                                    }}
                                     className="p-3 rounded-2xl bg-slate-50 hover:bg-blue-50/60 border border-slate-100 hover:border-blue-200 transition cursor-pointer flex items-start justify-between gap-3 group"
                                 >
                                     <div className="space-y-1">
