@@ -671,6 +671,17 @@ export function normalizeSparePart(part) {
 export function normalizeAcUnit(unit) {
     if (!unit) return null;
     
+    const purchasePrice = asNumber(unit?.purchase_price);
+    const sellingPrice = unit?.selling_price === null || unit?.selling_price === undefined || unit?.selling_price === ""
+        ? null
+        : asNumber(unit?.selling_price);
+    const soldPrice = unit?.sold_price !== null && unit?.sold_price !== undefined
+        ? asNumber(unit?.sold_price)
+        : (sellingPrice ?? purchasePrice);
+    const profit = unit?.profit !== null && unit?.profit !== undefined
+        ? asNumber(unit?.profit)
+        : Math.max(0, soldPrice - purchasePrice);
+
     return {
         ac_unit_id: unit.ac_unit_id,
         brand: unit.brand || '',
@@ -680,14 +691,22 @@ export function normalizeAcUnit(unit) {
         ac_type: unit.ac_type || 'Split',
         refrigerant_type: unit.refrigerant_type || null,
         supplier: unit.supplier || null,
-        purchase_price: asNumber(unit?.purchase_price),
-        selling_price: unit?.selling_price === null || unit?.selling_price === undefined || unit?.selling_price === ""
-            ? null
-            : asNumber(unit?.selling_price),
+        purchase_price: purchasePrice,
+        selling_price: sellingPrice,
         purchase_date: unit.purchase_date,
         warranty_period: asNumber(unit?.warranty_period),
         status: unit.status || 'Available',
         expected_arrival: unit.expected_arrival || null,
+        sale_id: unit.sale_id || null,
+        booking_id: unit.booking_id || null,
+        customer_name: unit.customer_name || null,
+        customer_contact: unit.customer_contact || null,
+        customer_address: unit.customer_address || null,
+        payment_method: unit.payment_method || null,
+        sold_price: soldPrice,
+        profit: profit,
+        sold_by_name: unit.sold_by_name || null,
+        sold_at: unit.sold_at || null,
         created_at: unit.created_at,
         updated_at: unit.updated_at,
     };
@@ -698,10 +717,22 @@ export function buildAnnualRevenue(monthlyRevenue = []) {
         const year = String(row?.year_month || "").slice(0, 4) || "Unknown";
 
         if (!carry[year]) {
-            carry[year] = { year, revenue: 0, bookings: 0 };
+            carry[year] = {
+                year,
+                revenue: 0,
+                profit: 0,
+                service_revenue: 0,
+                tools_materials_revenue: 0,
+                ac_units_revenue: 0,
+                bookings: 0,
+            };
         }
 
         carry[year].revenue += asNumber(row?.revenue);
+        carry[year].profit += asNumber(row?.profit);
+        carry[year].service_revenue += asNumber(row?.service_revenue);
+        carry[year].tools_materials_revenue += asNumber(row?.tools_materials_revenue);
+        carry[year].ac_units_revenue += asNumber(row?.ac_units_revenue);
         carry[year].bookings += asNumber(row?.bookings);
 
         return carry;

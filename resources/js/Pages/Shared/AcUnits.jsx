@@ -126,12 +126,13 @@ const createEmptyPartForm = (defaultBrand = '', defaultCategory = '') => ({
     status: 'Available / On Hand',
 });
 
-const createEmptySellForm = (warrantyPeriod = 12) => ({
+const createEmptySellForm = (warrantyPeriod = 12, sellingPrice = '') => ({
     customer_name: '',
     customer_contact: '',
     customer_address: '',
     payment_method: 'Cash',
     warranty_period: warrantyPeriod,
+    selling_price: sellingPrice !== null && sellingPrice !== undefined ? String(sellingPrice) : '',
 });
 
 const createEmptyPartSellForm = (part = null) => ({
@@ -171,9 +172,11 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
     // Core data
     const [units, setUnits] = useState([]);
+    const [soldUnitRecords, setSoldUnitRecords] = useState([]);
     const [brands, setBrands] = useState([]);
     const [unitTypes, setUnitTypes] = useState([]);
     const [parts, setParts] = useState([]);
+    const [soldPartRecords, setSoldPartRecords] = useState([]);
     const [sparePartFolders, setSparePartFolders] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -182,10 +185,23 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
     const [selectedBrand, setSelectedBrand] = useState(null); // Brand string or null (grid view)
     const [selectedCategory, setSelectedCategory] = useState("all"); // Category string or 'all'
 
+    // Sold AC Units organized records view state
+    const [soldViewMode, setSoldViewMode] = useState("records"); // 'records' | 'brands'
+    const [soldRecordsSearch, setSoldRecordsSearch] = useState("");
+    const [soldRecordsBrandFilter, setSoldRecordsBrandFilter] = useState("All");
+    const [soldRecordsPaymentFilter, setSoldRecordsPaymentFilter] = useState("All");
+
     // Spare Parts Sub-Tab: 'in_stock', 'order', 'sold', 'defects', 'warranty_reserved'
     const [partSubTab, setPartSubTab] = useState("in_stock");
     const [selectedPartBrand, setSelectedPartBrand] = useState(null);
     const [selectedPartCategory, setSelectedPartCategory] = useState("all");
+    const [soldPartViewMode, setSoldPartViewMode] = useState("records"); // 'records' | 'brands'
+    const [soldPartSearch, setSoldPartSearch] = useState("");
+
+    // Move Item Modal state (for moving AC units or Spare Parts to another existing sub-category)
+    const [moveAcModal, setMoveAcModal] = useState({ open: false, item: null, type: 'unit', targetCategory: '', targetBrand: '' });
+    const [moveTargetAcCategory, setMoveTargetAcCategory] = useState("");
+    const [movingAcItem, setMovingAcItem] = useState(false);
 
     // Searches
     const [brandCardSearch, setBrandCardSearch] = useState('');
@@ -393,6 +409,9 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         try {
             const { data } = await window.axios.get(ep.acUnits);
             setUnits((Array.isArray(data?.data) ? data.data : []).map(normalizeAcUnit));
+            if (Array.isArray(data?.sold_records)) {
+                setSoldUnitRecords(data.sold_records);
+            }
             await fetchCatalog();
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to load AC units."), "error");
@@ -406,6 +425,9 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         try {
             const { data } = await window.axios.get(ep.spareParts ?? SUPER_ADMIN_ENDPOINTS.spareParts);
             setParts((Array.isArray(data?.data) ? data.data : []).map(normalizeSparePart));
+            if (Array.isArray(data?.sold_records)) {
+                setSoldPartRecords(data.sold_records);
+            }
 
             // Fetch spare parts categories / folders
             const foldersUrl = ep.inventoryFolders ?? SUPER_ADMIN_ENDPOINTS.inventoryFolders;
@@ -971,10 +993,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         if (!soldModal || processingSold) return;
         setProcessingSold(true);
         try {
+            const finalSellingPrice = soldForm.selling_price !== '' && soldForm.selling_price !== undefined
+                ? parseFloat(soldForm.selling_price)
+                : (soldModal.selling_price || soldModal.purchase_price || 0);
             await window.axios.patch(ep.updateAcUnit(soldModal.ac_unit_id), {
                 status: 'Sold',
+                selling_price: finalSellingPrice,
+                customer_name: soldForm.customer_name?.trim() || 'Walk-in Customer',
+                customer_contact: soldForm.customer_contact?.trim() || null,
+                customer_address: soldForm.customer_address?.trim() || null,
+                payment_method: soldForm.payment_method || 'Cash',
+                warranty_period: parseInt(soldForm.warranty_period) || soldModal.warranty_period || 12,
             });
-            addToast(`AC unit ${soldModal.brand} ${soldModal.model} (${soldModal.serial_number}) status changed to Sold.`);
+            addToast(`AC unit ${soldModal.brand} ${soldModal.model} (${soldModal.serial_number}) sold & recorded in Sales & Records.`);
             setSoldModal(null);
             setConfirmMarkSold(false);
             setSoldForm(createEmptySellForm());
@@ -994,6 +1025,147 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         setEditingArrival(null);
         setArrivalInput('');
     };
+
+    // ══════════════════════════════════════════════════════════════════
+    // MOVE ITEM TO ANOTHER EXISTING SUB-CATEGORY HANDLERS
+    // ══════════════════════════════════════════════════════════════════
+    const handleOpenMoveAcItem = (item, mode) => {
+        const isUnit = mode === 'unit';
+        const categories = isUnit ? allCategories : allPartCategories;
+        const currentCategory = isUnit
+            ? (item.ac_type || 'Split')
+            : (item.sub_category || item.category || 'Capacitors');
+        const defaultTarget = categories.find(c => c.name.toLowerCase() !== currentCategory.toLowerCase())?.name || categories[0]?.name || currentCategory;
+        const defaultBrand = item.brand || (allBrandCards[0]?.name || '');
+
+        setMoveTargetAcCategory(defaultTarget);
+        setMoveAcModal({
+            open: true,
+            item,
+            mode,
+            type: mode,
+            categories,
+            currentCategory,
+            targetCategory: defaultTarget,
+            targetBrand: defaultBrand,
+        });
+    };
+
+    const handleConfirmMoveAcItem = async (e) => {
+        e?.preventDefault();
+        const targetCategory = moveAcModal?.targetCategory || moveTargetAcCategory;
+        const targetBrand = moveAcModal?.targetBrand || moveAcModal?.item?.brand;
+        if (!moveAcModal || !moveAcModal.item || !targetCategory?.trim() || movingAcItem) return;
+        setMovingAcItem(true);
+        try {
+            const { item, mode, type, categories } = moveAcModal;
+            const itemMode = type || mode;
+            if (itemMode === 'part') {
+                const targetCat = (categories || allPartCategories).find(c => c.name.toLowerCase() === targetCategory.toLowerCase());
+                const itemId = item.part_id || item.item_id;
+                const updateUrl = ep.updateSparePart ? ep.updateSparePart(itemId) : `/super-admin/spare-parts/${itemId}`;
+                await window.axios.patch(updateUrl, {
+                    sub_category: targetCategory,
+                    folder_id: targetCat?.id || null,
+                });
+                if (editPartTarget && (editPartTarget.part_id || editPartTarget.item_id) === itemId) {
+                    setEditPartForm(p => ({ ...p, sub_category: targetCategory }));
+                }
+                addToast(`Moved "${item.part_name || item.item_name}" to "${targetCategory}" sub-category.`);
+                setMoveAcModal({ open: false, item: null, type: 'unit', targetCategory: '', targetBrand: '' });
+                await fetchParts();
+            } else {
+                const patchData = {
+                    ac_type: targetCategory,
+                };
+                if (targetBrand) {
+                    patchData.brand = targetBrand;
+                }
+                await window.axios.patch(ep.updateAcUnit(item.ac_unit_id), patchData);
+                if (editUnitTarget && editUnitTarget.ac_unit_id === item.ac_unit_id) {
+                    setEditUnitForm(p => ({ ...p, ac_type: targetCategory, ...(targetBrand ? { brand: targetBrand } : {}) }));
+                }
+                addToast(`Moved "${targetBrand || item.brand} ${item.model}" (${item.serial_number}) to "${targetCategory}" category.`);
+                setMoveAcModal({ open: false, item: null, type: 'unit', targetCategory: '', targetBrand: '' });
+                await fetchUnits(false);
+            }
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to move item to new sub-category."), "error");
+        } finally {
+            setMovingAcItem(false);
+        }
+    };
+
+    // ══════════════════════════════════════════════════════════════════
+    // ORGANIZED SOLD AC UNITS & SPARE PARTS RECORDS
+    // ══════════════════════════════════════════════════════════════════
+    const organizedSoldUnits = useMemo(() => {
+        const q = soldRecordsSearch.toLowerCase().trim();
+        return soldUnits.filter(u => {
+            if (soldRecordsBrandFilter !== 'All' && (u.brand || '').toLowerCase() !== soldRecordsBrandFilter.toLowerCase()) {
+                return false;
+            }
+            if (soldRecordsPaymentFilter !== 'All' && (u.payment_method || 'Cash') !== soldRecordsPaymentFilter) {
+                return false;
+            }
+            if (!q) return true;
+            return (
+                (u.brand || '').toLowerCase().includes(q) ||
+                (u.model || '').toLowerCase().includes(q) ||
+                (u.serial_number || '').toLowerCase().includes(q) ||
+                (u.ac_type || '').toLowerCase().includes(q) ||
+                (u.customer_name || '').toLowerCase().includes(q) ||
+                String(u.booking_id || '').includes(q) ||
+                String(u.ac_unit_id || '').includes(q)
+            );
+        });
+    }, [soldUnits, soldRecordsSearch, soldRecordsBrandFilter, soldRecordsPaymentFilter]);
+
+    const soldUnitsSummary = useMemo(() => {
+        const count = organizedSoldUnits.length;
+        const totalRevenue = organizedSoldUnits.reduce((s, u) => s + (u.sold_price || u.selling_price || u.purchase_price || 0), 0);
+        const totalCost = organizedSoldUnits.reduce((s, u) => s + (u.purchase_price || 0), 0);
+        const totalProfit = organizedSoldUnits.reduce((s, u) => s + (u.profit ?? Math.max(0, (u.sold_price || u.selling_price || 0) - (u.purchase_price || 0))), 0);
+        return { count, totalRevenue, totalCost, totalProfit };
+    }, [organizedSoldUnits]);
+
+    const organizedSoldParts = useMemo(() => {
+        const q = soldPartSearch.toLowerCase().trim();
+        // Combine soldPartRecords from inventory_sales with any soldParts not in soldPartRecords
+        const list = soldPartRecords.length > 0 ? soldPartRecords : soldParts.map(p => ({
+            sale_id: p.part_id || p.item_id,
+            booking_id: null,
+            item_id: p.part_id || p.item_id,
+            item_name: p.part_name || p.item_name,
+            brand: Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || 'Universal'),
+            sub_category: p.sub_category || p.category || 'Spare Part',
+            quantity: p.initial_stock || 1,
+            unit: p.unit || 'pc',
+            cost_price: p.capital || 0,
+            unit_price: p.selling_price || 0,
+            total_amount: (p.selling_price || 0) * Math.max(1, (p.initial_stock || 1) - (p.quantity_on_hand || 0)),
+            profit: Math.max(0, (p.selling_price || 0) - (p.capital || 0)) * Math.max(1, (p.initial_stock || 1) - (p.quantity_on_hand || 0)),
+            payment_method: 'Cash',
+            customer_name: 'Walk-in Customer',
+            sold_at: p.last_updated || p.added_at,
+        }));
+        if (!q) return list;
+        return list.filter(r =>
+            (r.item_name || '').toLowerCase().includes(q) ||
+            (r.brand || '').toLowerCase().includes(q) ||
+            (r.sub_category || '').toLowerCase().includes(q) ||
+            (r.customer_name || '').toLowerCase().includes(q)
+        );
+    }, [soldPartRecords, soldParts, soldPartSearch]);
+
+    const soldPartsSummary = useMemo(() => {
+        const count = organizedSoldParts.length;
+        const totalQty = organizedSoldParts.reduce((s, r) => s + (Number(r.quantity) || 1), 0);
+        const totalRevenue = organizedSoldParts.reduce((s, r) => s + (Number(r.total_amount) || 0), 0);
+        const totalProfit = organizedSoldParts.reduce((s, r) => s + (Number(r.profit) || 0), 0);
+        return { count, totalQty, totalRevenue, totalProfit };
+    }, [organizedSoldParts]);
 
     // ══════════════════════════════════════════════════════════════════
     // SPARE PARTS CRUD & SOLD HANDLERS
@@ -1143,9 +1315,15 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             await window.axios.patch(updateUrl, {
                 quantity_on_hand: newQty,
                 status: newStatus,
+                is_sale: true,
+                quantity_to_sell: sellQty,
+                selling_price: parseFloat(partSoldForm.selling_price) || partSoldModal.selling_price || 0,
+                customer_name: partSoldForm.customer_name?.trim() || 'Walk-in Customer',
+                customer_contact: partSoldForm.customer_contact?.trim() || null,
+                payment_method: partSoldForm.payment_method || 'Cash',
             });
 
-            addToast(`Sold ${sellQty} ${partSoldModal.unit} of "${partSoldModal.part_name || partSoldModal.item_name}".`);
+            addToast(`Sold ${sellQty} ${partSoldModal.unit} of "${partSoldModal.part_name || partSoldModal.item_name}" & recorded in Sales & Records.`);
             setPartSoldModal(null);
             setConfirmPartSold(false);
             setPartSoldForm(createEmptyPartSellForm());
@@ -1492,10 +1670,245 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                ══════════════════════════════════════════════════════════════ */}
             {mainTab !== 'spareparts' && (
                 <div>
-                    {/* ──────────────────────────────────────────────────────────
-                        A. TOP LEVEL: CLICKABLE BRAND CARDS GRID (AC UNITS)
-                       ────────────────────────────────────────────────────────── */}
-                    {!selectedBrand ? (
+                    {/* Sold Units Sub-View Toggle: Organized Records vs. Browse by Brand Cards */}
+                    {mainTab === 'sold' && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+                            <div style={{ display: 'inline-flex', background: '#F1F5F9', padding: 4, borderRadius: 10, border: '1px solid #E2E8F0' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => { setSoldViewMode('records'); setSelectedBrand(null); }}
+                                    style={{
+                                        padding: '8px 16px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        background: soldViewMode === 'records' ? '#FFFFFF' : 'transparent',
+                                        color: soldViewMode === 'records' ? '#16A34A' : '#64748B',
+                                        boxShadow: soldViewMode === 'records' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                                    }}
+                                >
+                                    📋 Organized Sold Units Records ({soldUnits.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSoldViewMode('brands')}
+                                    style={{
+                                        padding: '8px 16px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        background: soldViewMode === 'brands' ? '#FFFFFF' : 'transparent',
+                                        color: soldViewMode === 'brands' ? '#1E2F5F' : '#64748B',
+                                        boxShadow: soldViewMode === 'brands' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                                    }}
+                                >
+                                    🏷️ Browse by Brand Cards
+                                </button>
+                            </div>
+                            <span style={{ fontSize: 12, color: '#16A34A', fontWeight: 600, background: '#F0FDF4', padding: '5px 12px', borderRadius: 8, border: '1px solid #BBF7D0' }}>
+                                ✓ Automatically synced with Sales & Records
+                            </span>
+                        </div>
+                    )}
+
+                    {/* ORGANIZED SOLD AC UNITS RECORDS VIEW */}
+                    {mainTab === 'sold' && soldViewMode === 'records' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                            {/* Summary KPI Cards */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #3B82F6' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Total AC Units Sold</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#1E2F5F', margin: '4px 0 0' }}>{soldUnitsSummary.count}</p>
+                                    <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0' }}>Recorded in Sales & Records</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #16A34A' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Total Unit Sales Revenue</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#16A34A', margin: '4px 0 0' }}>₱{soldUnitsSummary.totalRevenue.toLocaleString()}</p>
+                                    <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0' }}>Gross AC unit sales</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10B981' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Estimated Net Profit</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#059669', margin: '4px 0 0' }}>₱{soldUnitsSummary.totalProfit.toLocaleString()}</p>
+                                    <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0' }}>Selling price minus purchase cost</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #6366F1' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Total Purchase Cost</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#4F46E5', margin: '4px 0 0' }}>₱{soldUnitsSummary.totalCost.toLocaleString()}</p>
+                                    <p style={{ fontSize: 11, color: '#94A3B8', margin: '2px 0 0' }}>Supplier unit acquisition cost</p>
+                                </div>
+                            </div>
+
+                            {/* Organized Sold AC Units Table Card */}
+                            <div className="card" style={{ padding: 20 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                    <div>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                            Sold AC Units Sales Ledger
+                                        </p>
+                                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                            Complete record of all sold air conditioning units, customer details, serial numbers, and profit margins
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <select
+                                            className="input-field"
+                                            style={{ width: 150, fontSize: 12, padding: '6px 10px' }}
+                                            value={soldRecordsBrandFilter}
+                                            onChange={e => setSoldRecordsBrandFilter(e.target.value)}
+                                        >
+                                            <option value="All">All Brands</option>
+                                            {allBrandCards.map(b => (
+                                                <option key={b.name} value={b.name}>{b.name}</option>
+                                            ))}
+                                        </select>
+                                        <select
+                                            className="input-field"
+                                            style={{ width: 155, fontSize: 12, padding: '6px 10px' }}
+                                            value={soldRecordsPaymentFilter}
+                                            onChange={e => setSoldRecordsPaymentFilter(e.target.value)}
+                                        >
+                                            <option value="All">All Payment Methods</option>
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                            <option value="Credit Card">Credit Card</option>
+                                        </select>
+                                        <SearchBar
+                                            value={soldRecordsSearch}
+                                            onChange={setSoldRecordsSearch}
+                                            placeholder="Search model, serial, customer..."
+                                        />
+                                    </div>
+                                </div>
+
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1080 }}>
+                                        <thead>
+                                            <tr style={{ background: '#F8FAFC' }}>
+                                                {['Sale / Unit Ref', 'Date Sold', 'Brand & Model', 'Serial No.', 'Category & HP', 'Customer', 'Payment', 'Purchase Cost', 'Sold Price', 'Net Profit', 'Warranty', 'Actions'].map(h => (
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            ...thStyle,
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {organizedSoldUnits.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={12} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                        No sold AC units match your current filter.
+                                                    </td>
+                                                </tr>
+                                            ) : organizedSoldUnits.map(u => {
+                                                const soldPriceVal = u.sold_price || u.selling_price || u.purchase_price || 0;
+                                                const profitVal = u.profit ?? Math.max(0, soldPriceVal - (u.purchase_price || 0));
+                                                return (
+                                                    <tr
+                                                        key={u.ac_unit_id}
+                                                        style={{ borderTop: '1px solid #F1F5F9', cursor: 'pointer' }}
+                                                        onClick={() => trackRecentAc(u.ac_unit_id, 'unit')}
+                                                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                                    >
+                                                        <td style={{ ...tdStyle, fontSize: 12, fontWeight: 700, color: '#2563EB' }}>
+                                                            <div>#AC{String(u.ac_unit_id).padStart(3, '0')}</div>
+                                                            {u.booking_id && (
+                                                                <div style={{ fontSize: 10, color: '#64748B', fontWeight: 600 }}>Booking #{u.booking_id}</div>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#475569' }}>
+                                                            {u.sold_at ? new Date(u.sold_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : (u.updated_at ? new Date(u.updated_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')}
+                                                        </td>
+                                                        <td style={{ ...tdStyle }}>
+                                                            <div style={{ fontWeight: 700, color: '#0F172A' }}>{u.brand} {u.model}</div>
+                                                            <div style={{ fontSize: 11, color: '#64748B' }}>Refrigerant: {u.refrigerant_type || 'R32'}</div>
+                                                        </td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, fontFamily: 'monospace', color: '#475569' }}>{u.serial_number}</td>
+                                                        <td style={{ ...tdStyle }}>
+                                                            <span style={{
+                                                                display: 'inline-block',
+                                                                fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                                                background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE',
+                                                            }}>
+                                                                {u.ac_type} · {u.horsepower} HP
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ ...tdStyle }}>
+                                                            <div style={{ fontWeight: 600, color: '#1E293B', fontSize: 12 }}>{u.customer_name || 'Walk-in Customer'}</div>
+                                                            {u.customer_contact && <div style={{ fontSize: 11, color: '#64748B' }}>{u.customer_contact}</div>}
+                                                        </td>
+                                                        <td style={{ ...tdStyle }}>
+                                                            <span style={{
+                                                                fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                                                background: (u.payment_method || 'Cash') === 'Cash' ? '#DCFCE7' : '#DBEAFE',
+                                                                color: (u.payment_method || 'Cash') === 'Cash' ? '#15803D' : '#1D4ED8',
+                                                            }}>
+                                                                {u.payment_method || 'Cash'}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>₱{(u.purchase_price || 0).toLocaleString()}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 13, fontWeight: 700, color: '#0F172A' }}>₱{soldPriceVal.toLocaleString()}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, fontWeight: 700, color: '#16A34A' }}>+₱{profitVal.toLocaleString()}</td>
+                                                        <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{u.warranty_period} mo</td>
+                                                        <td
+                                                            className="sticky-action-col"
+                                                            style={{
+                                                                padding: '10px 14px',
+                                                                position: 'sticky',
+                                                                right: 0,
+                                                                zIndex: 5,
+                                                                background: '#FFFFFF',
+                                                            }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                                <button
+                                                                    className="btn-secondary"
+                                                                    style={{ padding: '4px 10px', fontSize: 11 }}
+                                                                    onClick={() => {
+                                                                        trackRecentAc(u.ac_unit_id, 'unit');
+                                                                        setEditUnitTarget(u);
+                                                                        setEditUnitForm({
+                                                                            brand: u.brand ?? "",
+                                                                            model: u.model ?? "",
+                                                                            serial_number: u.serial_number ?? "",
+                                                                            horsepower: String(u.horsepower ?? ""),
+                                                                            ac_type: u.ac_type ?? "Split",
+                                                                            refrigerant_type: u.refrigerant_type ?? "R32",
+                                                                            supplier: u.supplier ?? "",
+                                                                            purchase_price: String(u.purchase_price ?? ""),
+                                                                            selling_price: u.selling_price ? String(u.selling_price) : "",
+                                                                            purchase_date: toInputDate(u.purchase_date),
+                                                                            warranty_period: String(u.warranty_period ?? "12"),
+                                                                            status: u.status === 'Installed' ? 'Sold' : (u.status ?? "Available"),
+                                                                        });
+                                                                    }}
+                                                                >
+                                                                    Manage
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    ) : !selectedBrand ? (
                         <div>
                             {/* Search & Top Action Bar */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
@@ -1783,7 +2196,17 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         <thead>
                                             <tr style={{ background: '#F8FAFC' }}>
                                                 {['Unit ID', 'Model', 'Serial No.', 'Category / Type', 'HP', 'Refrigerant', 'Purchase Price', 'Selling Price', 'Warranty', ...(mainTab === 'order' ? ['Arrival Tracker'] : []), 'Status', 'Actions'].map(h => (
-                                                    <th key={h} style={thStyle}>{h}</th>
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            ...thStyle,
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1854,8 +2277,18 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                     <td style={{ padding: '10px 12px' }}>
                                                         <StatusBadge status={u.status} />
                                                     </td>
-                                                    <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                    <td
+                                                        className="sticky-action-col"
+                                                        style={{
+                                                            padding: '10px 14px',
+                                                            position: 'sticky',
+                                                            right: 0,
+                                                            zIndex: 5,
+                                                            background: '#FFFFFF',
+                                                        }}
+                                                        onClick={e => e.stopPropagation()}
+                                                    >
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                                                             {u.status === 'Available' && (
                                                                 <button
                                                                     className="btn-primary"
@@ -1863,7 +2296,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                                     onClick={() => {
                                                                         trackRecentAc(u.ac_unit_id, 'unit');
                                                                         setSoldModal(u);
-                                                                        setSoldForm(createEmptySellForm(u.warranty_period));
+                                                                        setSoldForm(createEmptySellForm(u.warranty_period, u.selling_price || u.purchase_price));
                                                                     }}>
                                                                     Sold
                                                                 </button>
@@ -1889,7 +2322,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                                         status: u.status === 'Installed' ? 'Sold' : (u.status ?? "Available"),
                                                                     });
                                                                 }}>
-                                                                Edit
+                                                                Manage
                                                             </button>
                                                             <button
                                                                 className="btn-danger"
@@ -1925,7 +2358,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             Order Base ({orderBaseParts.length})
                         </button>
                         <button className={`tab-item ${partSubTab === 'sold' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('sold')}>
-                            Sold Parts ({soldParts.length})
+                            Sold Parts ({ Math.max(soldParts.length, organizedSoldParts.length) })
                         </button>
                         <button className={`tab-item ${partSubTab === 'defects' ? 'active' : ''}`} onClick={() => handlePartSubTabChange('defects')}>
                             Defects ({defectParts.length})
@@ -1935,10 +2368,128 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                         </button>
                     </div>
 
-                    {/* ──────────────────────────────────────────────────────────
-                        A. TOP LEVEL: CLICKABLE BRAND CARDS GRID (SPARE PARTS)
-                       ────────────────────────────────────────────────────────── */}
-                    {!selectedPartBrand ? (
+                    {/* Sold Parts View Toggle */}
+                    {partSubTab === 'sold' && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+                            <div style={{ display: 'inline-flex', background: '#F1F5F9', padding: 4, borderRadius: 10, border: '1px solid #E2E8F0' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => { setSoldPartViewMode('records'); setSelectedPartBrand(null); }}
+                                    style={{
+                                        padding: '7px 14px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        background: soldPartViewMode === 'records' ? '#FFFFFF' : 'transparent',
+                                        color: soldPartViewMode === 'records' ? '#16A34A' : '#64748B',
+                                        boxShadow: soldPartViewMode === 'records' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                                    }}
+                                >
+                                    📋 Organized Sold Spare Parts Records ({organizedSoldParts.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSoldPartViewMode('brands')}
+                                    style={{
+                                        padding: '7px 14px',
+                                        borderRadius: 8,
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        background: soldPartViewMode === 'brands' ? '#FFFFFF' : 'transparent',
+                                        color: soldPartViewMode === 'brands' ? '#1E2F5F' : '#64748B',
+                                        boxShadow: soldPartViewMode === 'brands' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                                    }}
+                                >
+                                    🏷️ Browse by Brand Cards
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ORGANIZED SOLD SPARE PARTS RECORDS VIEW */}
+                    {partSubTab === 'sold' && soldPartViewMode === 'records' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #3B82F6' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Sale Transactions</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#1E2F5F', margin: '4px 0 0' }}>{soldPartsSummary.count}</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #6366F1' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Total Parts Sold</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#4F46E5', margin: '4px 0 0' }}>{soldPartsSummary.totalQty}</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #16A34A' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Spare Parts Revenue</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#16A34A', margin: '4px 0 0' }}>₱{soldPartsSummary.totalRevenue.toLocaleString()}</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #10B981' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', margin: 0 }}>Estimated Net Profit</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#059669', margin: '4px 0 0' }}>₱{soldPartsSummary.totalProfit.toLocaleString()}</p>
+                                </div>
+                            </div>
+
+                            <div className="card" style={{ padding: 20 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                    <div>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Sold Spare Parts Sales Ledger</p>
+                                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Recorded spare part sales synced with Sales & Records</p>
+                                    </div>
+                                    <SearchBar value={soldPartSearch} onChange={setSoldPartSearch} placeholder="Search part, brand, customer..." />
+                                </div>
+
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 940 }}>
+                                        <thead>
+                                            <tr style={{ background: '#F8FAFC' }}>
+                                                {['Sale Ref', 'Date Sold', 'Part Name', 'Compatible Brands', 'Sub-Category', 'Customer', 'Qty Sold', 'Unit Price', 'Total Amount', 'Net Profit', 'Payment'].map(h => (
+                                                    <th key={h} style={thStyle}>{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {organizedSoldParts.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={11} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                        No sold spare parts recorded yet.
+                                                    </td>
+                                                </tr>
+                                            ) : organizedSoldParts.map((r, idx) => (
+                                                <tr key={r.sale_id || idx} style={{ borderTop: '1px solid #F1F5F9' }}>
+                                                    <td style={{ ...tdStyle, fontSize: 12, fontWeight: 700, color: '#2563EB' }}>
+                                                        #{r.booking_id || r.sale_id}
+                                                    </td>
+                                                    <td style={{ ...tdStyle, fontSize: 12, color: '#475569' }}>
+                                                        {r.sold_at ? new Date(r.sold_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                                                    </td>
+                                                    <td style={{ ...tdStyle, fontWeight: 700, color: '#0F172A' }}>{r.item_name}</td>
+                                                    <td style={{ ...tdStyle, fontSize: 12, color: '#64748B' }}>{r.brand || 'Universal'}</td>
+                                                    <td style={{ ...tdStyle }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: '#F1F5F9', color: '#334155' }}>
+                                                            {r.sub_category || 'Spare Part'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600 }}>{r.customer_name || 'Walk-in Customer'}</td>
+                                                    <td style={{ ...tdStyle, fontWeight: 700 }}>{r.quantity} {r.unit || 'pc'}</td>
+                                                    <td style={{ ...tdStyle, fontSize: 12 }}>₱{Number(r.unit_price || 0).toLocaleString()}</td>
+                                                    <td style={{ ...tdStyle, fontWeight: 700, color: '#0F172A' }}>₱{Number(r.total_amount || 0).toLocaleString()}</td>
+                                                    <td style={{ ...tdStyle, fontWeight: 700, color: '#16A34A' }}>+₱{Number(r.profit || 0).toLocaleString()}</td>
+                                                    <td style={{ ...tdStyle }}>
+                                                        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: '#DCFCE7', color: '#15803D' }}>
+                                                            {r.payment_method || 'Cash'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    ) : !selectedPartBrand ? (
                         <div>
                             {/* Search & Top Action Bar */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
@@ -2231,7 +2782,17 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         <thead>
                                             <tr style={{ background: '#F8FAFC' }}>
                                                 {['Part ID', 'Part Name', 'Compatible Brands', 'Category', 'Unit', 'Initial', 'Qty on Hand', 'Reorder', 'Capital', 'Selling Price', 'Supplier', 'Status', 'Actions'].map(h => (
-                                                    <th key={h} style={thStyle}>{h}</th>
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            ...thStyle,
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -2286,8 +2847,18 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                         <td style={{ padding: '10px 12px' }}>
                                                             <StatusBadge status={p.status} />
                                                         </td>
-                                                        <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                        <td
+                                                            className="sticky-action-col"
+                                                            style={{
+                                                                padding: '10px 14px',
+                                                                position: 'sticky',
+                                                                right: 0,
+                                                                zIndex: 5,
+                                                                background: '#FFFFFF',
+                                                            }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                                                                 {canSell && (
                                                                     <button
                                                                         className="btn-primary"
@@ -2320,7 +2891,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                                             status: p.status || 'Available / On Hand',
                                                                         });
                                                                     }}>
-                                                                    Edit
+                                                                    Manage
                                                                 </button>
                                                                 <button
                                                                     className="btn-danger"
@@ -2784,10 +3355,15 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 onCancel={() => setConfirmAddUnit(false)}
             />
 
-            {/* Edit AC Unit Modal */}
+            {/* Manage / Edit AC Unit Modal */}
             {editUnitTarget && !confirmEditUnit && renderModalWrapper(true, () => setEditUnitTarget(null), (
                 <>
-                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Edit AC Unit</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage AC Unit</h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Update unit details or move to another category / brand</p>
+                        </div>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>AC Brand *</p>
@@ -2850,9 +3426,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             </select>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                        <button className="btn-secondary" onClick={() => setEditUnitTarget(null)}>Cancel</button>
-                        <button className="btn-primary" onClick={() => setConfirmEditUnit(true)}>Save Changes →</button>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center' }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ background: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            onClick={() => handleOpenMoveAcItem(editUnitTarget, 'unit')}
+                        >
+                            ⇄ Move Item
+                        </button>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button className="btn-secondary" onClick={() => setEditUnitTarget(null)}>Cancel</button>
+                            <button className="btn-primary" onClick={() => setConfirmEditUnit(true)}>Save Changes →</button>
+                        </div>
                     </div>
                 </>
             ))}
@@ -2881,17 +3467,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 <>
                     <h2 style={{ fontSize: 17, fontWeight: 700, color: '#16A34A', margin: '0 0 6px' }}>Mark AC Unit as Sold</h2>
                     <p style={{ fontSize: 13, color: '#64748B', marginBottom: 18 }}>
-                        <strong style={{ color: '#0F172A' }}>{soldModal.brand} {soldModal.model}</strong> · Serial: <span style={{ fontFamily: 'monospace' }}>{soldModal.serial_number}</span> · ₱{(soldModal.selling_price || 0).toLocaleString()}
+                        <strong style={{ color: '#0F172A' }}>{soldModal.brand} {soldModal.model}</strong> · Serial: <span style={{ fontFamily: 'monospace' }}>{soldModal.serial_number}</span>
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Customer Name (Optional)</p>
-                            <input className="input-field" placeholder="e.g. Juan Dela Cruz" value={soldForm.customer_name} onChange={e => setSoldForm(p => ({ ...p, customer_name: e.target.value }))} />
-                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                             <div>
-                                <p className="section-label" style={{ marginBottom: 5 }}>Contact Number</p>
-                                <input className="input-field" placeholder="e.g. 0917-123-4567" value={soldForm.customer_contact} onChange={e => setSoldForm(p => ({ ...p, customer_contact: e.target.value }))} />
+                                <p className="section-label" style={{ marginBottom: 5 }}>Selling Price (₱) *</p>
+                                <input
+                                    type="number"
+                                    className="input-field"
+                                    required
+                                    value={soldForm.selling_price ?? soldModal.selling_price ?? 0}
+                                    onChange={e => setSoldForm(p => ({ ...p, selling_price: e.target.value }))}
+                                />
                             </div>
                             <div>
                                 <p className="section-label" style={{ marginBottom: 5 }}>Payment Method</p>
@@ -2901,6 +3489,16 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                     <option value="Bank Transfer">Bank Transfer</option>
                                     <option value="Credit Card">Credit Card</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Customer Name (Optional)</p>
+                                <input className="input-field" placeholder="e.g. Juan Dela Cruz" value={soldForm.customer_name} onChange={e => setSoldForm(p => ({ ...p, customer_name: e.target.value }))} />
+                            </div>
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Contact Number</p>
+                                <input className="input-field" placeholder="e.g. 0917-123-4567" value={soldForm.customer_contact} onChange={e => setSoldForm(p => ({ ...p, customer_contact: e.target.value }))} />
                             </div>
                         </div>
                     </div>
@@ -2915,7 +3513,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             <Modal
                 open={confirmMarkSold}
                 title="Confirm Sold Status?"
-                message={`Mark "${soldModal?.brand} ${soldModal?.model}" as Sold? The status will immediately change to "Sold".`}
+                message={`Mark "${soldModal?.brand} ${soldModal?.model}" as Sold for ₱${Number(soldForm.selling_price ?? soldModal?.selling_price ?? 0).toLocaleString()}? This transaction will also be recorded in Sales & Records.`}
                 confirmLabel={processingSold ? "Updating..." : "Yes, Mark as Sold"}
                 confirmDisabled={processingSold}
                 onConfirm={handleMarkAsSold}
@@ -3062,10 +3660,13 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 onCancel={() => !savingPart && setConfirmAddPart(false)}
             />
 
-            {/* Edit Spare Part Modal */}
+            {/* Manage / Edit Spare Part Modal */}
             {editPartTarget && !confirmEditPart && renderModalWrapper(true, () => setEditPartTarget(null), (
                 <form onSubmit={(e) => { e.preventDefault(); setConfirmEditPart(true); }}>
-                    <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Edit Spare Part</h2>
+                    <div style={{ marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Spare Part</h2>
+                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Update spare part details or move to another sub-category</p>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <p className="section-label" style={{ marginBottom: 5 }}>Part Name *</p>
@@ -3167,9 +3768,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             </select>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                        <button type="button" className="btn-secondary" onClick={() => setEditPartTarget(null)}>Cancel</button>
-                        <button type="submit" className="btn-primary">Save Changes →</button>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center' }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ background: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                            onClick={() => handleOpenMoveAcItem(editPartTarget, 'part')}
+                        >
+                            ⇄ Move Item
+                        </button>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button type="button" className="btn-secondary" onClick={() => setEditPartTarget(null)}>Cancel</button>
+                            <button type="submit" className="btn-primary">Save Changes →</button>
+                        </div>
                     </div>
                 </form>
             ))}
@@ -3273,12 +3884,104 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             <Modal
                 open={confirmPartSold}
                 title="Confirm Spare Part Sale?"
-                message={`Sell ${partSoldForm.quantity_to_sell} ${partSoldModal?.unit} of "${partSoldModal?.part_name || partSoldModal?.item_name}" for ₱${((parseFloat(partSoldForm.selling_price) || 0) * (parseInt(partSoldForm.quantity_to_sell) || 1)).toLocaleString()}? Stock on hand will be updated.`}
+                message={`Sell ${partSoldForm.quantity_to_sell} ${partSoldModal?.unit} of "${partSoldModal?.part_name || partSoldModal?.item_name}" for ₱${((parseFloat(partSoldForm.selling_price) || 0) * (parseInt(partSoldForm.quantity_to_sell) || 1)).toLocaleString()}? Stock on hand will be updated and recorded in Sales & Records.`}
                 confirmLabel={processingPartSold ? "Processing..." : "Yes, Complete Sale"}
                 confirmDisabled={processingPartSold}
                 onConfirm={handlePartSoldConfirm}
                 onCancel={() => !processingPartSold && setConfirmPartSold(false)}
             />
+
+            {/* Move AC Unit / Spare Part Modal */}
+            {Boolean(moveAcModal?.open && moveAcModal?.item) && renderModalWrapper(true, () => !movingAcItem && setMoveAcModal({ open: false, item: null, type: 'unit', targetCategory: '', targetBrand: '' }), (
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                        <div style={{ width: 38, height: 38, borderRadius: 10, background: '#EFF6FF', border: '1px solid #BFDBFE', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1D4ED8', fontSize: 18, fontWeight: 800 }}>
+                            ⇄
+                        </div>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0F172A', margin: 0 }}>
+                                Move {(moveAcModal.type || moveAcModal.mode) === 'unit' ? 'AC Unit' : 'Spare Part'} to Sub-Category
+                            </h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                Reassign this item to another existing category or brand
+                            </p>
+                        </div>
+                    </div>
+
+                    <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                            Selected Item
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>
+                            {(moveAcModal.type || moveAcModal.mode) === 'unit'
+                                ? `${moveAcModal.item.brand} ${moveAcModal.item.model} (${moveAcModal.item.serial_number})`
+                                : (moveAcModal.item.part_name || moveAcModal.item.item_name)}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>
+                            Current Category: <strong style={{ color: '#1E2F5F' }}>
+                                {(moveAcModal.type || moveAcModal.mode) === 'unit'
+                                    ? (moveAcModal.item.ac_type || 'Split Type')
+                                    : (moveAcModal.item.sub_category || moveAcModal.item.category || 'Capacitors')}
+                            </strong>
+                            {(moveAcModal.type || moveAcModal.mode) === 'unit' && (
+                                <> · Brand: <strong style={{ color: '#2563EB' }}>{moveAcModal.item.brand}</strong></>
+                            )}
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+                        {(moveAcModal.type || moveAcModal.mode) === 'unit' && (
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 6 }}>Target Brand *</p>
+                                <select
+                                    className="input-field"
+                                    value={moveAcModal.targetBrand || moveAcModal.item.brand}
+                                    onChange={(e) => setMoveAcModal((prev) => ({ ...prev, targetBrand: e.target.value }))}
+                                >
+                                    {allBrandCards.map((b) => (
+                                        <option key={b.name} value={b.name}>{b.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 6 }}>Target Sub-Category *</p>
+                            <select
+                                className="input-field"
+                                value={moveAcModal.targetCategory || moveTargetAcCategory}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setMoveTargetAcCategory(val);
+                                    setMoveAcModal((prev) => ({ ...prev, targetCategory: val }));
+                                }}
+                            >
+                                {((moveAcModal.type || moveAcModal.mode) === 'unit' ? allCategories : allPartCategories).map((c) => (
+                                    <option key={c.name} value={c.name}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={movingAcItem}
+                            onClick={() => setMoveAcModal({ open: false, item: null, type: 'unit', targetCategory: '', targetBrand: '' })}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={movingAcItem || !(moveAcModal.targetCategory || moveTargetAcCategory)}
+                            onClick={handleConfirmMoveAcItem}
+                        >
+                            {movingAcItem ? 'Moving...' : 'Confirm Move →'}
+                        </button>
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }

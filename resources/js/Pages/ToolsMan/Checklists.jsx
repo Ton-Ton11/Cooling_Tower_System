@@ -1288,24 +1288,28 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                         "Status",
                                         "Submitted",
                                         "Action",
-                                    ].map((heading) => (
-                                        <th
-                                            key={heading}
-                                            style={{
-                                                padding: "10px 14px",
-                                                textAlign: "left",
-                                                fontSize: 11,
-                                                fontWeight: 600,
-                                                color: "#6B7280",
-                                                textTransform: "uppercase",
-                                                letterSpacing: "0.05em",
-                                                borderBottom:
-                                                    "1px solid #EAECF0",
-                                            }}
-                                        >
-                                            {heading}
-                                        </th>
-                                    ))}
+                                    ].map((heading) => {
+                                        const isAction = heading === "Action";
+                                        return (
+                                            <th
+                                                key={heading}
+                                                className={isAction ? "sticky-action-col" : ""}
+                                                style={{
+                                                    padding: "10px 14px",
+                                                    textAlign: isAction ? "right" : "left",
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    color: "#6B7280",
+                                                    textTransform: "uppercase",
+                                                    letterSpacing: "0.05em",
+                                                    borderBottom: "1px solid #EAECF0",
+                                                    ...(isAction ? { position: "sticky", right: 0, zIndex: 10, background: "#F8FAFC" } : {}),
+                                                }}
+                                            >
+                                                {heading}
+                                            </th>
+                                        );
+                                    })}
                                 </tr>
                             </thead>
                             <tbody>
@@ -1479,8 +1483,13 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                 {formatDateTime(cl.created_at)}
                                             </td>
                                             <td
+                                                className="sticky-action-col"
                                                 style={{
                                                     padding: "12px 14px",
+                                                    position: "sticky",
+                                                    right: 0,
+                                                    zIndex: 5,
+                                                    background: "#FFFFFF",
                                                 }}
                                             >
                                                 <div
@@ -1488,6 +1497,7 @@ export default function ToolsManChecklists({ addToast, onDataChanged, currentUse
                                                         display: "flex",
                                                         gap: 6,
                                                         alignItems: "center",
+                                                        justifyContent: "flex-end",
                                                     }}
                                                 >
                                                     <button

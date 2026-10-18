@@ -298,7 +298,7 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                                 <th className="py-3 px-3">Service</th>
                                                 <th className="py-3 px-3">Scheduled</th>
                                                 <th className="py-3 px-3">Technician</th>
-                                                <th className="py-3 px-3">Action</th>
+                                                <th className="py-3 px-3 sticky-action-col text-right" style={{ position: "sticky", right: 0, zIndex: 10, background: "#F8FAFC" }}>Action</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 text-xs">
@@ -319,7 +319,7 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                                     <td className="py-3 px-3 text-slate-600">
                                                         {b.assigned_tech_name || "Unassigned"}
                                                     </td>
-                                                    <td className="py-3 px-3">
+                                                    <td className="py-3 px-3 sticky-action-col text-right" style={{ position: "sticky", right: 0, zIndex: 5, background: "#FFFFFF" }}>
                                                         <button
                                                             onClick={() => onNavigate("bookings")}
                                                             className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] transition"

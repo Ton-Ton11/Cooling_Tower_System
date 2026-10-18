@@ -436,23 +436,35 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                             "Status",
                                             "Date",
                                             "Actions",
-                                        ].map((heading) => (
-                                            <th
-                                                key={heading}
-                                                style={{
-                                                    padding: "10px 14px",
-                                                    textAlign: "left",
-                                                    fontSize: 11,
-                                                    fontWeight: 600,
-                                                    color: "#6B7280",
-                                                    textTransform: "uppercase",
-                                                    letterSpacing: "0.05em",
-                                                    borderBottom: "1px solid #EAECF0",
-                                                }}
-                                            >
-                                                {heading}
-                                            </th>
-                                        ))}
+                                        ].map((heading) => {
+                                            const isAction = heading === "Actions";
+                                            return (
+                                                <th
+                                                    key={heading}
+                                                    className={isAction ? "sticky-action-col" : ""}
+                                                    style={{
+                                                        padding: "10px 14px",
+                                                        textAlign: isAction ? "right" : "left",
+                                                        fontSize: 11,
+                                                        fontWeight: 600,
+                                                        color: "#6B7280",
+                                                        textTransform: "uppercase",
+                                                        letterSpacing: "0.05em",
+                                                        borderBottom: "1px solid #EAECF0",
+                                                        ...(isAction
+                                                            ? {
+                                                                  position: "sticky",
+                                                                  right: 0,
+                                                                  zIndex: 10,
+                                                                  background: "#F8FAFC",
+                                                              }
+                                                            : {}),
+                                                    }}
+                                                >
+                                                    {heading}
+                                                </th>
+                                            );
+                                        })}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -500,8 +512,17 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                 <td style={{ padding: "12px 14px", fontSize: 11, color: "#9CA3AF" }}>
                                                     {formatDateTime(cl.created_at)}
                                                 </td>
-                                                <td style={{ padding: "12px 14px" }}>
-                                                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                                <td
+                                                    className="sticky-action-col"
+                                                    style={{
+                                                        padding: "12px 14px",
+                                                        position: "sticky",
+                                                        right: 0,
+                                                        zIndex: 5,
+                                                        background: "#FFFFFF",
+                                                    }}
+                                                >
+                                                    <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
                                                         <button
                                                             className="btn-secondary"
                                                             style={{ padding: "5px 10px", fontSize: 11, display: "inline-flex", alignItems: "center", gap: 5 }}

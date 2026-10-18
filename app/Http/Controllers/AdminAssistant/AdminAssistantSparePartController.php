@@ -5,6 +5,7 @@ namespace App\Http\Controllers\AdminAssistant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class AdminAssistantSparePartController extends AdminAssistantBaseController
 {
@@ -17,8 +18,19 @@ class AdminAssistantSparePartController extends AdminAssistantBaseController
             ->orderBy('item_name')
             ->get();
 
+        $soldRecords = [];
+        if (Schema::hasTable('inventory_sales')) {
+            $soldRecords = DB::table('inventory_sales')
+                ->where('sale_type', 'spare_part')
+                ->orderByDesc('sold_at')
+                ->orderByDesc('sale_id')
+                ->get()
+                ->values();
+        }
+
         return response()->json([
             'data' => $items->map(fn ($item) => $this->formatSparePart($item))->values(),
+            'sold_records' => $soldRecords,
         ]);
     }
 
@@ -223,18 +235,139 @@ class AdminAssistantSparePartController extends AdminAssistantBaseController
 
         $updateData['last_updated'] = now();
 
-        DB::table('inventory_items')->where('item_id', $itemId)->update($updateData);
+        $isSale = $request->boolean('is_sale', false)
+            || $request->filled('quantity_to_sell')
+            || (($validated['status'] ?? null) === 'Sold' && $item->status !== 'Sold');
+
+        $soldRecord = null;
+        $bookingId = null;
+
+        DB::transaction(function () use ($itemId, $item, $updateData, $isSale, $request, &$soldRecord, &$bookingId) {
+            DB::table('inventory_items')->where('item_id', $itemId)->update($updateData);
+
+            if ($isSale) {
+                $qtySold = max(1, (int) ($request->input('quantity_to_sell') ?: ((int) $item->quantity_on_hand - (int) ($updateData['quantity_on_hand'] ?? 0)) ?: 1));
+                $unitPrice = $request->filled('selling_price')
+                    ? (float) $request->input('selling_price')
+                    : (float) ($item->selling_price ?? ((float) $item->capital + (float) $item->profit));
+                $costPrice = (float) ($item->capital ?? 0);
+                $totalAmount = round($unitPrice * $qtySold, 2);
+                $profit = round(($unitPrice - $costPrice) * $qtySold, 2);
+                $paymentMethod = $request->input('payment_method', 'Cash') ?: 'Cash';
+
+                $clientId = $request->input('client_id');
+                $customerUser = $clientId ? DB::table('users')->where('user_id', $clientId)->first() : null;
+                $customerName = trim((string) $request->input('customer_name', ''));
+                if ($customerName === '' && $customerUser) {
+                    $customerName = trim(($customerUser->given_name ?? '') . ' ' . ($customerUser->last_name ?? ''));
+                }
+                if ($customerName === '') {
+                    $customerName = 'Walk-in Customer';
+                }
+                $customerContact = $request->input('customer_contact') ?: ($customerUser->contact_number ?? null);
+
+                $bookingClientId = $customerUser?->user_id;
+                if (! $bookingClientId) {
+                    $fallbackCustomer = DB::table('users')->where('role_id', 6)->orderBy('user_id')->first()
+                        ?: DB::table('users')->orderBy('user_id')->first();
+                    $bookingClientId = $fallbackCustomer?->user_id;
+                }
+
+                $serviceName = 'Spare Part Sale: ' . mb_substr($item->item_name, 0, 75);
+                $service = DB::table('services')->where('service_name', $serviceName)->first();
+                if (! $service) {
+                    $serviceId = DB::table('services')->insertGetId([
+                        'service_name' => $serviceName,
+                        'description' => 'Direct spare part sale: ' . $item->item_name,
+                        'base_price' => $unitPrice,
+                        'is_active' => 1,
+                        'category' => 'Spare Part Sale',
+                        'display_order' => 99,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ], 'service_id');
+                } else {
+                    $serviceId = $service->service_id;
+                }
+
+                $paymentId = null;
+                if ($bookingClientId) {
+                    $bookingId = DB::table('bookings')->insertGetId([
+                        'client_id' => $bookingClientId,
+                        'service_id' => $serviceId,
+                        'scheduled_date' => now(),
+                        'booking_status' => 'Completed',
+                        'notes' => "Spare Part Sale: {$qtySold}x {$item->item_name} to {$customerName}",
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ], 'booking_id');
+
+                    $paymentId = DB::table('payment')->insertGetId([
+                        'booking_id' => $bookingId,
+                        'booking_price' => $totalAmount,
+                        'unit_price' => 0.00,
+                        'spare_parts_price' => $totalAmount,
+                        'amount_paid' => $totalAmount,
+                        'payment_status' => 'Paid',
+                        'payment_method' => $paymentMethod,
+                        'payment_type' => 'Full Payment',
+                        'payment_date' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ], 'payment_id');
+                }
+
+                $soldByUser = $request->user();
+                $soldByName = $soldByUser ? trim(($soldByUser->given_name ?? '') . ' ' . ($soldByUser->last_name ?? '')) : 'Admin Assistant';
+
+                if (Schema::hasTable('inventory_sales')) {
+                    $saleId = DB::table('inventory_sales')->insertGetId([
+                        'booking_id' => $bookingId,
+                        'payment_id' => $paymentId,
+                        'sale_type' => 'spare_part',
+                        'item_id' => $itemId,
+                        'item_name' => $item->item_name,
+                        'brand' => $item->compatible_brands ?: 'Universal',
+                        'sub_category' => $item->sub_category ?: 'Spare Parts',
+                        'item_type' => 'Spare Part',
+                        'quantity' => $qtySold,
+                        'unit' => $item->unit ?: 'pcs',
+                        'cost_price' => $costPrice,
+                        'unit_price' => $unitPrice,
+                        'total_amount' => $totalAmount,
+                        'profit' => $profit,
+                        'payment_method' => $paymentMethod,
+                        'payment_status' => 'Paid',
+                        'client_id' => $bookingClientId,
+                        'customer_name' => $customerName,
+                        'customer_contact' => $customerContact,
+                        'sold_by' => $soldByUser?->user_id,
+                        'sold_by_name' => $soldByName ?: 'Admin Assistant',
+                        'notes' => "Spare Part Sale: {$qtySold} × {$item->item_name}",
+                        'sold_at' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ], 'sale_id');
+
+                    $soldRecord = DB::table('inventory_sales')->where('sale_id', $saleId)->first();
+                }
+            }
+        });
 
         $this->logActivity(
             (int) $request->user()->user_id,
-            'INVENTORY',
-            sprintf('Updated spare part "%s".', $validated['item_name'] ?? $item->item_name)
+            $isSale ? 'SALE' : 'INVENTORY',
+            $isSale
+                ? sprintf('Sold spare part "%s".', $item->item_name)
+                : sprintf('Updated spare part "%s".', $validated['item_name'] ?? $item->item_name)
         );
 
         $updated = DB::table('inventory_items')->where('item_id', $itemId)->first();
 
         return response()->json([
-            'message' => 'Spare part updated successfully.',
+            'message' => $isSale ? 'Spare part sale recorded in Sales & Records.' : 'Spare part updated successfully.',
+            'booking_id' => $bookingId,
+            'sold_record' => $soldRecord,
             'data' => $this->formatSparePart($updated),
         ]);
     }

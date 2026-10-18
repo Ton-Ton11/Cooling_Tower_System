@@ -21,8 +21,19 @@ class SuperAdminInventoryController extends SuperAdminBaseController
 
         $items = $query->orderBy('inventory_mode')->orderBy('item_type')->orderBy('item_name')->get();
 
+        $soldItems = [];
+        if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
+            $soldItems = DB::table('inventory_sales')
+                ->where('sale_type', 'tools_materials')
+                ->orderByDesc('sold_at')
+                ->orderByDesc('sale_id')
+                ->get()
+                ->values();
+        }
+
         return response()->json([
             'data' => $items->map(fn ($item) => $this->formatInventoryItem($item))->values(),
+            'sold_items' => $soldItems,
         ]);
     }
 
@@ -685,7 +696,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
         $validated = $request->validate([
             'client_id' => ['required', 'integer', Rule::exists('users', 'user_id')->where(fn ($q) => $q->where('role_id', 6))],
             'quantity' => ['required', 'integer', 'min:1'],
-            'payment_method' => ['required', Rule::in(['Cash', 'GCash'])],
+            'payment_method' => ['required', Rule::in(['Cash', 'GCash', 'Bank Transfer', 'Credit Card'])],
             'unit_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
         ]);
 
@@ -708,9 +719,13 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             ? (float) $validated['unit_price']
             : ($item->selling_price !== null ? (float) $item->selling_price : ((float) $item->capital + (float) $item->profit));
 
+        $costPrice = (float) ($item->capital ?? 0);
         $totalAmount = round($unitPrice * $qty, 2);
+        $totalProfit = round(($unitPrice - $costPrice) * $qty, 2);
+        $soldByUser = $request->user();
+        $soldByName = $soldByUser ? trim(($soldByUser->given_name ?? '') . ' ' . ($soldByUser->last_name ?? '')) : 'Super Admin';
 
-        $bookingId = DB::transaction(function () use ($item, $qty, $customer, $unitPrice, $totalAmount, $validated, $request, $customerName) {
+        [$bookingId, $saleRecord] = DB::transaction(function () use ($item, $qty, $customer, $unitPrice, $costPrice, $totalAmount, $totalProfit, $validated, $request, $customerName, $soldByUser, $soldByName) {
             $serviceName = 'Retail Sale: ' . mb_substr($item->item_name, 0, 80);
             $service = DB::table('services')->where('service_name', $serviceName)->first();
             if (! $service) {
@@ -728,10 +743,11 @@ class SuperAdminInventoryController extends SuperAdminBaseController
                 'service_id' => $serviceId,
                 'scheduled_date' => now(),
                 'booking_status' => 'Completed',
+                'notes' => "Retail Sale: {$qty}x {$item->item_name} ({$item->sub_category})",
                 'created_at' => now(),
             ], 'booking_id');
 
-            DB::table('payment')->insert([
+            $paymentId = DB::table('payment')->insertGetId([
                 'booking_id' => $bookingId,
                 'booking_price' => $totalAmount,
                 'unit_price' => $unitPrice,
@@ -740,7 +756,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
                 'payment_status' => 'Paid',
                 'payment_method' => $validated['payment_method'],
                 'payment_date' => now(),
-            ]);
+            ], 'payment_id');
 
             DB::table('booking_materials')->insert([
                 'booking_id' => $bookingId,
@@ -748,6 +764,40 @@ class SuperAdminInventoryController extends SuperAdminBaseController
                 'quantity_used' => $qty,
                 'logged_at' => now(),
             ]);
+
+            $saleRecord = null;
+            if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
+                $saleId = DB::table('inventory_sales')->insertGetId([
+                    'booking_id' => $bookingId,
+                    'payment_id' => $paymentId,
+                    'sale_type' => 'tools_materials',
+                    'item_id' => $item->item_id,
+                    'item_name' => $item->item_name,
+                    'serial_number' => $item->serial_number ?? null,
+                    'sub_category' => $item->sub_category ?: 'General',
+                    'item_type' => $item->item_type ?: 'Material',
+                    'quantity' => $qty,
+                    'unit' => $item->unit ?: 'pcs',
+                    'cost_price' => $costPrice,
+                    'unit_price' => $unitPrice,
+                    'total_amount' => $totalAmount,
+                    'profit' => $totalProfit,
+                    'payment_method' => $validated['payment_method'],
+                    'payment_status' => 'Paid',
+                    'client_id' => $customer->user_id,
+                    'customer_name' => $customerName,
+                    'customer_contact' => $customer->contact_number ?? null,
+                    'customer_address' => $customer->address ?? null,
+                    'sold_by' => $soldByUser?->user_id,
+                    'sold_by_name' => $soldByName ?: 'Super Admin',
+                    'notes' => "Retail Sale of {$qty} {$item->unit} × {$item->item_name}",
+                    'sold_at' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ], 'sale_id');
+
+                $saleRecord = DB::table('inventory_sales')->where('sale_id', $saleId)->first();
+            }
 
             $newOnHand = max(0, (int) $item->quantity_on_hand - $qty);
             DB::table('inventory_items')->where('item_id', $item->item_id)->update([
@@ -761,7 +811,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
                 sprintf('Sold %dx %s to customer %s for ₱%s via %s.', $qty, $item->item_name, $customerName, number_format($totalAmount, 2), $validated['payment_method'])
             );
 
-            return $bookingId;
+            return [$bookingId, $saleRecord];
         });
 
         return response()->json([
@@ -769,6 +819,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             'booking_id' => $bookingId,
             'amount_paid' => $totalAmount,
             'customer_name' => $customerName,
+            'sold_record' => $saleRecord,
             'data' => $this->getInventoryItemById($item->item_id),
         ]);
     }

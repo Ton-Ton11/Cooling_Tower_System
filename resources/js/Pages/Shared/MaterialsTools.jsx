@@ -360,6 +360,15 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     // ── Checkout & Usage Tracking States ──
     const [checkouts, setCheckouts] = useState([]);
     const [checkoutOptions, setCheckoutOptions] = useState({ technicians: [], services: [], customers: [] });
+    const [soldItems, setSoldItems] = useState([]);
+    const [saleSubTab, setSaleSubTab] = useState('catalog'); // 'catalog' | 'sold_records'
+    const [soldSearch, setSoldSearch] = useState('');
+    const [soldPaymentFilter, setSoldPaymentFilter] = useState('all');
+
+    // ── Move Item to Another Sub-category Modal State ──
+    const [moveItemModal, setMoveItemModal] = useState(null); // { item, fieldType: 'materials'|'power_tools'|'hand_tools'|'sale_items' }
+    const [moveTargetSubCategory, setMoveTargetSubCategory] = useState('');
+    const [movingItem, setMovingItem] = useState(false);
 
     const allCustomers = useMemo(() => checkoutOptions?.customers || [], [checkoutOptions?.customers]);
     const filteredCustomers = useMemo(() => {
@@ -441,13 +450,16 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         }
     }, [ep.inventoryCheckoutOptions]);
 
-    // Fetch Items (includes active and archived)
+    // Fetch Items (includes active and archived + sold_items)
     const fetchItems = useCallback(async (showLoader = true) => {
         if (showLoader) setLoading(true);
         try {
             const sep = ep.inventory.includes('?') ? '&' : '?';
             const { data } = await window.axios.get(`${ep.inventory}${sep}include_archived=1`);
             setItems((Array.isArray(data?.data) ? data.data : []).map(normalizeInventoryItem));
+            if (Array.isArray(data?.sold_items)) {
+                setSoldItems(data.sold_items);
+            }
             await fetchFolders();
             await fetchCheckouts();
             await fetchCheckoutOptions();
@@ -467,6 +479,19 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const powerCategories = useMemo(() => folders.filter(f => f.field_type === 'power_tools'), [folders]);
     const handCategories = useMemo(() => folders.filter(f => f.field_type === 'hand_tools'), [folders]);
     const saleCategories = useMemo(() => folders.filter(f => f.field_type === 'sale_items'), [folders]);
+
+    const getCategoriesForFieldType = useCallback((fieldType) => {
+        if (fieldType === 'materials' || fieldType === 'material') {
+            return materialCategories;
+        }
+        if (fieldType === 'power_tools' || fieldType === 'power_tool') {
+            return powerCategories;
+        }
+        if (fieldType === 'hand_tools' || fieldType === 'hand_tool') {
+            return handCategories;
+        }
+        return saleCategories;
+    }, [materialCategories, powerCategories, handCategories, saleCategories]);
 
     // Active sub-category objects
     const activeMaterialCategoryObj = useMemo(() => materialCategories.find(f => f.name === selectedMaterialCategory), [materialCategories, selectedMaterialCategory]);
@@ -1194,6 +1219,87 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         }
     };
 
+    const handleOpenMoveItem = (item, fieldType) => {
+        if (!item) return;
+        const cats = getCategoriesForFieldType(fieldType);
+        const currentCat = item.sub_category || '';
+        const otherCat = cats.find(c => c.name !== currentCat) || null;
+        setMoveTargetSubCategory(otherCat ? otherCat.name : '');
+        setMoveItemModal({
+            item,
+            fieldType,
+            categories: cats,
+            currentCategory: currentCat || 'General',
+        });
+    };
+
+    const handleConfirmMoveItem = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        if (!moveItemModal?.item || !moveTargetSubCategory || movingItem) return;
+        const { item, fieldType } = moveItemModal;
+        const currentCat = moveItemModal.currentCategory || item.sub_category || 'General';
+        if (moveTargetSubCategory === currentCat) {
+            addToast("Item is already in this sub-category.", "info");
+            return;
+        }
+
+        const cats = getCategoriesForFieldType(fieldType);
+        const targetFolder = cats.find(c => c.name === moveTargetSubCategory);
+
+        setMovingItem(true);
+        try {
+            await window.axios.patch(ep.updateInventory(item.item_id), {
+                sub_category: moveTargetSubCategory,
+                folder_id: targetFolder?.id || null,
+                managed_by: currentUserName,
+            });
+            addToast(`Moved "${item.item_name}" to sub-category [${moveTargetSubCategory}].`, "success");
+            setMoveItemModal(null);
+            setEditWMTarget(null);
+            setEditPTTarget(null);
+            setEditHTTarget(null);
+            setEditSaleTarget(null);
+            await fetchItems(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to move item to sub-category."), "error");
+        } finally {
+            setMovingItem(false);
+        }
+    };
+
+    const filteredSoldItems = useMemo(() => {
+        return soldItems.filter(rec => {
+            if (selectedSaleCategory !== 'all' && (rec.sub_category || '').toLowerCase() !== selectedSaleCategory.toLowerCase()) {
+                return false;
+            }
+            if (soldPaymentFilter !== 'all' && (rec.payment_method || '').toLowerCase() !== soldPaymentFilter.toLowerCase()) {
+                return false;
+            }
+            if (soldSearch.trim()) {
+                const q = soldSearch.toLowerCase();
+                return (rec.item_name || '').toLowerCase().includes(q) ||
+                    (rec.customer_name || '').toLowerCase().includes(q) ||
+                    (rec.sub_category || '').toLowerCase().includes(q) ||
+                    String(rec.booking_id || '').includes(q) ||
+                    String(rec.sale_id || '').includes(q);
+            }
+            return true;
+        });
+    }, [soldItems, selectedSaleCategory, soldPaymentFilter, soldSearch]);
+
+    const soldSummaryMetrics = useMemo(() => {
+        const totalUnits = filteredSoldItems.reduce((acc, r) => acc + (Number(r.quantity) || 0), 0);
+        const totalRevenue = filteredSoldItems.reduce((acc, r) => acc + (Number(r.total_amount) || 0), 0);
+        const totalProfit = filteredSoldItems.reduce((acc, r) => acc + (Number(r.profit) || 0), 0);
+        return {
+            count: filteredSoldItems.length,
+            totalUnits,
+            totalRevenue,
+            totalProfit,
+        };
+    }, [filteredSoldItems]);
+
     const handleDelete = async () => {
         if (!deleteTarget || deleting) return;
         setDeleting(true);
@@ -1211,10 +1317,10 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     };
 
     // Modal render helpers
-    const renderModalWrapper = (isOpen, onClose, children) => {
+    const renderModalWrapper = (isOpen, onClose, children, zIndex = 1000) => {
         if (!isOpen) return null;
         return (
-            <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
+            <div style={{ position: 'fixed', inset: 0, zIndex, background: 'rgba(15,23,42,0.45)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
                 <div style={{ background: '#fff', borderRadius: 16, padding: '28px', maxWidth: 540, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.20)', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
                     {children}
                 </div>
@@ -1660,7 +1766,24 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         <thead>
                                             <tr style={{ background: '#F8FAFC' }}>
                                                 {['ID', 'Item Name', 'Sub-category', 'Stock (Available/Total)', 'Reorder Level', 'Unit', 'Managed By', 'Last Updated', 'Actions'].map(h => (
-                                                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            letterSpacing: '0.05em',
+                                                            textTransform: 'uppercase',
+                                                            color: '#64748B',
+                                                            whiteSpace: 'nowrap',
+                                                            borderBottom: '1px solid #E2E8F0',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1713,8 +1836,18 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                         <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.unit}</td>
                                                         <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.managed_by || '—'}</td>
                                                         <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
-                                                        <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                        <td
+                                                            className="sticky-action-col"
+                                                            style={{
+                                                                padding: '10px 12px',
+                                                                position: 'sticky',
+                                                                right: 0,
+                                                                zIndex: 5,
+                                                                background: '#FFFFFF',
+                                                            }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                 <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
@@ -1833,7 +1966,24 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         <thead>
                                             <tr style={{ background: '#F8FAFC' }}>
                                                 {['Serial No.', 'Tool Name', 'Sub-category', 'Unit', 'Status', 'Managed By', 'Last Updated', 'Actions'].map(h => (
-                                                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            letterSpacing: '0.05em',
+                                                            textTransform: 'uppercase',
+                                                            color: '#64748B',
+                                                            whiteSpace: 'nowrap',
+                                                            borderBottom: '1px solid #E2E8F0',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -1876,8 +2026,18 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                         </td>
                                                         <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.managed_by || '—'}</td>
                                                         <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
-                                                        <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                        <td
+                                                            className="sticky-action-col"
+                                                            style={{
+                                                                padding: '10px 12px',
+                                                                position: 'sticky',
+                                                                right: 0,
+                                                                zIndex: 5,
+                                                                background: '#FFFFFF',
+                                                            }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                 <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
@@ -1997,7 +2157,24 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         <thead>
                                             <tr style={{ background: '#F8FAFC' }}>
                                                 {['ID', 'Tool Name', 'Sub-category', 'Stock (Available/Total)', 'Reorder Level', 'Unit', 'Managed By', 'Last Updated', 'Actions'].map(h => (
-                                                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                                    <th
+                                                        key={h}
+                                                        className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            textAlign: h === 'Actions' ? 'right' : 'left',
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            letterSpacing: '0.05em',
+                                                            textTransform: 'uppercase',
+                                                            color: '#64748B',
+                                                            whiteSpace: 'nowrap',
+                                                            borderBottom: '1px solid #E2E8F0',
+                                                            ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
                                                 ))}
                                             </tr>
                                         </thead>
@@ -2049,8 +2226,18 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                         <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.unit}</td>
                                                         <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.managed_by || '—'}</td>
                                                         <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
-                                                        <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                        <td
+                                                            className="sticky-action-col"
+                                                            style={{
+                                                                padding: '10px 12px',
+                                                                position: 'sticky',
+                                                                right: 0,
+                                                                zIndex: 5,
+                                                                background: '#FFFFFF',
+                                                            }}
+                                                            onClick={e => e.stopPropagation()}
+                                                        >
+                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
                                                                 <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                     onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                 <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
@@ -2274,12 +2461,45 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     )}
 
-                    {/* Top Action Buttons for For Sale */}
+                    {/* Sub-navigation Toggle: For Sale Catalog vs Organized Sold Tools & Materials Records */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-                        <div>
-                            <p style={{ fontSize: 15, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>For Sale Sub-categories</p>
-                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>{saleCategories.length} sub-categories configured for customer retail and supplies</p>
+                        <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', padding: 5, borderRadius: 12, border: '1px solid #E2E8F0' }}>
+                            <button
+                                onClick={() => setSaleSubTab('catalog')}
+                                style={{
+                                    padding: '8px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
+                                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                                    background: saleSubTab === 'catalog' ? '#FFFFFF' : 'transparent',
+                                    color: saleSubTab === 'catalog' ? '#1E2F5F' : '#64748B',
+                                    boxShadow: saleSubTab === 'catalog' ? '0 2px 6px rgba(15,23,42,0.08)' : 'none',
+                                    transition: 'all 0.15s ease',
+                                }}
+                            >
+                                For Sale Catalog ({saleItems.length})
+                            </button>
+                            <button
+                                onClick={() => setSaleSubTab('sold_records')}
+                                style={{
+                                    padding: '8px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
+                                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
+                                    background: saleSubTab === 'sold_records' ? '#1E2F5F' : 'transparent',
+                                    color: saleSubTab === 'sold_records' ? '#FFFFFF' : '#64748B',
+                                    boxShadow: saleSubTab === 'sold_records' ? '0 2px 8px rgba(30,47,95,0.22)' : 'none',
+                                    transition: 'all 0.15s ease',
+                                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                                }}
+                            >
+                                <span>Sold Tools & Materials Records</span>
+                                <span style={{
+                                    fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 12,
+                                    background: saleSubTab === 'sold_records' ? 'rgba(255,255,255,0.2)' : '#DCFCE7',
+                                    color: saleSubTab === 'sold_records' ? '#FFFFFF' : '#15803D',
+                                }}>
+                                    {soldItems.length}
+                                </span>
+                            </button>
                         </div>
+
                         <div style={{ display: 'flex', gap: 8 }}>
                             <button
                                 className="btn-secondary"
@@ -2303,6 +2523,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
                     {/* For Sale Sub-category Pill Selector Bar */}
                     <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
+                                {saleSubTab === 'catalog' ? 'For Sale Sub-categories' : 'Filter Sold Records by Sub-category'}
+                            </span>
+                            <span style={{ fontSize: 12, color: '#64748B' }}>
+                                {saleCategories.length} sub-categories configured
+                            </span>
+                        </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                             <button
                                 onClick={() => setSelectedSaleCategory('all')}
@@ -2315,10 +2543,12 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     boxShadow: selectedSaleCategory === 'all' ? '0 2px 6px rgba(59,130,246,0.15)' : 'none',
                                     transition: 'all 0.15s ease',
                                 }}>
-                                All For Sale ({saleItems.length})
+                                {saleSubTab === 'catalog' ? `All For Sale (${saleItems.length})` : `All Sold Records (${soldItems.length})`}
                             </button>
                             {saleCategories.map(cat => {
-                                const count = saleItems.filter(i => i.sub_category === cat.name || i.folder_id === cat.id).length;
+                                const count = saleSubTab === 'catalog'
+                                    ? saleItems.filter(i => i.sub_category === cat.name || i.folder_id === cat.id).length
+                                    : soldItems.filter(r => (r.sub_category || '').toLowerCase() === cat.name.toLowerCase()).length;
                                 const isSelected = selectedSaleCategory === cat.name;
                                 return (
                                     <button
@@ -2340,158 +2570,323 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
 
-                    <div className="card" style={{ padding: 20 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                            <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
-                                        {selectedSaleCategory === 'all' ? 'All For Sale Items' : selectedSaleCategory}
+                    {saleSubTab === 'catalog' ? (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                            {selectedSaleCategory === 'all' ? 'All For Sale Items' : selectedSaleCategory}
+                                        </p>
+                                        {selectedSaleCategory !== 'all' && (
+                                            <button
+                                                onClick={() => setSelectedSaleCategory('all')}
+                                                style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                                                View All
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        {selectedSaleCategory === 'all'
+                                            ? 'Materials & tools available for direct purchase by clients — sales automatically sync to Sales & Records'
+                                            : (activeSaleCategoryObj?.description || `Items assigned under "${selectedSaleCategory}"`)}
                                     </p>
-                                    {selectedSaleCategory !== 'all' && (
-                                        <button
-                                            onClick={() => setSelectedSaleCategory('all')}
-                                            style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
-                                            View All
-                                        </button>
-                                    )}
                                 </div>
-                                <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                                    {selectedSaleCategory === 'all'
-                                        ? 'Materials & tools available for direct purchase by clients'
-                                        : (activeSaleCategoryObj?.description || `Items assigned under "${selectedSaleCategory}"`)}
-                                </p>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search sale items or sub-category..." />
+                                    <button
+                                        className="btn-primary"
+                                        style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                        onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                        + Add Item {selectedSaleCategory !== 'all' ? `to ${selectedSaleCategory}` : ''}
+                                    </button>
+                                </div>
                             </div>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search sale items or sub-category..." />
-                                <button
-                                    className="btn-primary"
-                                    style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
-                                    onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
-                                    + Add Item {selectedSaleCategory !== 'all' ? `to ${selectedSaleCategory}` : ''}
-                                </button>
-                            </div>
-                        </div>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
-                                <thead>
-                                    <tr style={{ background: '#F8FAFC' }}>
-                                        {['ID', 'Item Name', 'Sub-category', 'Type', 'Qty', 'Reorder', 'Unit', 'Cost Price', 'Selling Price', 'Profit', 'Managed By', 'Supplier', 'Last Updated', 'Actions'].map(h => (
-                                            <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredSale.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={14} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
-                                                No items found {selectedSaleCategory !== 'all' ? `in "${selectedSaleCategory}"` : ''}.
-                                                <div style={{ marginTop: 10 }}>
-                                                    <button
-                                                        className="btn-primary"
-                                                        style={{ fontSize: 12, padding: '5px 12px' }}
-                                                        onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
-                                                        + Add Item Here
-                                                    </button>
-                                                </div>
-                                            </td>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['ID', 'Item Name', 'Sub-category', 'Type', 'Qty', 'Reorder', 'Unit', 'Cost Price', 'Selling Price', 'Profit', 'Managed By', 'Supplier', 'Last Updated', 'Actions'].map(h => (
+                                                <th
+                                                    key={h}
+                                                    className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        textAlign: h === 'Actions' ? 'right' : 'left',
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        letterSpacing: '0.05em',
+                                                        textTransform: 'uppercase',
+                                                        color: '#64748B',
+                                                        whiteSpace: 'nowrap',
+                                                        borderBottom: '1px solid #E2E8F0',
+                                                        ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                    }}
+                                                >
+                                                    {h}
+                                                </th>
+                                            ))}
                                         </tr>
-                                    ) : filteredSale.map(item => {
-                                        const available = (item.quantity_on_hand !== undefined && item.quantity_on_hand !== null) ? Number(item.quantity_on_hand) : (item.quantity ?? 0);
-                                        const initial = (item.initial_stock && item.initial_stock > 0) ? item.initial_stock : (available > 0 ? available : 1);
-                                        const pct = initial > 0 ? available / initial : 0;
-                                        const isLow = available <= (item.reorder_level || 5);
-                                        const stockColor = available === 0 ? '#EF4444' : isLow ? '#F59E0B' : '#10B981';
-                                        const ratio = `${available}/${initial}`;
-
-                                        const costPrice = Number(item.capital || 0);
-                                        const sellingPrice = (item.selling_price !== null && item.selling_price !== undefined && item.selling_price !== '')
-                                            ? Number(item.selling_price)
-                                            : (costPrice + (Number(item.profit) || 0));
-                                        const profitVal = (item.profit !== null && item.profit !== undefined && item.profit !== '')
-                                            ? Number(item.profit)
-                                            : Math.max(0, sellingPrice - costPrice);
-
-                                        return (
-                                            <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9', cursor: 'pointer' }}
-                                                onClick={() => trackRecentItem(item.item_id)}
-                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
-                                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>#{item.item_id}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>{item.item_name}</td>
-                                                <td style={{ padding: '10px 12px' }}>
-                                                    <span style={{
-                                                        display: 'inline-block',
-                                                        fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 6,
-                                                        background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE',
-                                                    }}>
-                                                        {item.sub_category || 'General For-Sale Items'}
-                                                    </span>
-                                                </td>
-                                                <td style={{ padding: '10px 12px' }}><StatusBadge status={item.item_type} /></td>
-                                                <td style={{ padding: '10px 12px' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                        <div style={{ flex: 1, height: 6, background: '#E2E8F0', borderRadius: 3, minWidth: 60 }}>
-                                                            <div style={{ height: '100%', borderRadius: 3, background: stockColor, width: `${Math.min(100, Math.max(0, pct * 100))}%` }} />
-                                                        </div>
-                                                        <span style={{ fontSize: 12, fontWeight: 600, color: stockColor, whiteSpace: 'nowrap' }}>{ratio} left</span>
-                                                        {isLow && available > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#D97706', background: 'rgba(245,138,7,0.12)', padding: '1px 6px', borderRadius: 4 }}>LOW</span>}
-                                                        {available === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#EF4444', background: 'rgba(239,68,68,0.12)', padding: '1px 6px', borderRadius: 4 }}>OUT</span>}
-                                                    </div>
-                                                </td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>{item.reorder_level}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.unit}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155' }}>₱{costPrice.toLocaleString()}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>₱{sellingPrice.toLocaleString()}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#16A34A' }}>₱{profitVal.toLocaleString()}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.managed_by || '—'}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>{item.supplier_name || '—'}</td>
-                                                <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
-                                                <td style={{ padding: '10px 12px' }} onClick={e => e.stopPropagation()}>
-                                                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                                        <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                            onClick={() => {
-                                                                trackRecentItem(item.item_id);
-                                                                setSellTarget(item);
-                                                                setSellQty('1');
-                                                                setSellMethod('Cash');
-                                                                setSelectedCustomer(null);
-                                                                setCustomerSearch('');
-                                                                setCustomerDropdownOpen(false);
-                                                            }}
-                                                            disabled={available === 0}>
-                                                            Sell
+                                    </thead>
+                                    <tbody>
+                                        {filteredSale.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={14} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No items found {selectedSaleCategory !== 'all' ? `in "${selectedSaleCategory}"` : ''}.
+                                                    <div style={{ marginTop: 10 }}>
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{ fontSize: 12, padding: '5px 12px' }}
+                                                            onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                                            + Add Item Here
                                                         </button>
-                                                        <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                            onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
-                                                        <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
-                                                            onClick={() => {
-                                                                trackRecentItem(item.item_id);
-                                                                setEditSaleTarget(item);
-                                                                setEditSaleForm({
-                                                                    item_name: item.item_name,
-                                                                    item_type: item.item_type || 'Material',
-                                                                    unit: item.unit,
-                                                                    initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
-                                                                    quantity_on_hand: String(item.quantity_on_hand),
-                                                                    reorder_level: String(item.reorder_level),
-                                                                    capital: String(costPrice),
-                                                                    selling_price: String(sellingPrice),
-                                                                    profit: String(profitVal),
-                                                                    supplier_name: item.supplier_name || '',
-                                                                    sub_category: item.sub_category || 'General For-Sale Items',
-                                                                    folder_id: item.folder_id,
-                                                                    managed_by: currentUserName,
-                                                                });
-                                                            }}>Manage</button>
                                                     </div>
                                                 </td>
                                             </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                        ) : filteredSale.map(item => {
+                                            const available = (item.quantity_on_hand !== undefined && item.quantity_on_hand !== null) ? Number(item.quantity_on_hand) : (item.quantity ?? 0);
+                                            const initial = (item.initial_stock && item.initial_stock > 0) ? item.initial_stock : (available > 0 ? available : 1);
+                                            const pct = initial > 0 ? available / initial : 0;
+                                            const isLow = available <= (item.reorder_level || 5);
+                                            const stockColor = available === 0 ? '#EF4444' : isLow ? '#F59E0B' : '#10B981';
+                                            const ratio = `${available}/${initial}`;
+
+                                            const costPrice = Number(item.capital || 0);
+                                            const sellingPrice = (item.selling_price !== null && item.selling_price !== undefined && item.selling_price !== '')
+                                                ? Number(item.selling_price)
+                                                : (costPrice + (Number(item.profit) || 0));
+                                            const profitVal = (item.profit !== null && item.profit !== undefined && item.profit !== '')
+                                                ? Number(item.profit)
+                                                : Math.max(0, sellingPrice - costPrice);
+
+                                            return (
+                                                <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9', cursor: 'pointer' }}
+                                                    onClick={() => trackRecentItem(item.item_id)}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>#{item.item_id}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>{item.item_name}</td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-block',
+                                                            fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 6,
+                                                            background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE',
+                                                        }}>
+                                                            {item.sub_category || 'General For-Sale Items'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}><StatusBadge status={item.item_type} /></td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                            <div style={{ flex: 1, height: 6, background: '#E2E8F0', borderRadius: 3, minWidth: 60 }}>
+                                                                <div style={{ height: '100%', borderRadius: 3, background: stockColor, width: `${Math.min(100, Math.max(0, pct * 100))}%` }} />
+                                                            </div>
+                                                            <span style={{ fontSize: 12, fontWeight: 600, color: stockColor, whiteSpace: 'nowrap' }}>{ratio} left</span>
+                                                            {isLow && available > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#D97706', background: 'rgba(245,138,7,0.12)', padding: '1px 6px', borderRadius: 4 }}>LOW</span>}
+                                                            {available === 0 && <span style={{ fontSize: 10, fontWeight: 700, color: '#EF4444', background: 'rgba(239,68,68,0.12)', padding: '1px 6px', borderRadius: 4 }}>OUT</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>{item.reorder_level}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.unit}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155' }}>₱{costPrice.toLocaleString()}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>₱{sellingPrice.toLocaleString()}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#16A34A' }}>₱{profitVal.toLocaleString()}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.managed_by || '—'}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>{item.supplier_name || '—'}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
+                                                    <td
+                                                        className="sticky-action-col"
+                                                        style={{
+                                                            padding: '10px 12px',
+                                                            position: 'sticky',
+                                                            right: 0,
+                                                            zIndex: 5,
+                                                            background: '#FFFFFF',
+                                                        }}
+                                                        onClick={e => e.stopPropagation()}
+                                                    >
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                            <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                onClick={() => {
+                                                                    trackRecentItem(item.item_id);
+                                                                    setSellTarget(item);
+                                                                    setSellQty('1');
+                                                                    setSellMethod('Cash');
+                                                                    setSelectedCustomer(null);
+                                                                    setCustomerSearch('');
+                                                                    setCustomerDropdownOpen(false);
+                                                                }}
+                                                                disabled={available === 0}>
+                                                                Sell
+                                                            </button>
+                                                            <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
+                                                            <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
+                                                                onClick={() => {
+                                                                    trackRecentItem(item.item_id);
+                                                                    setEditSaleTarget(item);
+                                                                    setEditSaleForm({
+                                                                        item_name: item.item_name,
+                                                                        item_type: item.item_type || 'Material',
+                                                                        unit: item.unit,
+                                                                        initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                                                                        quantity_on_hand: String(item.quantity_on_hand),
+                                                                        reorder_level: String(item.reorder_level),
+                                                                        capital: String(costPrice),
+                                                                        selling_price: String(sellingPrice),
+                                                                        profit: String(profitVal),
+                                                                        supplier_name: item.supplier_name || '',
+                                                                        sub_category: item.sub_category || 'General For-Sale Items',
+                                                                        folder_id: item.folder_id,
+                                                                        managed_by: currentUserName,
+                                                                    });
+                                                                }}>Manage</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        /* ─── ORGANIZED SOLD TOOLS & MATERIALS RECORDS VIEW ─── */
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            {/* Summary KPI Cards for Sold Tools & Materials */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #2563EB' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', margin: 0 }}>Total Transactions</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#0F172A', margin: '6px 0 2px' }}>{soldSummaryMetrics.count}</p>
+                                    <p style={{ fontSize: 11, color: '#64748B', margin: 0 }}>Synced with Sales & Records</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #7C3AED' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', margin: 0 }}>Total Qty Sold</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#0F172A', margin: '6px 0 2px' }}>{soldSummaryMetrics.totalUnits.toLocaleString()}</p>
+                                    <p style={{ fontSize: 11, color: '#64748B', margin: 0 }}>Tools & materials units sold</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #0284C7' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', margin: 0 }}>Total Retail Revenue</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#0284C7', margin: '6px 0 2px' }}>₱{soldSummaryMetrics.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                    <p style={{ fontSize: 11, color: '#64748B', margin: 0 }}>Gross retail sales collected</p>
+                                </div>
+                                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid #16A34A' }}>
+                                    <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', margin: 0 }}>Net Retail Profit</p>
+                                    <p style={{ fontSize: 24, fontWeight: 800, color: '#16A34A', margin: '6px 0 2px' }}>₱{soldSummaryMetrics.totalProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                    <p style={{ fontSize: 11, color: '#64748B', margin: 0 }}>Revenue minus item cost price</p>
+                                </div>
+                            </div>
+
+                            <div className="card" style={{ padding: 20 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                    <div>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                            Sold Tools & Materials Records {selectedSaleCategory !== 'all' ? `— ${selectedSaleCategory}` : ''}
+                                        </p>
+                                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                            Organized retail sales log with customer details, payment method, profit margin, and Sales & Records booking reference
+                                        </p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <select
+                                            className="input-field"
+                                            style={{ width: 'auto', minWidth: 145, padding: '6px 12px', fontSize: 12 }}
+                                            value={soldPaymentFilter}
+                                            onChange={e => setSoldPaymentFilter(e.target.value)}
+                                        >
+                                            <option value="all">All Payment Methods</option>
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                            <option value="Credit Card">Credit Card</option>
+                                        </select>
+                                        <SearchBar value={soldSearch} onChange={setSoldSearch} placeholder="Search item, customer, or ref..." />
+                                    </div>
+                                </div>
+
+                                <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+                                        <thead>
+                                            <tr style={{ background: '#F8FAFC' }}>
+                                                {['Sale / Booking Ref', 'Date & Time Sold', 'Item Name', 'Sub-category', 'Type', 'Qty Sold', 'Cost Price', 'Unit Price', 'Total Revenue', 'Profit', 'Customer', 'Payment', 'Sold By'].map(h => (
+                                                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredSoldItems.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={13} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                        No sold tools or materials records found yet. When you sell an item from the For Sale Catalog, it will automatically appear here and in Sales & Records.
+                                                    </td>
+                                                </tr>
+                                            ) : filteredSoldItems.map(rec => (
+                                                <tr key={rec.sale_id || rec.booking_id} style={{ borderTop: '1px solid #F1F5F9' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#1E2F5F' }}>
+                                                            #{rec.booking_id || rec.sale_id}
+                                                        </div>
+                                                        <div style={{ fontSize: 10, color: '#16A34A', fontWeight: 600 }}>
+                                                            Synced to Sales
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155', whiteSpace: 'nowrap' }}>
+                                                        <div style={{ fontWeight: 600 }}>{rec.sold_at ? formatDate(rec.sold_at) : '—'}</div>
+                                                        <div style={{ fontSize: 10, color: '#94A3B8' }}>
+                                                            {rec.sold_at ? new Date(rec.sold_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
+                                                        {rec.item_name}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 6,
+                                                            background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE',
+                                                        }}>
+                                                            {rec.sub_category || 'General'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <StatusBadge status={rec.item_type || 'Material'} />
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A', whiteSpace: 'nowrap' }}>
+                                                        {rec.quantity} {rec.unit || 'pcs'}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>
+                                                        ₱{Number(rec.cost_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#334155', whiteSpace: 'nowrap' }}>
+                                                        ₱{Number(rec.unit_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 800, color: '#0284C7', whiteSpace: 'nowrap' }}>
+                                                        ₱{Number(rec.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: '#16A34A', whiteSpace: 'nowrap' }}>
+                                                        +₱{Number(rec.profit || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>{rec.customer_name || 'Walk-in Customer'}</div>
+                                                        {rec.customer_contact && (
+                                                            <div style={{ fontSize: 11, color: '#64748B' }}>{rec.customer_contact}</div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <StatusBadge status={rec.payment_method || 'Cash'} />
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569', whiteSpace: 'nowrap' }}>
+                                                        {rec.sold_by_name || 'Staff'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -2527,7 +2922,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                             <th>Status</th>
                                             <th>Managed By</th>
                                             <th>Archived At</th>
-                                            <th style={{ textAlign: 'right' }}>Actions</th>
+                                            <th className="sticky-action-col" style={{ textAlign: 'right', position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' }}>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -2570,7 +2965,16 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                     <td style={{ fontSize: 12, color: '#94A3B8' }}>
                                                         {item.archived_at ? new Date(item.archived_at).toLocaleString() : '—'}
                                                     </td>
-                                                    <td style={{ textAlign: 'right' }}>
+                                                    <td
+                                                        className="sticky-action-col"
+                                                        style={{
+                                                            textAlign: 'right',
+                                                            position: 'sticky',
+                                                            right: 0,
+                                                            zIndex: 5,
+                                                            background: '#FFFFFF',
+                                                        }}
+                                                    >
                                                         <button
                                                             className="btn-primary"
                                                             style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6 }}
@@ -3289,7 +3693,28 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* ── Manage Worker Material Modal ── */}
             {editWMTarget && renderModalWrapper(true, () => setEditWMTarget(null), (
                 <>
-                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Manage Material</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Material</h2>
+                        <button
+                            type="button"
+                            onClick={() => handleOpenMoveItem(editWMTarget, 'material')}
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                        >
+                            ⇄ Move Item
+                        </button>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <p className="section-label" style={{ marginBottom: 5 }}>Sub-category</p>
@@ -3347,22 +3772,40 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
-                        <button
-                            type="button"
-                            style={{
-                                background: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #FECACA',
-                                padding: '8px 16px',
-                                borderRadius: 8,
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                            }}
-                            onClick={() => setArchiveTarget(editWMTarget)}
-                        >
-                            Archive Material
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => setArchiveTarget(editWMTarget)}
+                            >
+                                Archive Material
+                            </button>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#EFF6FF',
+                                    color: '#2563EB',
+                                    border: '1px solid #BFDBFE',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => handleOpenMoveItem(editWMTarget, 'material')}
+                            >
+                                ⇄ Move Item
+                            </button>
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditWMTarget(null)}>Cancel</button>
                             <button className="btn-primary" onClick={handleEditWM}>Update Material</button>
@@ -3374,7 +3817,28 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* ── Manage Power Tool Modal ── */}
             {editPTTarget && renderModalWrapper(true, () => setEditPTTarget(null), (
                 <>
-                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Manage Power Tool</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Power Tool</h2>
+                        <button
+                            type="button"
+                            onClick={() => handleOpenMoveItem(editPTTarget, 'power_tool')}
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                        >
+                            ⇄ Move Item
+                        </button>
+                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Sub-category</p>
@@ -3444,22 +3908,40 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
-                        <button
-                            type="button"
-                            style={{
-                                background: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #FECACA',
-                                padding: '8px 16px',
-                                borderRadius: 8,
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                            }}
-                            onClick={() => setArchiveTarget(editPTTarget)}
-                        >
-                            Archive Tool
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => setArchiveTarget(editPTTarget)}
+                            >
+                                Archive Tool
+                            </button>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#EFF6FF',
+                                    color: '#2563EB',
+                                    border: '1px solid #BFDBFE',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => handleOpenMoveItem(editPTTarget, 'power_tool')}
+                            >
+                                ⇄ Move Item
+                            </button>
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditPTTarget(null)}>Cancel</button>
                             <button className="btn-primary" onClick={handleEditPT}>Update Power Tool</button>
@@ -3471,7 +3953,28 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* ── Manage Hand Tool Modal ── */}
             {editHTTarget && renderModalWrapper(true, () => setEditHTTarget(null), (
                 <>
-                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 16px' }}>Manage Hand Tool</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Hand Tool</h2>
+                        <button
+                            type="button"
+                            onClick={() => handleOpenMoveItem(editHTTarget, 'hand_tool')}
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                        >
+                            ⇄ Move Item
+                        </button>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <p className="section-label" style={{ marginBottom: 5 }}>Sub-category</p>
@@ -3529,22 +4032,40 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
-                        <button
-                            type="button"
-                            style={{
-                                background: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #FECACA',
-                                padding: '8px 16px',
-                                borderRadius: 8,
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                            }}
-                            onClick={() => setArchiveTarget(editHTTarget)}
-                        >
-                            Archive Tool
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => setArchiveTarget(editHTTarget)}
+                            >
+                                Archive Tool
+                            </button>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#EFF6FF',
+                                    color: '#2563EB',
+                                    border: '1px solid #BFDBFE',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => handleOpenMoveItem(editHTTarget, 'hand_tool')}
+                            >
+                                ⇄ Move Item
+                            </button>
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditHTTarget(null)}>Cancel</button>
                             <button className="btn-primary" onClick={handleEditHT}>Update Hand Tool</button>
@@ -3556,7 +4077,28 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* ── Manage For Sale Item Modal ── */}
             {editSaleTarget && renderModalWrapper(true, () => setEditSaleTarget(null), (
                 <>
-                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 20px' }}>Manage For Sale Item</h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage For Sale Item</h2>
+                        <button
+                            type="button"
+                            onClick={() => handleOpenMoveItem(editSaleTarget, 'for_sale')}
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                        >
+                            ⇄ Move Item
+                        </button>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <p className="section-label" style={{ marginBottom: 5 }}>Sub-category</p>
@@ -3677,22 +4219,40 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
-                        <button
-                            type="button"
-                            style={{
-                                background: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #FECACA',
-                                padding: '8px 16px',
-                                borderRadius: 8,
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                            }}
-                            onClick={() => setArchiveTarget(editSaleTarget)}
-                        >
-                            Archive Item
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #FECACA',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => setArchiveTarget(editSaleTarget)}
+                            >
+                                Archive Item
+                            </button>
+                            <button
+                                type="button"
+                                style={{
+                                    background: '#EFF6FF',
+                                    color: '#2563EB',
+                                    border: '1px solid #BFDBFE',
+                                    padding: '8px 14px',
+                                    borderRadius: 8,
+                                    fontSize: 13,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                                onClick={() => handleOpenMoveItem(editSaleTarget, 'for_sale')}
+                            >
+                                ⇄ Move Item
+                            </button>
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditSaleTarget(null)}>Cancel</button>
                             <button className="btn-primary" onClick={handleEditSale}>Update Item</button>
@@ -3700,6 +4260,122 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                 </>
             ))}
+
+            {/* ── Move Item to Another Existing Sub-Category Modal ── */}
+            {moveItemModal && renderModalWrapper(true, () => !movingItem && setMoveItemModal(null), (() => {
+                const item = moveItemModal.item || {};
+                const currentCategory = moveItemModal.currentCategory || item.sub_category || 'General';
+                const categoriesList = (Array.isArray(moveItemModal.categories) && moveItemModal.categories.length > 0)
+                    ? moveItemModal.categories
+                    : getCategoriesForFieldType(moveItemModal.fieldType);
+                const hasOtherCategories = categoriesList.some(cat => cat.name !== currentCategory);
+
+                return (
+                    <form onSubmit={handleConfirmMoveItem}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                            <div style={{
+                                width: 42, height: 42, borderRadius: 10,
+                                background: '#EFF6FF', color: '#2563EB',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: 20, fontWeight: 700,
+                            }}>
+                                ⇄
+                            </div>
+                            <div>
+                                <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                    Move Item to Another Sub-Category
+                                </h2>
+                                <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                    {item.item_name || 'Inventory Item'}
+                                    {item.serial_number ? ` · S/N: ${item.serial_number}` : ''}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+                                <span style={{ color: '#64748B', fontWeight: 600 }}>Current Sub-Category:</span>
+                                <span style={{ fontWeight: 700, color: '#1E2F5F', background: '#EFF6FF', padding: '2px 8px', borderRadius: 6 }}>
+                                    {currentCategory}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div style={{ marginBottom: 20 }}>
+                            <p className="section-label" style={{ marginBottom: 8 }}>Select Destination Sub-Category *</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
+                                {categoriesList.length === 0 ? (
+                                    <div style={{ padding: '18px 14px', textAlign: 'center', background: '#F8FAFC', borderRadius: 10, border: '1px dashed #CBD5E1', color: '#64748B', fontSize: 13 }}>
+                                        No sub-categories configured for this category yet.
+                                    </div>
+                                ) : (
+                                    categoriesList.map(cat => {
+                                        const isCurrent = cat.name === currentCategory;
+                                        const isSelected = cat.name === moveTargetSubCategory;
+                                        return (
+                                            <label
+                                                key={cat.id || cat.name}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    padding: '10px 14px',
+                                                    borderRadius: 10,
+                                                    border: isSelected ? '2px solid #2563EB' : '1px solid #E2E8F0',
+                                                    background: isSelected ? '#EFF6FF' : (isCurrent ? '#F8FAFC' : '#FFFFFF'),
+                                                    cursor: isCurrent ? 'not-allowed' : 'pointer',
+                                                    opacity: isCurrent ? 0.7 : 1,
+                                                    transition: 'all 0.15s ease',
+                                                }}
+                                            >
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    <input
+                                                        type="radio"
+                                                        name="moveTargetSubCategory"
+                                                        checked={isSelected}
+                                                        disabled={isCurrent}
+                                                        onChange={() => !isCurrent && setMoveTargetSubCategory(cat.name)}
+                                                        style={{ accentColor: '#2563EB', cursor: isCurrent ? 'not-allowed' : 'pointer' }}
+                                                    />
+                                                    <div>
+                                                        <div style={{ fontSize: 13, fontWeight: 700, color: isCurrent ? '#64748B' : '#0F172A' }}>{cat.name}</div>
+                                                        {cat.description && (
+                                                            <div style={{ fontSize: 11, color: '#64748B' }}>{cat.description}</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {isCurrent && (
+                                                    <span style={{ fontSize: 10, fontWeight: 700, background: '#E2E8F0', color: '#475569', padding: '2px 7px', borderRadius: 6 }}>
+                                                        Current
+                                                    </span>
+                                                )}
+                                            </label>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            {!hasOtherCategories && categoriesList.length > 0 && (
+                                <p style={{ fontSize: 11, color: '#EA580C', margin: '8px 0 0', fontWeight: 600 }}>
+                                    ⚠️ No other sub-categories exist to move this item to. Please create another sub-category first.
+                                </p>
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                            <button type="button" className="btn-secondary" disabled={movingItem} onClick={() => setMoveItemModal(null)}>
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                className="btn-primary"
+                                disabled={movingItem || !moveTargetSubCategory || moveTargetSubCategory === currentCategory || !hasOtherCategories}
+                            >
+                                {movingItem ? 'Moving Item...' : moveTargetSubCategory ? `Move to "${moveTargetSubCategory}" →` : 'Select Destination'}
+                            </button>
+                        </div>
+                    </form>
+                );
+            })(), 1050)}
 
             {/* ── Archive Confirmation Modal ── */}
             <Modal

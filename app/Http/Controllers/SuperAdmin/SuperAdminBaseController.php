@@ -251,10 +251,14 @@ abstract class SuperAdminBaseController extends Controller
             })
             ->select([
                 'bookings.booking_id',
+                'bookings.client_id',
                 'bookings.scheduled_date',
                 'bookings.booking_status',
+                'bookings.notes as booking_notes',
                 'bookings.created_at',
                 'services.service_name',
+                'services.category as service_category',
+                'services.base_price',
                 'payment.amount_paid',
                 'payment.payment_method',
                 'payment.payment_status',
@@ -264,6 +268,8 @@ abstract class SuperAdminBaseController extends Controller
                 'clients.given_name as client_given_name',
                 'clients.middle_name as client_middle_name',
                 'clients.last_name as client_last_name',
+                'clients.contact_number as client_contact_number',
+                'clients.address as client_address',
             ]);
     }
 
@@ -510,17 +516,83 @@ abstract class SuperAdminBaseController extends Controller
 
     protected function mapSalesRecords(Collection $rows): Collection
     {
-        return $rows->map(function ($row) {
+        $salesByBookingId = collect();
+        if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
+            $salesByBookingId = DB::table('inventory_sales')
+                ->whereNotNull('booking_id')
+                ->get()
+                ->keyBy('booking_id');
+        }
+
+        return $rows->map(function ($row) use ($salesByBookingId) {
+            $invSale = $salesByBookingId->get($row->booking_id);
+            $serviceName = (string) ($row->service_name ?? '');
+
+            $saleCategory = 'Service Booking';
+            $saleType = 'service';
+            if ($invSale) {
+                $saleType = $invSale->sale_type ?: 'tools_materials';
+                if ($saleType === 'ac_unit') {
+                    $saleCategory = 'AC Unit';
+                } elseif ($saleType === 'spare_part') {
+                    $saleCategory = 'Spare Part';
+                } else {
+                    $saleCategory = 'Tools & Materials';
+                }
+            } elseif (str_starts_with($serviceName, 'Retail Sale:')) {
+                $saleCategory = 'Tools & Materials';
+                $saleType = 'tools_materials';
+            } elseif (str_starts_with($serviceName, 'AC Unit Sale:')) {
+                $saleCategory = 'AC Unit';
+                $saleType = 'ac_unit';
+            } elseif (str_starts_with($serviceName, 'Spare Part Sale:')) {
+                $saleCategory = 'Spare Part';
+                $saleType = 'spare_part';
+            }
+
+            $amountPaid = $row->amount_paid !== null
+                ? (float) $row->amount_paid
+                : ($invSale ? (float) $invSale->total_amount : 0.0);
+
+            $costPrice = $invSale ? (float) $invSale->cost_price : 0.0;
+            $qty = $invSale ? (int) ($invSale->quantity ?: 1) : 1;
+            $profit = $invSale
+                ? (float) $invSale->profit
+                : ($saleType === 'service' ? $amountPaid : round($amountPaid - ($costPrice * $qty), 2));
+
+            $clientName = $invSale && ! empty($invSale->customer_name)
+                ? $invSale->customer_name
+                : $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name);
+
             return [
                 'booking_id' => (int) $row->booking_id,
-                'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
-                'service' => $row->service_name,
+                'sale_id' => $invSale ? (int) $invSale->sale_id : null,
+                'sale_type' => $saleType,
+                'sale_category' => $saleCategory,
+                'client_name' => $clientName,
+                'customer_contact' => $invSale->customer_contact ?? ($row->client_contact_number ?? null),
+                'customer_address' => $invSale->customer_address ?? ($row->client_address ?? null),
+                'service' => $serviceName,
+                'item_name' => $invSale->item_name ?? $serviceName,
+                'brand' => $invSale->brand ?? null,
+                'model' => $invSale->model ?? null,
+                'serial_number' => $invSale->serial_number ?? null,
+                'sub_category' => $invSale->sub_category ?? ($row->service_category ?? 'HVAC Service'),
+                'horsepower' => $invSale->horsepower ?? null,
+                'quantity' => $qty,
+                'unit' => $invSale->unit ?? ($saleType === 'service' ? 'job' : 'pcs'),
+                'cost_price' => $costPrice,
+                'unit_price' => $invSale ? (float) $invSale->unit_price : $amountPaid,
+                'profit' => $profit,
+                'warranty_period' => $invSale->warranty_period ?? null,
+                'sold_by_name' => $invSale->sold_by_name ?? null,
+                'notes' => $invSale->notes ?? ($row->booking_notes ?? null),
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
-                'amount_paid' => $row->amount_paid !== null ? (float) $row->amount_paid : 0.0,
-                'payment_method' => $row->payment_method,
-                'payment_status' => $row->payment_status ?? 'Pending',
-                'payment_date' => $row->payment_date,
+                'amount_paid' => $amountPaid,
+                'payment_method' => $row->payment_method ?: ($invSale->payment_method ?? 'Cash'),
+                'payment_status' => $row->payment_status ?? ($invSale->payment_status ?? 'Pending'),
+                'payment_date' => $row->payment_date ?? ($invSale->sold_at ?? $row->created_at),
                 'rating' => $row->rating ? (int) $row->rating : null,
                 'feedback' => $row->feedback,
                 'created_at' => $row->created_at,
@@ -608,9 +680,11 @@ abstract class SuperAdminBaseController extends Controller
                 'day' => $date->format('D'),
                 'date' => $date->toDateString(),
                 'bookings' => $matches->count(),
-                'revenue' => (float) $matches->sum(function ($row) {
-                    return (float) data_get($row, 'amount_paid', 0);
-                }),
+                'revenue' => (float) $matches->sum(fn ($row) => (float) data_get($row, 'amount_paid', 0)),
+                'profit' => (float) $matches->sum(fn ($row) => (float) data_get($row, 'profit', data_get($row, 'amount_paid', 0))),
+                'service_revenue' => (float) $matches->filter(fn ($r) => data_get($r, 'sale_type', 'service') === 'service')->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
+                'tools_revenue' => (float) $matches->filter(fn ($r) => data_get($r, 'sale_type') === 'tools_materials')->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
+                'ac_revenue' => (float) $matches->filter(fn ($r) => in_array(data_get($r, 'sale_type'), ['ac_unit', 'spare_part'], true))->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
             ];
         })->values();
     }
@@ -634,9 +708,11 @@ abstract class SuperAdminBaseController extends Controller
             return [
                 'month' => $month->format('M'),
                 'year_month' => $month->format('Y-m'),
-                'revenue' => (float) $matches->sum(function ($record) {
-                    return (float) data_get($record, 'amount_paid', 0);
-                }),
+                'revenue' => (float) $matches->sum(fn ($record) => (float) data_get($record, 'amount_paid', 0)),
+                'profit' => (float) $matches->sum(fn ($record) => (float) data_get($record, 'profit', data_get($record, 'amount_paid', 0))),
+                'service_revenue' => (float) $matches->filter(fn ($r) => data_get($r, 'sale_type', 'service') === 'service')->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
+                'tools_revenue' => (float) $matches->filter(fn ($r) => data_get($r, 'sale_type') === 'tools_materials')->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
+                'ac_revenue' => (float) $matches->filter(fn ($r) => in_array(data_get($r, 'sale_type'), ['ac_unit', 'spare_part'], true))->sum(fn ($r) => (float) data_get($r, 'amount_paid', 0)),
                 'bookings' => $matches->count(),
             ];
         })->values();

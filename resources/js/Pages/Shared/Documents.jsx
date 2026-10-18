@@ -391,25 +391,36 @@ function Documents({ addToast }) {
                                         "Created",
                                         "Status",
                                         "Actions",
-                                    ].map((heading) => (
-                                        <th
-                                            key={heading}
-                                            style={{
-                                                padding: "10px 12px",
-                                                textAlign: "left",
-                                                fontSize: 11,
-                                                fontWeight: 600,
-                                                letterSpacing: "0.05em",
-                                                textTransform: "uppercase",
-                                                color: "#6B7280",
-                                                whiteSpace: "nowrap",
-                                                borderBottom:
-                                                    "1px solid #EAECF0",
-                                            }}
-                                        >
-                                            {heading}
-                                        </th>
-                                    ))}
+                                    ].map((heading) => {
+                                        const isAction = heading === "Actions";
+                                        return (
+                                            <th
+                                                key={heading}
+                                                className={isAction ? "sticky-action-col" : ""}
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    textAlign: isAction ? "right" : "left",
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    letterSpacing: "0.05em",
+                                                    textTransform: "uppercase",
+                                                    color: "#6B7280",
+                                                    whiteSpace: "nowrap",
+                                                    borderBottom: "1px solid #EAECF0",
+                                                    ...(isAction
+                                                        ? {
+                                                              position: "sticky",
+                                                              right: 0,
+                                                              zIndex: 10,
+                                                              background: "#F5F7FA",
+                                                          }
+                                                        : {}),
+                                                }}
+                                            >
+                                                {heading}
+                                            </th>
+                                        );
+                                    })}
                                 </tr>
                             </thead>
                             <tbody>
@@ -485,12 +496,22 @@ function Documents({ addToast }) {
                                         <td style={{ padding: "10px 12px" }}>
                                             <StatusBadge status={document.status} />
                                         </td>
-                                        <td style={{ padding: "10px 12px" }}>
+                                        <td
+                                            className="sticky-action-col"
+                                            style={{
+                                                padding: "10px 12px",
+                                                position: "sticky",
+                                                right: 0,
+                                                zIndex: 5,
+                                                background: "#FFFFFF",
+                                            }}
+                                        >
                                             <div
                                                 style={{
                                                     display: "flex",
                                                     gap: 6,
-                                                    flexWrap: "wrap",
+                                                    flexWrap: "nowrap",
+                                                    justifyContent: "flex-end",
                                                 }}
                                             >
                                                 {document.status !== "Exported" && (

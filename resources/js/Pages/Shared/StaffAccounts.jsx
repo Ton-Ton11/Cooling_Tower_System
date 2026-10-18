@@ -883,23 +883,35 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
                             <thead>
                                 <tr style={{ background: "#F8FAFC" }}>
-                                    {["ID", "Employee Name", "Role Category", "Email", "Contact", "Status", "Joined", "Actions"].map((heading) => (
-                                        <th
-                                            key={heading}
-                                            style={{
-                                                padding: "12px 14px",
-                                                textAlign: "left",
-                                                fontSize: 11,
-                                                fontWeight: 700,
-                                                letterSpacing: "0.05em",
-                                                textTransform: "uppercase",
-                                                color: "#64748B",
-                                                borderBottom: "1px solid #E2E8F0",
-                                            }}
-                                        >
-                                            {heading}
-                                        </th>
-                                    ))}
+                                    {["ID", "Employee Name", "Role Category", "Email", "Contact", "Status", "Joined", "Actions"].map((heading) => {
+                                        const isAction = heading === "Actions";
+                                        return (
+                                            <th
+                                                key={heading}
+                                                className={isAction ? "sticky-action-col" : ""}
+                                                style={{
+                                                    padding: "12px 14px",
+                                                    textAlign: isAction ? "right" : "left",
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    letterSpacing: "0.05em",
+                                                    textTransform: "uppercase",
+                                                    color: "#64748B",
+                                                    borderBottom: "1px solid #E2E8F0",
+                                                    ...(isAction
+                                                        ? {
+                                                              position: "sticky",
+                                                              right: 0,
+                                                              zIndex: 10,
+                                                              background: "#F8FAFC",
+                                                          }
+                                                        : {}),
+                                                }}
+                                            >
+                                                {heading}
+                                            </th>
+                                        );
+                                    })}
                                 </tr>
                             </thead>
                             <tbody>
@@ -1000,8 +1012,17 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                                                 <td style={{ padding: "12px 14px", fontSize: 12, color: "#94A3B8" }}>
                                                     {formatDate(user.created_at)}
                                                 </td>
-                                                <td style={{ padding: "12px 14px" }}>
-                                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                                <td
+                                                    className="sticky-action-col"
+                                                    style={{
+                                                        padding: "12px 14px",
+                                                        position: "sticky",
+                                                        right: 0,
+                                                        zIndex: 5,
+                                                        background: "#FFFFFF",
+                                                    }}
+                                                >
+                                                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", alignItems: "center", justifyContent: "flex-end" }}>
                                                         {viewMode === "active" ? (
                                                             <>
                                                                 {canEditThisUser ? (
