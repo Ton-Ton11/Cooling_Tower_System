@@ -12,9 +12,57 @@ const icons = {
     phone: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z",
 };
 
+const ACCREDITED_BRANDS = [
+    { name: "Panasonic", tag: "Inverter & Split" },
+    { name: "Daikin", tag: "Specialist" },
+    { name: "Carrier", tag: "Commercial & Home" },
+    { name: "Condura", tag: "Heavy Duty" },
+    { name: "Kelvinator", tag: "Certified Care" },
+    { name: "Gree", tag: "Smart Cooling" },
+    { name: "Midea", tag: "Eco Inverter" },
+];
+
+const COMPANY_DETAILS = {
+    address: "Door 5, Apostol Bldg., Mayor Jaldon St. Canelar Zamboanga City",
+    mobile: "0917 877 7670",
+    telephone: "062 310-2275",
+    facebook: "Cooling Tower Airconditioning Services",
+    facebookUrl: "https://www.facebook.com/share/19w3XmbCza/",
+};
+
 export default function CustomerOverview({ onNavigate, dashboardData, isLoading, onSelectServiceToBook }) {
     const [activeTab, setActiveTab] = useState("services"); // "services" | "requests"
     const [carouselIndex, setCarouselIndex] = useState(0);
+    const [copiedKey, setCopiedKey] = useState(null);
+
+    const handleCopy = (text, key) => {
+        if (navigator?.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {
+                fallbackCopy(text);
+            });
+        } else {
+            fallbackCopy(text);
+        }
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey(null), 2000);
+    };
+
+    const fallbackCopy = (text) => {
+        try {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+        } catch (err) {
+            console.error("Failed to copy", err);
+        }
+    };
 
     const stats = dashboardData?.stats ?? {};
     const recentBookings = dashboardData?.recent_bookings ?? [];
@@ -100,10 +148,19 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
                         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
                             <div className="space-y-3 max-w-xl">
-                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-[11px] font-bold uppercase tracking-wider">
-                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                                    <span>Cooling Tower Quality Assurance</span>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-extrabold uppercase tracking-wider">
+                                        <svg className="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                        </svg>
+                                        <span>DTI Accredited</span>
+                                    </div>
+                                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-[11px] font-bold uppercase tracking-wider">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                                        <span>Authorized Dealer, Installer & Service Center</span>
+                                    </div>
                                 </div>
+
                                 <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white leading-tight">
                                     Certified Airconditioning Care for Home & Business
                                 </h1>
@@ -122,7 +179,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                         <svg className="w-3.5 h-3.5 text-blue-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                         </svg>
-                                        <span>Direct Technician Dispatch</span>
+                                        <span>Authorized Multi-Brand Center</span>
                                     </span>
                                     <span className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
                                         <svg className="w-3.5 h-3.5 text-emerald-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -159,6 +216,51 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             <span className="w-6 h-2 rounded-full bg-blue-500 transition-all cursor-pointer" />
                             <span className="w-2 h-2 rounded-full bg-white/20 transition-all cursor-pointer hover:bg-white/40" />
                             <span className="w-2 h-2 rounded-full bg-white/20 transition-all cursor-pointer hover:bg-white/40" />
+                        </div>
+                    </div>
+
+                    {/* SECTION 1.2: ACCREDITED DEALER & SERVICE CENTER SHOWCASE (TRUST & CREDENTIALS) */}
+                    <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#0E1A33] to-blue-700 text-white flex items-center justify-center shadow-md shadow-blue-900/15 shrink-0">
+                                    <svg className="w-5 h-5 text-sky-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                            DTI Accredited
+                                        </span>
+                                        <span className="text-[11px] font-bold text-slate-500">Official Warranty Protection</span>
+                                    </div>
+                                    <h3 className="text-sm font-extrabold text-slate-900 mt-0.5">
+                                        Accredited Dealer, Installer & Service Center
+                                    </h3>
+                                </div>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <span className="text-[11px] font-semibold text-slate-600 block">Factory-Certified Technicians</span>
+                                <span className="text-[10px] text-slate-400">100% genuine parts • Preserves unit factory warranty</span>
+                            </div>
+                        </div>
+
+                        {/* Brand Badges Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                            {ACCREDITED_BRANDS.map((brand) => (
+                                <div
+                                    key={brand.name}
+                                    className="p-2.5 rounded-xl bg-slate-50/90 hover:bg-blue-50/50 border border-slate-200/70 hover:border-blue-300 transition text-center group cursor-default"
+                                >
+                                    <span className="block text-xs font-black text-slate-800 group-hover:text-blue-700 transition uppercase tracking-tight">
+                                        {brand.name}
+                                    </span>
+                                    <span className="block text-[9px] font-semibold text-slate-400 group-hover:text-slate-600 transition truncate mt-0.5">
+                                        {brand.tag}
+                                    </span>
+                                </div>
+                            ))}
                         </div>
                     </div>
 
@@ -610,22 +712,109 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             })}
                         </div>
 
-                        {/* Dispatch Hotline Quick Action */}
-                        <div className="pt-2 border-t border-slate-100">
-                            <a
-                                href="tel:09171234567"
-                                className="w-full py-2.5 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 text-xs font-bold transition flex items-center justify-center gap-2 border border-slate-200"
-                            >
-                                <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icons.phone} />
+
+                    </div>
+
+                    {/* WIDGET 5: SERVICE CENTER OFFICE & ACCREDITATION CARD */}
+                    <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-100 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center shrink-0">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-extrabold text-slate-900">Service Center Office</h3>
+                                    <span className="text-[10px] text-emerald-700 font-bold uppercase">DTI Accredited</span>
+                                </div>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                Official Center
+                            </span>
+                        </div>
+
+                        {/* Physical Address */}
+                        <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1 text-xs">
+                            <div className="flex items-start gap-2">
+                                <svg className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                                 </svg>
-                                <span>Dispatch Hotline: 0917-123-4567</span>
+                                <div>
+                                    <span className="font-extrabold text-slate-800 block text-xs">Main Office & Facility</span>
+                                    <p className="text-[11px] text-slate-600 leading-snug mt-0.5">
+                                        {COMPANY_DETAILS.address}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Direct Contacts */}
+                        <div className="space-y-2">
+                            <button
+                                type="button"
+                                onClick={() => handleCopy(COMPANY_DETAILS.mobile, "mobile-widget")}
+                                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold transition flex items-center justify-between shadow-sm cursor-pointer"
+                                title="Click to copy Mobile Hotline"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icons.phone} />
+                                    </svg>
+                                    <span>Mobile Hotline</span>
+                                </div>
+                                <span className="font-extrabold font-mono text-[11px] bg-white/20 px-2 py-0.5 rounded-md">
+                                    {copiedKey === "mobile-widget" ? "✓ Copied to clipboard!" : COMPANY_DETAILS.mobile}
+                                </span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => handleCopy(COMPANY_DETAILS.telephone, "telephone-widget")}
+                                className="w-full py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 text-xs font-bold transition flex items-center justify-between cursor-pointer"
+                                title="Click to copy Office Telephone"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={icons.phone} />
+                                    </svg>
+                                    <span>Office Telephone</span>
+                                </div>
+                                <span className="font-extrabold font-mono text-[11px] text-slate-800">
+                                    {copiedKey === "telephone-widget" ? "✓ Copied to clipboard!" : COMPANY_DETAILS.telephone}
+                                </span>
+                            </button>
+
+                            <a
+                                href={COMPANY_DETAILS.facebookUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full py-2.5 px-3 rounded-xl bg-blue-50/80 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200/90 text-xs font-bold transition flex items-center justify-between group shadow-2xs"
+                                title="Open Facebook Page"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-[#1877F2] fill-current shrink-0" viewBox="0 0 24 24">
+                                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                                    </svg>
+                                    <span>Facebook Page</span>
+                                </div>
+                                <span className="font-bold text-[11px] text-blue-800 group-hover:underline truncate max-w-[170px]">
+                                    {COMPANY_DETAILS.facebook}
+                                </span>
                             </a>
+                        </div>
+
+                        {/* Accredited Brands Footer */}
+                        <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-500 leading-relaxed">
+                            <span className="font-bold text-slate-700 block mb-0.5">Accredited Dealer, Installer & Service Center:</span>
+                            <span className="text-slate-600">Panasonic • Daikin • Carrier • Condura • Kelvinator • Gree • Midea</span>
                         </div>
                     </div>
 
                 </div>
             </div>
+
         </div>
     );
 }

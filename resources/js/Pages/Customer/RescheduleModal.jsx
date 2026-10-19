@@ -14,12 +14,12 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
 
     if (!isOpen || !booking) return null;
 
-    const gcashAccount = "0917-123-4567";
+    const gcashAccount = "0917 877 7670";
     const gcashName = "Cooling Tower Airconditioning Services";
     const rescheduleFee = 150.00;
 
     const handleCopy = () => {
-        navigator.clipboard.writeText("09171234567");
+        navigator.clipboard.writeText("09178777670");
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

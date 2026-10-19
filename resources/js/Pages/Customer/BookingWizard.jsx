@@ -95,8 +95,8 @@ const DEFAULT_UNIT_TYPES = [
 ];
 
 const DEFAULT_BRANDS = [
-    "Samsung", "LG", "Panasonic", "Carrier", "Daikin",
-    "Mitsubishi", "Condura", "Kolin", "Fujitsu", "Other"
+    "Panasonic", "Daikin", "Carrier", "Condura", "Kelvinator", "Gree", "Midea",
+    "Samsung", "LG", "Mitsubishi", "Kolin", "Fujitsu", "Other"
 ];
 
 const HP_OPTIONS = [
@@ -270,7 +270,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     const [submitting, setSubmitting] = useState(false);
     const [submittedBooking, setSubmittedBooking] = useState(null);
 
-    const gcashAccount = policyData?.gcash_account || "0917-123-4567";
+    const gcashAccount = policyData?.gcash_account || "0917 877 7670";
     const gcashName = policyData?.gcash_name || "Cooling Tower Airconditioning Services";
 
     // Load Catalog Data
@@ -325,7 +325,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     }, [currentService]);
 
     const handleCopyGCash = () => {
-        navigator.clipboard.writeText("09171234567");
+        navigator.clipboard.writeText((gcashAccount || "0917 877 7670").replace(/\s+/g, ''));
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -709,14 +709,19 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
             {/* Header Banner */}
             <div className="bg-gradient-to-r from-[#1E2F5F] via-[#243B73] to-[#162347] rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
                 <div className="relative z-10 max-w-2xl">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs font-bold uppercase tracking-wider mb-3">
-                        Official Service Request
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap mb-3">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold uppercase tracking-wider">
+                            ✓ DTI Accredited
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs font-bold uppercase tracking-wider">
+                            Authorized Service Center
+                        </span>
+                    </div>
                     <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
                         Book an Air-Conditioning Service
                     </h1>
                     <p className="mt-2 text-xs sm:text-sm text-blue-100/90 leading-relaxed">
-                        Submit your service requirements, customize aircon units, set your preferred schedule, and secure priority technician dispatch with an appointment reservation fee.
+                        Authorized dealer, installer & service center for Panasonic, Daikin, Carrier, Condura, Kelvinator, Gree & Midea. Schedule certified care with 100% genuine parts and warranty preservation.
                     </p>
                 </div>
                 {/* Decorative glow */}
