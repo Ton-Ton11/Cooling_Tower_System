@@ -13,6 +13,8 @@ class AdminAssistantSparePartController extends AdminAssistantBaseController
     {
         $this->authorizeRole($request);
 
+        app(\App\Services\ForecastingService::class)->syncExpiredAcWarrantiesAndReleaseParts();
+
         $items = DB::table('inventory_items')
             ->where('item_type', 'Spare Part')
             ->orderBy('item_name')

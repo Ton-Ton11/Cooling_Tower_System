@@ -57,6 +57,72 @@ class ForecastingService
                 $table->timestamps();
             });
         }
+
+        if (Schema::hasTable('ac_units_inventory')) {
+            Schema::table('ac_units_inventory', function (Blueprint $table) {
+                if (! Schema::hasColumn('ac_units_inventory', 'warranty_start_date')) {
+                    $table->date('warranty_start_date')->nullable()->after('warranty_period');
+                }
+                if (! Schema::hasColumn('ac_units_inventory', 'warranty_expiry_date')) {
+                    $table->date('warranty_expiry_date')->nullable()->after('warranty_start_date');
+                }
+                if (! Schema::hasColumn('ac_units_inventory', 'warranty_status')) {
+                    $table->string('warranty_status', 40)->default('Not Activated')->after('warranty_expiry_date');
+                }
+                if (! Schema::hasColumn('ac_units_inventory', 'customer_name')) {
+                    $table->string('customer_name', 150)->nullable()->after('warranty_status');
+                }
+                if (! Schema::hasColumn('ac_units_inventory', 'customer_contact')) {
+                    $table->string('customer_contact', 80)->nullable()->after('customer_name');
+                }
+                if (! Schema::hasColumn('ac_units_inventory', 'sold_at')) {
+                    $table->timestamp('sold_at')->nullable()->after('customer_contact');
+                }
+            });
+        }
+
+        if (Schema::hasTable('inventory_items')) {
+            Schema::table('inventory_items', function (Blueprint $table) {
+                if (! Schema::hasColumn('inventory_items', 'reservation_source')) {
+                    $table->string('reservation_source', 40)->nullable()->after('status');
+                }
+                if (! Schema::hasColumn('inventory_items', 'is_warranty_reserved')) {
+                    $table->boolean('is_warranty_reserved')->default(false)->after('reservation_source');
+                }
+                if (! Schema::hasColumn('inventory_items', 'reserved_for_ac_unit_id')) {
+                    $table->unsignedBigInteger('reserved_for_ac_unit_id')->nullable()->index()->after('is_warranty_reserved');
+                }
+                if (! Schema::hasColumn('inventory_items', 'reserved_for_serial')) {
+                    $table->string('reserved_for_serial', 120)->nullable()->index()->after('reserved_for_ac_unit_id');
+                }
+                if (! Schema::hasColumn('inventory_items', 'reserved_for_unit_label')) {
+                    $table->string('reserved_for_unit_label', 180)->nullable()->after('reserved_for_serial');
+                }
+                if (! Schema::hasColumn('inventory_items', 'source_item_id')) {
+                    $table->unsignedBigInteger('source_item_id')->nullable()->after('reserved_for_unit_label');
+                }
+                if (! Schema::hasColumn('inventory_items', 'warranty_start_date')) {
+                    $table->date('warranty_start_date')->nullable()->after('source_item_id');
+                }
+                if (! Schema::hasColumn('inventory_items', 'warranty_expiry_date')) {
+                    $table->date('warranty_expiry_date')->nullable()->after('warranty_start_date');
+                }
+            });
+        }
+
+        if (Schema::hasTable('inventory_sales')) {
+            Schema::table('inventory_sales', function (Blueprint $table) {
+                if (! Schema::hasColumn('inventory_sales', 'warranty_start_date')) {
+                    $table->date('warranty_start_date')->nullable()->after('warranty_period');
+                }
+                if (! Schema::hasColumn('inventory_sales', 'warranty_expiry_date')) {
+                    $table->date('warranty_expiry_date')->nullable()->after('warranty_start_date');
+                }
+                if (! Schema::hasColumn('inventory_sales', 'warranty_status')) {
+                    $table->string('warranty_status', 40)->nullable()->after('warranty_expiry_date');
+                }
+            });
+        }
     }
 
     /**
@@ -545,16 +611,781 @@ class ForecastingService
         $expiringCertsCount = $techAlerts->whereIn('status', ['Expired', 'Critical', 'Expiring Soon'])->count();
         $projectedPipelineRevenue = $customerForecasts->sum('estimated_revenue');
 
+        $warrantySync = $this->syncExpiredAcWarrantiesAndReleaseParts();
+
         return [
             'summary' => [
                 'due_soon_customers'         => $dueSoonCustomersCount,
                 'total_tracked_units'        => $customerForecasts->count(),
                 'expiring_certifications'    => $expiringCertsCount,
                 'projected_pipeline_revenue' => $projectedPipelineRevenue,
+                'active_ac_warranties'       => $warrantySync['active_warranties_count'] ?? 0,
+                'expired_ac_warranties'      => $warrantySync['expired_warranties_count'] ?? 0,
+                'reserved_spare_parts'       => $warrantySync['reserved_parts_count'] ?? 0,
             ],
             'customer_forecasts' => $customerForecasts->values()->all(),
             'technician_alerts'  => $techAlerts->values()->all(),
             'demand_projection'  => $projectionSeries,
+            'warranty_forecasts' => $warrantySync['units'] ?? [],
+        ];
+    }
+
+    /**
+     * Activate warranty forecasting for a purchased/sold AC unit and automatically reserve
+     * compatible spare parts (from On-Hand if available, or Order Base if not on-hand).
+     */
+    public function activateAcUnitWarrantyForecast(int $acUnitId, array $options = []): array
+    {
+        $this->ensureTablesExist();
+
+        $unit = DB::table('ac_units_inventory')->where('ac_unit_id', $acUnitId)->first();
+        if (! $unit) {
+            return ['activated' => false, 'reserved_parts' => []];
+        }
+
+        $warrantyMonths = isset($options['warranty_period'])
+            ? max(1, (int) $options['warranty_period'])
+            : max(1, (int) ($unit->warranty_period ?: 12));
+
+        $startDateStr = $options['warranty_start_date']
+            ?? $unit->warranty_start_date
+            ?? ($unit->sold_at ? Carbon::parse($unit->sold_at)->toDateString() : null)
+            ?? now()->toDateString();
+
+        $startDate = Carbon::parse($startDateStr)->startOfDay();
+
+        $expiryDate = ! empty($options['warranty_expiry_date'])
+            ? Carbon::parse($options['warranty_expiry_date'])->startOfDay()
+            : (clone $startDate)->addMonths($warrantyMonths)->startOfDay();
+
+        $daysLeft = (int) now()->startOfDay()->diffInDays($expiryDate, false);
+        $warrantyStatus = $daysLeft < 0
+            ? 'Expired'
+            : ($daysLeft <= 30 ? 'Expiring Soon' : 'Active');
+
+        $updatePayload = [
+            'warranty_period'      => $warrantyMonths,
+            'warranty_start_date'  => $startDate->toDateString(),
+            'warranty_expiry_date' => $expiryDate->toDateString(),
+            'warranty_status'      => $warrantyStatus,
+            'updated_at'           => now(),
+        ];
+
+        if (! empty($options['customer_name'])) {
+            $updatePayload['customer_name'] = $options['customer_name'];
+        }
+        if (! empty($options['customer_contact'])) {
+            $updatePayload['customer_contact'] = $options['customer_contact'];
+        }
+        if (empty($unit->sold_at)) {
+            $updatePayload['sold_at'] = now();
+        }
+
+        DB::table('ac_units_inventory')->where('ac_unit_id', $acUnitId)->update($updatePayload);
+
+        if (Schema::hasTable('inventory_sales')) {
+            DB::table('inventory_sales')
+                ->where('sale_type', 'ac_unit')
+                ->where('ac_unit_id', $acUnitId)
+                ->update([
+                    'warranty_period'      => $warrantyMonths,
+                    'warranty_start_date'  => $startDate->toDateString(),
+                    'warranty_expiry_date' => $expiryDate->toDateString(),
+                    'warranty_status'      => $warrantyStatus,
+                    'updated_at'           => now(),
+                ]);
+        }
+
+        $freshUnit = DB::table('ac_units_inventory')->where('ac_unit_id', $acUnitId)->first();
+
+        if ($daysLeft < 0) {
+            $released = $this->releaseSparePartsForAcUnit($acUnitId, $freshUnit->serial_number);
+            return [
+                'activated'            => true,
+                'warranty_status'      => 'Expired',
+                'warranty_start_date'  => $startDate->toDateString(),
+                'warranty_expiry_date' => $expiryDate->toDateString(),
+                'days_left'            => $daysLeft,
+                'reserved_parts'       => [],
+                'released_parts'       => $released,
+            ];
+        }
+
+        $reservedParts = $this->reserveSparePartsForAcUnitWarranty(
+            $freshUnit,
+            $startDate->toDateString(),
+            $expiryDate->toDateString(),
+            $options['reserve_source'] ?? null
+        );
+
+        return [
+            'activated'            => true,
+            'warranty_status'      => $warrantyStatus,
+            'warranty_start_date'  => $startDate->toDateString(),
+            'warranty_expiry_date' => $expiryDate->toDateString(),
+            'days_left'            => $daysLeft,
+            'reserved_parts'       => $reservedParts,
+        ];
+    }
+
+    /**
+     * Reserve compatible spare parts for an AC unit under active warranty.
+     * - Reserves from On-Hand spare parts if available in stock.
+     * - Automatically reserves in Order Base spare parts when compatible spare parts are not currently on-hand.
+     */
+    public function reserveSparePartsForAcUnitWarranty(
+        object $unit,
+        string $startDate,
+        string $expiryDate,
+        ?string $preferredSource = null
+    ): array {
+        $acUnitId = (int) $unit->ac_unit_id;
+        $serialNumber = (string) $unit->serial_number;
+        $brand = trim((string) $unit->brand);
+        $unitLabel = trim("{$unit->brand} {$unit->model} ({$unit->ac_type} • {$unit->horsepower} HP)");
+
+        // Check if spare parts are already reserved for this AC unit
+        $existingReserved = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where('reserved_for_ac_unit_id', $acUnitId)
+            ->where(function ($q) {
+                $q->where('is_warranty_reserved', 1)
+                    ->orWhere('status', 'Warranty Reserved');
+            })
+            ->get();
+
+        if ($existingReserved->isNotEmpty()) {
+            DB::table('inventory_items')
+                ->where('item_type', 'Spare Part')
+                ->where('reserved_for_ac_unit_id', $acUnitId)
+                ->update([
+                    'warranty_start_date'  => $startDate,
+                    'warranty_expiry_date' => $expiryDate,
+                    'last_updated'         => now(),
+                ]);
+
+            return DB::table('inventory_items')
+                ->where('item_type', 'Spare Part')
+                ->where('reserved_for_ac_unit_id', $acUnitId)
+                ->get()
+                ->all();
+        }
+
+        // Find all non-archived, unreserved Spare Parts
+        $candidateParts = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where(function ($q) {
+                $q->whereNull('is_archived')->orWhere('is_archived', 0);
+            })
+            ->where(function ($q) {
+                $q->whereNull('is_warranty_reserved')->orWhere('is_warranty_reserved', 0);
+            })
+            ->whereNotIn('status', ['Sold', 'Defect', 'Warranty Reserved'])
+            ->get();
+
+        // Filter parts compatible with this AC unit's brand
+        $brandMatchedOnHand = $candidateParts->filter(function ($part) use ($brand) {
+            $isOnHand = in_array($part->status, ['Available', 'Available / On Hand', 'Low Stock'], true)
+                && (int) $part->quantity_on_hand > 0;
+            if (! $isOnHand) {
+                return false;
+            }
+            $compat = strtolower((string) ($part->compatible_brands ?? ''));
+            return $brand !== '' && str_contains($compat, strtolower($brand));
+        })->values();
+
+        $reservedRecords = [];
+
+        // 1. Reserve from On-Hand if available (and not forced to order_base)
+        if ($preferredSource !== 'order_base' && $brandMatchedOnHand->isNotEmpty()) {
+            $onHandPart = $brandMatchedOnHand->first();
+            $currentQty = (int) $onHandPart->quantity_on_hand;
+
+            if ($currentQty > 1) {
+                $newQty = $currentQty - 1;
+                $reorder = (int) $onHandPart->reorder_level;
+                $newStatus = $newQty <= 0 ? 'Out of Stock' : ($newQty <= $reorder ? 'Low Stock' : ($onHandPart->status ?: 'Available / On Hand'));
+
+                DB::table('inventory_items')
+                    ->where('item_id', $onHandPart->item_id)
+                    ->update([
+                        'quantity_on_hand' => $newQty,
+                        'status'           => $newStatus,
+                        'last_updated'     => now(),
+                    ]);
+
+                $reservedId = DB::table('inventory_items')->insertGetId([
+                    'item_name'               => $onHandPart->item_name,
+                    'item_type'               => 'Spare Part',
+                    'inventory_mode'          => $onHandPart->inventory_mode ?? 'spare_part',
+                    'folder_id'               => $onHandPart->folder_id,
+                    'sub_category'            => $onHandPart->sub_category ?: 'PCBs & Controls',
+                    'compatible_brands'       => $brand ?: $onHandPart->compatible_brands,
+                    'quantity_on_hand'        => 1,
+                    'initial_stock'           => 1,
+                    'reorder_level'           => 1,
+                    'unit'                    => $onHandPart->unit ?: 'pcs',
+                    'capital'                 => $onHandPart->capital ?? 0,
+                    'selling_price'           => $onHandPart->selling_price ?? 0,
+                    'profit'                  => $onHandPart->profit ?? 0,
+                    'supplier_name'           => $onHandPart->supplier_name,
+                    'status'                  => 'Warranty Reserved',
+                    'reservation_source'      => 'on_hand',
+                    'is_warranty_reserved'    => true,
+                    'reserved_for_ac_unit_id' => $acUnitId,
+                    'reserved_for_serial'    => $serialNumber,
+                    'reserved_for_unit_label' => $unitLabel,
+                    'source_item_id'          => $onHandPart->item_id,
+                    'warranty_start_date'     => $startDate,
+                    'warranty_expiry_date'    => $expiryDate,
+                    'created_at'              => now(),
+                    'last_updated'            => now(),
+                ], 'item_id');
+
+                $reservedRecords[] = DB::table('inventory_items')->where('item_id', $reservedId)->first();
+            } else {
+                DB::table('inventory_items')
+                    ->where('item_id', $onHandPart->item_id)
+                    ->update([
+                        'status'                  => 'Warranty Reserved',
+                        'reservation_source'      => 'on_hand',
+                        'is_warranty_reserved'    => true,
+                        'reserved_for_ac_unit_id' => $acUnitId,
+                        'reserved_for_serial'    => $serialNumber,
+                        'reserved_for_unit_label' => $unitLabel,
+                        'source_item_id'          => null,
+                        'warranty_start_date'     => $startDate,
+                        'warranty_expiry_date'    => $expiryDate,
+                        'last_updated'            => now(),
+                    ]);
+
+                $reservedRecords[] = DB::table('inventory_items')->where('item_id', $onHandPart->item_id)->first();
+            }
+        }
+
+        // 2. Check if an essential brand-specific spare part (e.g., Fan Motor / Compressor Capacitor) is NOT on-hand,
+        // OR if no On-Hand spare part was available at all -> Automatically reserve in Order Base spare parts!
+        $hasBrandFanMotorOnHand = $brandMatchedOnHand->contains(function ($p) {
+            $name = strtolower((string) $p->item_name);
+            $cat = strtolower((string) ($p->sub_category ?? ''));
+            return str_contains($name, 'motor') || str_contains($cat, 'motor');
+        });
+
+        if (empty($reservedRecords) || ! $hasBrandFanMotorOnHand || $preferredSource === 'order_base') {
+            $existingOrderBase = $candidateParts->first(function ($part) use ($brand) {
+                $isOrderOrOut = in_array($part->status, ['Order Base', 'Out of Stock'], true)
+                    || (int) $part->quantity_on_hand <= 0;
+                if (! $isOrderOrOut) {
+                    return false;
+                }
+                $compat = strtolower((string) ($part->compatible_brands ?? ''));
+                return $brand !== '' && str_contains($compat, strtolower($brand));
+            });
+
+            if ($existingOrderBase) {
+                DB::table('inventory_items')
+                    ->where('item_id', $existingOrderBase->item_id)
+                    ->update([
+                        'status'                  => 'Warranty Reserved',
+                        'reservation_source'      => 'order_base',
+                        'is_warranty_reserved'    => true,
+                        'reserved_for_ac_unit_id' => $acUnitId,
+                        'reserved_for_serial'    => $serialNumber,
+                        'reserved_for_unit_label' => $unitLabel,
+                        'source_item_id'          => null,
+                        'warranty_start_date'     => $startDate,
+                        'warranty_expiry_date'    => $expiryDate,
+                        'last_updated'            => now(),
+                    ]);
+
+                $reservedRecords[] = DB::table('inventory_items')->where('item_id', $existingOrderBase->item_id)->first();
+            } else {
+                $fanMotorsFolder = DB::table('inventory_folders')
+                    ->where('field_type', 'spare_parts')
+                    ->where('name', 'like', '%Fan Motor%')
+                    ->first();
+
+                $orderBasePartName = empty($reservedRecords)
+                    ? "{$brand} {$unit->ac_type} Warranty Service Kit (PCB & Capacitor)"
+                    : "{$brand} {$unit->ac_type} Inverter Outdoor Fan Motor ({$unit->horsepower} HP)";
+
+                $orderBaseId = DB::table('inventory_items')->insertGetId([
+                    'item_name'               => $orderBasePartName,
+                    'item_type'               => 'Spare Part',
+                    'inventory_mode'          => 'spare_part',
+                    'folder_id'               => $fanMotorsFolder?->id,
+                    'sub_category'            => $fanMotorsFolder?->name ?? 'Fan Motors',
+                    'compatible_brands'       => $brand ?: 'Universal',
+                    'quantity_on_hand'        => 1,
+                    'initial_stock'           => 1,
+                    'reorder_level'           => 2,
+                    'unit'                    => 'pcs',
+                    'capital'                 => 1850.00,
+                    'selling_price'           => 2750.00,
+                    'profit'                  => 900.00,
+                    'supplier_name'           => $unit->supplier ?: 'Authorized Brand Parts Distributor',
+                    'status'                  => 'Warranty Reserved',
+                    'reservation_source'      => 'order_base',
+                    'is_warranty_reserved'    => true,
+                    'reserved_for_ac_unit_id' => $acUnitId,
+                    'reserved_for_serial'    => $serialNumber,
+                    'reserved_for_unit_label' => $unitLabel,
+                    'source_item_id'          => null,
+                    'warranty_start_date'     => $startDate,
+                    'warranty_expiry_date'    => $expiryDate,
+                    'created_at'              => now(),
+                    'last_updated'            => now(),
+                ], 'item_id');
+
+                $reservedRecords[] = DB::table('inventory_items')->where('item_id', $orderBaseId)->first();
+            }
+        }
+
+        return $reservedRecords;
+    }
+
+    /**
+     * Release reserved spare parts when an AC unit's warranty ends/expires:
+     * - On-Hand reserved spare parts become Available / On Hand again (restoring stock).
+     * - Order Base reserved spare parts revert to 'Order Base' (not reserved anymore).
+     */
+    public function releaseSparePartsForAcUnit(int $acUnitId, ?string $serialNumber = null): array
+    {
+        $this->ensureTablesExist();
+
+        $query = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where(function ($q) use ($acUnitId, $serialNumber) {
+                $q->where('reserved_for_ac_unit_id', $acUnitId);
+                if (! empty($serialNumber)) {
+                    $q->orWhere('reserved_for_serial', $serialNumber);
+                }
+            })
+            ->where(function ($q) {
+                $q->where('is_warranty_reserved', 1)
+                    ->orWhere('status', 'Warranty Reserved');
+            });
+
+        $reservedItems = $query->get();
+        $releasedSummary = [];
+
+        foreach ($reservedItems as $item) {
+            $sourceType = $item->reservation_source ?: 'on_hand';
+
+            if ($sourceType === 'order_base') {
+                // Order Base reserve spare part status becomes 'Order Base' (not reserved anymore)
+                DB::table('inventory_items')
+                    ->where('item_id', $item->item_id)
+                    ->update([
+                        'status'                  => 'Order Base',
+                        'is_warranty_reserved'    => false,
+                        'reservation_source'      => null,
+                        'reserved_for_ac_unit_id' => null,
+                        'reserved_for_serial'    => null,
+                        'reserved_for_unit_label' => null,
+                        'warranty_start_date'     => null,
+                        'warranty_expiry_date'    => null,
+                        'last_updated'            => now(),
+                    ]);
+
+                $releasedSummary[] = [
+                    'item_id'    => $item->item_id,
+                    'item_name'  => $item->item_name,
+                    'source'     => 'order_base',
+                    'new_status' => 'Order Base (Not Reserved)',
+                ];
+            } else {
+                // On-Hand reserve spare part becomes Available / On Hand again
+                $restoredToSource = false;
+                if (! empty($item->source_item_id)) {
+                    $sourceRow = DB::table('inventory_items')
+                        ->where('item_id', $item->source_item_id)
+                        ->first();
+
+                    if ($sourceRow) {
+                        $restoredQty = (int) $sourceRow->quantity_on_hand + max(1, (int) $item->quantity_on_hand);
+                        $reorder = (int) $sourceRow->reorder_level;
+                        $restoredStatus = $restoredQty <= $reorder ? 'Low Stock' : 'Available / On Hand';
+
+                        DB::table('inventory_items')
+                            ->where('item_id', $sourceRow->item_id)
+                            ->update([
+                                'quantity_on_hand' => $restoredQty,
+                                'status'           => $restoredStatus,
+                                'last_updated'     => now(),
+                            ]);
+
+                        DB::table('inventory_items')->where('item_id', $item->item_id)->delete();
+                        $restoredToSource = true;
+
+                        $releasedSummary[] = [
+                            'item_id'    => $sourceRow->item_id,
+                            'item_name'  => $sourceRow->item_name,
+                            'source'     => 'on_hand',
+                            'new_status' => 'Available / On Hand',
+                        ];
+                    }
+                }
+
+                if (! $restoredToSource) {
+                    DB::table('inventory_items')
+                        ->where('item_id', $item->item_id)
+                        ->update([
+                            'status'                  => 'Available / On Hand',
+                            'is_warranty_reserved'    => false,
+                            'reservation_source'      => null,
+                            'reserved_for_ac_unit_id' => null,
+                            'reserved_for_serial'    => null,
+                            'reserved_for_unit_label' => null,
+                            'source_item_id'          => null,
+                            'warranty_start_date'     => null,
+                            'warranty_expiry_date'    => null,
+                            'last_updated'            => now(),
+                        ]);
+
+                    $releasedSummary[] = [
+                        'item_id'    => $item->item_id,
+                        'item_name'  => $item->item_name,
+                        'source'     => 'on_hand',
+                        'new_status' => 'Available / On Hand',
+                    ];
+                }
+            }
+        }
+
+        return $releasedSummary;
+    }
+
+    /**
+     * Synchronize all sold AC units' warranty statuses and automatically release
+     * reserved spare parts for any AC unit whose warranty has ended.
+     */
+    public function syncExpiredAcWarrantiesAndReleaseParts(): array
+    {
+        $this->ensureTablesExist();
+
+        if (! Schema::hasTable('ac_units_inventory')) {
+            return [
+                'active_warranties_count'  => 0,
+                'expired_warranties_count' => 0,
+                'reserved_parts_count'     => 0,
+                'units'                    => [],
+            ];
+        }
+
+        // Normalize any 'Installed' AC units to 'Sold' so they appear in Sold Units & Warranty Tracking
+        DB::table('ac_units_inventory')
+            ->where('status', 'Installed')
+            ->update(['status' => 'Sold', 'updated_at' => now()]);
+
+        $soldUnits = DB::table('ac_units_inventory')
+            ->where('status', 'Sold')
+            ->get();
+
+        $salesByUnitId = Schema::hasTable('inventory_sales')
+            ? DB::table('inventory_sales')->where('sale_type', 'ac_unit')->get()->keyBy('ac_unit_id')
+            : collect();
+
+        foreach ($soldUnits as $unit) {
+            $sale = $salesByUnitId->get($unit->ac_unit_id);
+            $warrantyMonths = max(1, (int) ($unit->warranty_period ?: 12));
+
+            $startDateStr = $unit->warranty_start_date
+                ?: ($sale?->warranty_start_date ?? null)
+                ?: ($unit->purchase_date ?: ($sale?->sold_at ? Carbon::parse($sale->sold_at)->toDateString() : now()->toDateString()));
+
+            $startDate = Carbon::parse($startDateStr)->startOfDay();
+            $expiryDate = $unit->warranty_expiry_date
+                ? Carbon::parse($unit->warranty_expiry_date)->startOfDay()
+                : (clone $startDate)->addMonths($warrantyMonths)->startOfDay();
+
+            $daysLeft = (int) now()->startOfDay()->diffInDays($expiryDate, false);
+            $computedStatus = $daysLeft < 0
+                ? 'Expired'
+                : ($daysLeft <= 30 ? 'Expiring Soon' : 'Active');
+
+            $customerName = $unit->customer_name ?: ($sale?->customer_name ?? 'Walk-in Customer');
+            $customerContact = $unit->customer_contact ?: ($sale?->customer_contact ?? null);
+
+            if ($unit->warranty_start_date !== $startDate->toDateString()
+                || $unit->warranty_expiry_date !== $expiryDate->toDateString()
+                || $unit->warranty_status !== $computedStatus
+                || empty($unit->customer_name)
+            ) {
+                DB::table('ac_units_inventory')
+                    ->where('ac_unit_id', $unit->ac_unit_id)
+                    ->update([
+                        'warranty_start_date'  => $startDate->toDateString(),
+                        'warranty_expiry_date' => $expiryDate->toDateString(),
+                        'warranty_status'      => $computedStatus,
+                        'customer_name'        => $customerName,
+                        'customer_contact'     => $customerContact,
+                        'sold_at'              => $unit->sold_at ?: ($sale?->sold_at ?? $unit->updated_at ?? now()),
+                    ]);
+            }
+
+            if ($daysLeft < 0) {
+                // Warranty ended -> release any reserved spare parts!
+                $this->releaseSparePartsForAcUnit((int) $unit->ac_unit_id, (string) $unit->serial_number);
+            } else {
+                // Active warranty -> ensure spare parts are reserved
+                $this->reserveSparePartsForAcUnitWarranty(
+                    $unit,
+                    $startDate->toDateString(),
+                    $expiryDate->toDateString()
+                );
+            }
+        }
+
+        // Also check any orphaned reserved spare parts whose warranty_expiry_date has passed
+        $expiredOrphanParts = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where(function ($q) {
+                $q->where('is_warranty_reserved', 1)
+                    ->orWhere('status', 'Warranty Reserved');
+            })
+            ->whereNotNull('warranty_expiry_date')
+            ->where('warranty_expiry_date', '<', now()->toDateString())
+            ->get();
+
+        foreach ($expiredOrphanParts as $orphan) {
+            if ($orphan->reserved_for_ac_unit_id) {
+                $this->releaseSparePartsForAcUnit((int) $orphan->reserved_for_ac_unit_id, $orphan->reserved_for_serial);
+            } else {
+                $newStatus = $orphan->reservation_source === 'order_base' ? 'Order Base' : 'Available / On Hand';
+                DB::table('inventory_items')
+                    ->where('item_id', $orphan->item_id)
+                    ->update([
+                        'status'                  => $newStatus,
+                        'is_warranty_reserved'    => false,
+                        'reservation_source'      => null,
+                        'reserved_for_ac_unit_id' => null,
+                        'reserved_for_serial'    => null,
+                        'reserved_for_unit_label' => null,
+                        'warranty_start_date'     => null,
+                        'warranty_expiry_date'    => null,
+                        'last_updated'            => now(),
+                    ]);
+            }
+        }
+
+        $refreshedSoldUnits = DB::table('ac_units_inventory')
+            ->where('status', 'Sold')
+            ->orderByDesc('warranty_expiry_date')
+            ->get();
+
+        $allReservedParts = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where(function ($q) {
+                $q->where('is_warranty_reserved', 1)
+                    ->orWhere('status', 'Warranty Reserved');
+            })
+            ->get();
+
+        $reservedByUnitId = $allReservedParts->groupBy('reserved_for_ac_unit_id');
+
+        $formattedUnits = $refreshedSoldUnits->map(function ($u) use ($reservedByUnitId) {
+            $start = $u->warranty_start_date ? Carbon::parse($u->warranty_start_date)->startOfDay() : Carbon::parse($u->purchase_date)->startOfDay();
+            $expiry = $u->warranty_expiry_date ? Carbon::parse($u->warranty_expiry_date)->startOfDay() : (clone $start)->addMonths(max(1, (int) $u->warranty_period));
+            $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
+            $totalDays = max(1, (int) $start->diffInDays($expiry));
+            $unitParts = collect($reservedByUnitId->get($u->ac_unit_id, []))->map(fn ($p) => [
+                'item_id'            => (int) $p->item_id,
+                'item_name'          => $p->item_name,
+                'sub_category'       => $p->sub_category ?: 'Spare Part',
+                'reservation_source' => $p->reservation_source ?: 'on_hand',
+                'source_label'       => ($p->reservation_source === 'order_base') ? 'Order Base Reserve' : 'On-Hand Reserve',
+                'status'             => $p->status,
+                'quantity'           => (int) $p->quantity_on_hand,
+            ])->values()->all();
+
+            return [
+                'ac_unit_id'                   => (int) $u->ac_unit_id,
+                'brand'                        => $u->brand,
+                'model'                        => $u->model,
+                'serial_number'                => $u->serial_number,
+                'ac_type'                      => $u->ac_type,
+                'horsepower'                   => (float) $u->horsepower,
+                'customer_name'                => $u->customer_name ?: 'Walk-in Customer',
+                'customer_contact'             => $u->customer_contact,
+                'warranty_period'              => (int) $u->warranty_period,
+                'warranty_start_date'          => $start->toDateString(),
+                'warranty_start_formatted'     => $start->format('M d, Y'),
+                'warranty_expiry_date'         => $expiry->toDateString(),
+                'warranty_expiry_formatted'    => $expiry->format('M d, Y'),
+                'days_left'                    => $daysLeft,
+                'total_days'                   => $totalDays,
+                'warranty_status'              => $daysLeft < 0 ? 'Expired' : ($daysLeft <= 30 ? 'Expiring Soon' : 'Active'),
+                'is_expired'                   => $daysLeft < 0,
+                'reserved_parts'               => $unitParts,
+            ];
+        })->values();
+
+        return [
+            'active_warranties_count'  => $formattedUnits->where('is_expired', false)->count(),
+            'expired_warranties_count' => $formattedUnits->where('is_expired', true)->count(),
+            'reserved_parts_count'     => $allReservedParts->count(),
+            'units'                    => $formattedUnits->all(),
+        ];
+    }
+
+    /**
+     * Company contact details shown when a serial number is not in records or for warranty support.
+     */
+    public function getCompanyWarrantyContactInfo(): array
+    {
+        return [
+            'company_name'     => 'Cooling Tower Airconditioning Service Company',
+            'mobile_number'    => '0917 877 7670',
+            'telephone_number' => '062 310-2275',
+            'facebook_page'    => 'Cooling Tower Airconditioning Service Company',
+            'facebook_url'     => 'https://www.facebook.com/share/19w3XmbCza/',
+            'email'            => 'support@coolingtoweraircon.ph',
+            'office_address'   => 'Cooling Tower HVAC Service Center, Metro Manila / Davao City',
+            'office_hours'     => 'Monday – Saturday, 8:00 AM – 6:00 PM',
+        ];
+    }
+
+    /**
+     * Track an AC unit warranty by Serial Number for the Customer Warranty Tracking portal.
+     */
+    public function trackWarrantyBySerialNumber(string $serialNumber): array
+    {
+        $this->ensureTablesExist();
+        $this->syncExpiredAcWarrantiesAndReleaseParts();
+
+        $cleanSerial = trim($serialNumber);
+        $contactInfo = $this->getCompanyWarrantyContactInfo();
+
+        if ($cleanSerial === '') {
+            return [
+                'found'         => false,
+                'serial_number' => '',
+                'message'       => 'Please enter a valid AC unit serial number.',
+                'contact_info'  => $contactInfo,
+            ];
+        }
+
+        $unit = DB::table('ac_units_inventory')
+            ->whereRaw('LOWER(TRIM(serial_number)) = ?', [strtolower($cleanSerial)])
+            ->first();
+
+        if (! $unit) {
+            return [
+                'found'         => false,
+                'serial_number' => $cleanSerial,
+                'message'       => "Serial Number \"{$cleanSerial}\" was not found in our AC unit inventory records.",
+                'contact_info'  => $contactInfo,
+            ];
+        }
+
+        $sale = Schema::hasTable('inventory_sales')
+            ? DB::table('inventory_sales')
+                ->where('sale_type', 'ac_unit')
+                ->where(function ($q) use ($unit, $cleanSerial) {
+                    $q->where('ac_unit_id', $unit->ac_unit_id)
+                        ->orWhereRaw('LOWER(TRIM(serial_number)) = ?', [strtolower($cleanSerial)]);
+                })
+                ->first()
+            : null;
+
+        $warrantyMonths = max(1, (int) ($unit->warranty_period ?: 12));
+        $startStr = $unit->warranty_start_date
+            ?: ($sale?->warranty_start_date ?? null)
+            ?: ($unit->purchase_date ?: now()->toDateString());
+
+        $startDate = Carbon::parse($startStr)->startOfDay();
+        $expiryDate = $unit->warranty_expiry_date
+            ? Carbon::parse($unit->warranty_expiry_date)->startOfDay()
+            : (clone $startDate)->addMonths($warrantyMonths)->startOfDay();
+
+        $today = now()->startOfDay();
+        $daysLeft = (int) $today->diffInDays($expiryDate, false);
+        $totalDays = max(1, (int) $startDate->diffInDays($expiryDate));
+        $daysElapsed = max(0, min($totalDays, (int) $startDate->diffInDays($today, false)));
+        $progressPercent = $daysLeft < 0
+            ? 0
+            : max(0, min(100, (int) round(($daysLeft / $totalDays) * 100)));
+
+        $isExpired = $daysLeft < 0;
+        $warrantyStatus = $isExpired
+            ? 'Expired'
+            : ($daysLeft <= 30 ? 'Expiring Soon' : 'Active');
+
+        // Format human-readable time left or time since ended
+        if ($isExpired) {
+            $endedDaysAgo = abs($daysLeft);
+            $timeLeftLabel = "Warranty Ended ({$endedDaysAgo} " . ($endedDaysAgo === 1 ? 'day' : 'days') . " ago)";
+        } else {
+            $monthsRemaining = intdiv($daysLeft, 30);
+            $remDays = $daysLeft % 30;
+            if ($monthsRemaining > 0) {
+                $timeLeftLabel = "{$monthsRemaining} " . ($monthsRemaining === 1 ? 'month' : 'months')
+                    . ($remDays > 0 ? ", {$remDays} " . ($remDays === 1 ? 'day' : 'days') : '')
+                    . " left ({$daysLeft} days)";
+            } else {
+                $timeLeftLabel = "{$daysLeft} " . ($daysLeft === 1 ? 'day' : 'days') . " left";
+            }
+        }
+
+        // If expired, make sure reserved spare parts are released
+        $releasedParts = [];
+        if ($isExpired) {
+            $releasedParts = $this->releaseSparePartsForAcUnit((int) $unit->ac_unit_id, (string) $unit->serial_number);
+        }
+
+        $reservedParts = DB::table('inventory_items')
+            ->where('item_type', 'Spare Part')
+            ->where('reserved_for_ac_unit_id', $unit->ac_unit_id)
+            ->where(function ($q) {
+                $q->where('is_warranty_reserved', 1)
+                    ->orWhere('status', 'Warranty Reserved');
+            })
+            ->get()
+            ->map(fn ($p) => [
+                'item_id'            => (int) $p->item_id,
+                'item_name'          => $p->item_name,
+                'sub_category'       => $p->sub_category ?: 'Spare Part',
+                'reservation_source' => $p->reservation_source ?: 'on_hand',
+                'source_label'       => ($p->reservation_source === 'order_base')
+                    ? 'Reserved in Order Base Spare Parts'
+                    : 'Reserved from On-Hand Spare Parts',
+                'status'             => $p->status,
+                'quantity'           => (int) $p->quantity_on_hand,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'found'         => true,
+            'serial_number' => $unit->serial_number,
+            'unit'          => [
+                'ac_unit_id'                => (int) $unit->ac_unit_id,
+                'brand'                     => $unit->brand,
+                'model'                     => $unit->model,
+                'serial_number'             => $unit->serial_number,
+                'ac_type'                   => $unit->ac_type,
+                'horsepower'                => (float) $unit->horsepower,
+                'refrigerant_type'          => $unit->refrigerant_type ?: 'R32',
+                'inventory_status'          => $unit->status,
+                'customer_name'             => $unit->customer_name ?: ($sale?->customer_name ?? 'Valued Customer'),
+                'customer_contact'          => $unit->customer_contact ?: ($sale?->customer_contact ?? null),
+                'warranty_period_months'    => $warrantyMonths,
+                'warranty_start_date'       => $startDate->toDateString(),
+                'warranty_start_formatted'  => $startDate->format('F d, Y'),
+                'warranty_expiry_date'      => $expiryDate->toDateString(),
+                'warranty_expiry_formatted' => $expiryDate->format('F d, Y'),
+                'days_left'                 => $daysLeft,
+                'total_days'                => $totalDays,
+                'days_elapsed'              => $daysElapsed,
+                'progress_percent'          => $progressPercent,
+                'time_left_label'           => $timeLeftLabel,
+                'warranty_status'           => $warrantyStatus,
+                'is_expired'                => $isExpired,
+                'reserved_parts'            => $reservedParts,
+                'released_parts'            => $releasedParts,
+            ],
+            'contact_info'  => $contactInfo,
         ];
     }
 

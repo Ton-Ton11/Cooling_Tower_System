@@ -599,6 +599,11 @@ Route::prefix('customer')
             Route::get('/complaints', 'complaintsIndex')->name('complaints.index');
             Route::post('/complaints', 'storeComplaint')->name('complaints.store');
         });
+
+        Route::controller(\App\Http\Controllers\Shared\ForecastingController::class)->group(function () {
+            Route::get('/warranty-tracking/context', 'customerWarrantyContext')->name('warranty.context');
+            Route::match(['get', 'post'], '/warranty-tracking/track', 'trackAcWarranty')->name('warranty.track');
+        });
     });
 
 // ══════════════════════════════════════════════════════════════════
@@ -612,6 +617,8 @@ Route::middleware(['auth', 'verified'])
         Route::post('/certifications', 'storeCertification')->name('certifications.store');
         Route::patch('/certifications/{certificationId}/renew', 'renewCertification')->name('certifications.renew');
         Route::post('/evaluate-reminders', 'triggerReminderEvaluation')->name('evaluate');
+        Route::match(['get', 'post'], '/warranty/track', 'trackAcWarranty')->name('warranty.track');
+        Route::post('/warranty/{acUnitId}/status', 'updateAcUnitWarrantyStatus')->name('warranty.status');
     });
 
 // ══════════════════════════════════════════════════════════════════
