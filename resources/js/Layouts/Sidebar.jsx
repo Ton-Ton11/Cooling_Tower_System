@@ -25,6 +25,8 @@ const ic = {
         "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2 M12 11a4 4 0 100-8 4 4 0 000 8z",
     materials:
         "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z",
+    checklists:
+        "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
     acunits: "M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z",
     sales: "M18 20V10 M12 20V4 M6 20v-6",
     documents:
@@ -44,6 +46,7 @@ const navItems = [
     { id: "teams", label: "Technician Teams", icon: ic.teams },
     { id: "staff", label: "Staff Accounts", icon: ic.staff },
     { id: "materials", label: "Materials & Tools", icon: ic.materials },
+    { id: "checklists", label: "Checklists & Dispatches", icon: ic.checklists },
     { id: "acunits", label: "AC Units Inventory", icon: ic.acunits },
     { id: "sales", label: "Sales & Records", icon: ic.sales },
     { id: "documents", label: "Documents / Forms", icon: ic.documents },

@@ -68,6 +68,13 @@ export default function AdminAssistantDashboardOverview({ onNavigate, dashboardD
             target: "announcements",
             badge: "Notice",
         },
+        {
+            id: 5,
+            title: "Manage For Sale catalog & pricing",
+            sub: "Review retail merchandise, set profit margins, and update stock",
+            target: "materials",
+            badge: "Catalog",
+        },
     ];
 
     const staffMembers = [

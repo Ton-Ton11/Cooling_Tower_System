@@ -4,6 +4,7 @@ namespace App\Http\Controllers\ToolsMan;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -14,26 +15,22 @@ class ToolsManInventoryController extends ToolsManBaseController
     {
         $this->authorizeRole($request);
 
-        $query = DB::table('inventory_items');
+        $query = DB::table('inventory_items')
+            ->where(function ($q) {
+                $q->where('inventory_mode', 'worker')
+                    ->orWhereNull('inventory_mode');
+            });
+
         if (! $request->boolean('include_archived', false)) {
             $query->where('is_archived', false);
         }
 
         $items = $query
-            ->orderBy('inventory_mode')
             ->orderBy('item_type')
             ->orderBy('item_name')
             ->get();
 
         $soldItems = [];
-        if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
-            $soldItems = DB::table('inventory_sales')
-                ->where('sale_type', 'tools_materials')
-                ->orderByDesc('sold_at')
-                ->orderByDesc('sale_id')
-                ->get()
-                ->values();
-        }
 
         return response()->json([
             'data' => $items->map(fn ($item) => $this->formatInventoryItem($item))->values(),
@@ -46,35 +43,38 @@ class ToolsManInventoryController extends ToolsManBaseController
         $this->authorizeRole($request);
 
         $validated = $request->validate([
-            'item_name'        => ['required', 'string', 'max:100'],
-            'item_type'        => ['required', Rule::in(self::INVENTORY_ITEM_TYPES)],
-            'inventory_mode'   => ['sometimes', Rule::in(self::INVENTORY_MODES)],
-            'tool_subtype'     => ['sometimes', 'nullable', Rule::in(self::TOOL_SUBTYPES)],
-            'folder_id'        => ['sometimes', 'nullable', 'integer'],
-            'sub_category'     => ['sometimes', 'nullable', 'string', 'max:100'],
+            'item_name' => ['required', 'string', 'max:100'],
+            'item_type' => ['required', Rule::in(self::INVENTORY_ITEM_TYPES)],
+            'inventory_mode' => ['sometimes', Rule::in(self::INVENTORY_MODES)],
+            'tool_subtype' => ['sometimes', 'nullable', Rule::in(self::TOOL_SUBTYPES)],
+            'folder_id' => ['sometimes', 'nullable', 'integer'],
+            'sub_category' => ['sometimes', 'nullable', 'string', 'max:100'],
             'compatible_brands' => ['sometimes', 'nullable'],
-            'serial_number'    => ['nullable', 'string', 'max:100', 'unique:inventory_items,serial_number'],
+            'serial_number' => ['nullable', 'string', 'max:100', 'unique:inventory_items,serial_number'],
             'quantity_on_hand' => ['required', 'integer', 'min:0'],
-            'initial_stock'    => ['sometimes', 'integer', 'min:0'],
-            'reorder_level'    => ['required', 'integer', 'min:0'],
-            'unit'             => ['required', 'string', 'max:20'],
-            'capital'          => ['sometimes', 'numeric', 'min:0'],
-            'profit'           => ['sometimes', 'numeric', 'min:0'],
-            'selling_price'    => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'supplier_name'    => ['nullable', 'string', 'max:150'],
-            'managed_by'       => ['nullable', 'string', 'max:150'],
-            'status'           => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'initial_stock' => ['sometimes', 'integer', 'min:0'],
+            'reorder_level' => ['required', 'integer', 'min:0'],
+            'unit' => ['required', 'string', 'max:20'],
+            'capital' => ['sometimes', 'numeric', 'min:0'],
+            'profit' => ['sometimes', 'numeric', 'min:0'],
+            'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'supplier_name' => ['nullable', 'string', 'max:150'],
+            'managed_by' => ['nullable', 'string', 'max:150'],
+            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
-        $validated['inventory_mode'] = $validated['inventory_mode'] ?? 'worker';
-        $validated['initial_stock']  = $validated['initial_stock'] ?? $validated['quantity_on_hand'];
-        $validated['capital']        = $validated['capital'] ?? 0;
-        $validated['profit']         = $validated['profit'] ?? 0;
-        $validated['status']         = $validated['status'] ?? 'Available';
-        $validated['managed_by']     = $validated['managed_by'] ?? ($request->user() ? ($request->user()->name ?? 'Tools Man') : null);
+        $validated['inventory_mode'] = 'worker';
+        if (! in_array($validated['item_type'], ['Tool', 'Material'], true)) {
+            $validated['item_type'] = 'Material';
+        }
+        $validated['initial_stock'] = $validated['initial_stock'] ?? $validated['quantity_on_hand'];
+        $validated['capital'] = $validated['capital'] ?? 0;
+        $validated['profit'] = $validated['profit'] ?? 0;
+        $validated['status'] = $validated['status'] ?? 'Available';
+        $validated['managed_by'] = $validated['managed_by'] ?? ($request->user() ? ($request->user()->name ?? 'Tools Man') : null);
 
         // Auto-resolve folder_id or sub_category
-        if (empty($validated['folder_id']) && !empty($validated['sub_category'])) {
+        if (empty($validated['folder_id']) && ! empty($validated['sub_category'])) {
             $fieldType = 'materials';
             if ($validated['inventory_mode'] === 'sale') {
                 $fieldType = 'sale_items';
@@ -88,7 +88,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             if ($matched) {
                 $validated['folder_id'] = $matched->id;
             }
-        } elseif (!empty($validated['folder_id']) && empty($validated['sub_category'])) {
+        } elseif (! empty($validated['folder_id']) && empty($validated['sub_category'])) {
             $matched = DB::table('inventory_folders')->where('id', $validated['folder_id'])->first();
             if ($matched) {
                 $validated['sub_category'] = $matched->name;
@@ -104,7 +104,7 @@ class ToolsManInventoryController extends ToolsManBaseController
         }
 
         $itemId = DB::table('inventory_items')->insertGetId(array_merge($validated, [
-            'created_at'   => now(),
+            'created_at' => now(),
             'last_updated' => now(),
         ]), 'item_id');
 
@@ -112,7 +112,7 @@ class ToolsManInventoryController extends ToolsManBaseController
 
         return response()->json([
             'message' => 'Inventory item created successfully.',
-            'data'    => $this->getInventoryItemById($itemId),
+            'data' => $this->getInventoryItemById($itemId),
         ], 201);
     }
 
@@ -121,28 +121,33 @@ class ToolsManInventoryController extends ToolsManBaseController
         $this->authorizeRole($request);
 
         $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
-        if (! $item) { abort(404); }
+        if (! $item) {
+            abort(404);
+        }
+        if ($item->inventory_mode === 'sale') {
+            abort(403, 'Tools Man can only manage worker inventory.');
+        }
 
         $validated = $request->validate([
-            'item_name'        => ['sometimes', 'string', 'max:100'],
-            'item_type'        => ['sometimes', Rule::in(self::INVENTORY_ITEM_TYPES)],
-            'inventory_mode'   => ['sometimes', Rule::in(self::INVENTORY_MODES)],
-            'tool_subtype'     => ['sometimes', 'nullable', Rule::in(self::TOOL_SUBTYPES)],
-            'folder_id'        => ['sometimes', 'nullable', 'integer'],
-            'sub_category'     => ['sometimes', 'nullable', 'string', 'max:100'],
+            'item_name' => ['sometimes', 'string', 'max:100'],
+            'item_type' => ['sometimes', Rule::in(self::INVENTORY_ITEM_TYPES)],
+            'inventory_mode' => ['sometimes', Rule::in(self::INVENTORY_MODES)],
+            'tool_subtype' => ['sometimes', 'nullable', Rule::in(self::TOOL_SUBTYPES)],
+            'folder_id' => ['sometimes', 'nullable', 'integer'],
+            'sub_category' => ['sometimes', 'nullable', 'string', 'max:100'],
             'compatible_brands' => ['sometimes', 'nullable'],
-            'serial_number'    => ['nullable', 'string', 'max:100', Rule::unique('inventory_items', 'serial_number')->ignore($itemId, 'item_id')],
+            'serial_number' => ['nullable', 'string', 'max:100', Rule::unique('inventory_items', 'serial_number')->ignore($itemId, 'item_id')],
             'quantity_on_hand' => ['sometimes', 'integer', 'min:0'],
-            'added_stock'      => ['sometimes', 'integer'],
-            'initial_stock'    => ['sometimes', 'integer', 'min:0'],
-            'reorder_level'    => ['sometimes', 'integer', 'min:0'],
-            'unit'             => ['sometimes', 'string', 'max:20'],
-            'capital'          => ['sometimes', 'numeric', 'min:0'],
-            'profit'           => ['sometimes', 'numeric', 'min:0'],
-            'selling_price'    => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'supplier_name'    => ['nullable', 'string', 'max:150'],
-            'managed_by'       => ['sometimes', 'nullable', 'string', 'max:150'],
-            'status'           => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'added_stock' => ['sometimes', 'integer'],
+            'initial_stock' => ['sometimes', 'integer', 'min:0'],
+            'reorder_level' => ['sometimes', 'integer', 'min:0'],
+            'unit' => ['sometimes', 'string', 'max:20'],
+            'capital' => ['sometimes', 'numeric', 'min:0'],
+            'profit' => ['sometimes', 'numeric', 'min:0'],
+            'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'supplier_name' => ['nullable', 'string', 'max:150'],
+            'managed_by' => ['sometimes', 'nullable', 'string', 'max:150'],
+            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
         // When stock is added via added_stock, automatically increment both quantity_on_hand and initial_stock
@@ -162,7 +167,7 @@ class ToolsManInventoryController extends ToolsManBaseController
         }
 
         // Auto-resolve folder_id or sub_category
-        if (empty($validated['folder_id']) && !empty($validated['sub_category'])) {
+        if (empty($validated['folder_id']) && ! empty($validated['sub_category'])) {
             $currentMode = $validated['inventory_mode'] ?? $item->inventory_mode ?? 'worker';
             $currentType = $validated['item_type'] ?? $item->item_type ?? 'Material';
             $currentSubtype = $validated['tool_subtype'] ?? $item->tool_subtype ?? 'hand';
@@ -180,7 +185,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             if ($matched) {
                 $validated['folder_id'] = $matched->id;
             }
-        } elseif (!empty($validated['folder_id']) && empty($validated['sub_category'])) {
+        } elseif (! empty($validated['folder_id']) && empty($validated['sub_category'])) {
             $matched = DB::table('inventory_folders')->where('id', $validated['folder_id'])->first();
             if ($matched) {
                 $validated['sub_category'] = $matched->name;
@@ -195,7 +200,7 @@ class ToolsManInventoryController extends ToolsManBaseController
 
         return response()->json([
             'message' => 'Inventory item updated successfully.',
-            'data'    => $this->getInventoryItemById($itemId),
+            'data' => $this->getInventoryItemById($itemId),
         ]);
     }
 
@@ -204,7 +209,12 @@ class ToolsManInventoryController extends ToolsManBaseController
         $this->authorizeRole($request);
 
         $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
-        if (! $item) { abort(404); }
+        if (! $item) {
+            abort(404);
+        }
+        if ($item->inventory_mode === 'sale') {
+            abort(403, 'Tools Man can only manage worker inventory.');
+        }
 
         DB::table('inventory_items')->where('item_id', $itemId)->update([
             'is_archived' => true,
@@ -216,7 +226,7 @@ class ToolsManInventoryController extends ToolsManBaseController
 
         return response()->json([
             'message' => sprintf('Inventory item "%s" has been archived.', $item->item_name),
-            'data'    => $this->getInventoryItemById($itemId),
+            'data' => $this->getInventoryItemById($itemId),
         ]);
     }
 
@@ -225,7 +235,12 @@ class ToolsManInventoryController extends ToolsManBaseController
         $this->authorizeRole($request);
 
         $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
-        if (! $item) { abort(404); }
+        if (! $item) {
+            abort(404);
+        }
+        if ($item->inventory_mode === 'sale') {
+            abort(403, 'Tools Man can only manage worker inventory.');
+        }
 
         DB::table('inventory_items')->where('item_id', $itemId)->update([
             'is_archived' => false,
@@ -237,7 +252,7 @@ class ToolsManInventoryController extends ToolsManBaseController
 
         return response()->json([
             'message' => sprintf('Inventory item "%s" has been restored.', $item->item_name),
-            'data'    => $this->getInventoryItemById($itemId),
+            'data' => $this->getInventoryItemById($itemId),
         ]);
     }
 
@@ -246,7 +261,12 @@ class ToolsManInventoryController extends ToolsManBaseController
         $this->authorizeRole($request);
 
         $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
-        if (! $item) { abort(404); }
+        if (! $item) {
+            abort(404);
+        }
+        if ($item->inventory_mode === 'sale') {
+            abort(403, 'Tools Man can only manage worker inventory.');
+        }
 
         DB::table('inventory_items')->where('item_id', $itemId)->update([
             'is_archived' => true,
@@ -279,7 +299,7 @@ class ToolsManInventoryController extends ToolsManBaseController
         }
 
         $qty = (int) $validated['quantity'];
-        $checkoutDate = ! empty($validated['checkout_date']) ? \Illuminate\Support\Carbon::parse($validated['checkout_date']) : now();
+        $checkoutDate = ! empty($validated['checkout_date']) ? Carbon::parse($validated['checkout_date']) : now();
         $logType = $validated['log_type'] ?? ($item->item_type === 'Material' ? 'material_usage' : 'borrow');
 
         if ($item->item_type === 'Tool' && $item->tool_subtype === 'power') {
@@ -366,7 +386,7 @@ class ToolsManInventoryController extends ToolsManBaseController
         }
 
         $qty = (int) ($validated['quantity'] ?? 1);
-        $returnDate = ! empty($validated['return_date']) ? \Illuminate\Support\Carbon::parse($validated['return_date']) : now();
+        $returnDate = ! empty($validated['return_date']) ? Carbon::parse($validated['return_date']) : now();
 
         if ($item->item_type === 'Tool' && $item->tool_subtype === 'power') {
             DB::table('inventory_items')->where('item_id', $item->item_id)->update([
@@ -467,7 +487,7 @@ class ToolsManInventoryController extends ToolsManBaseController
                     $status = 'Lost';
                 }
 
-                $clientName = trim(($row->client_given_name ?? '') . ' ' . ($row->client_last_name ?? ''));
+                $clientName = trim(($row->client_given_name ?? '').' '.($row->client_last_name ?? ''));
                 $description = $row->notes;
 
                 if (! empty($row->linked_checklist_id)) {
@@ -490,15 +510,15 @@ class ToolsManInventoryController extends ToolsManBaseController
                     }
 
                     if (! empty($row->checklist_team_name)) {
-                        $parts[] = 'Squad: ' . $row->checklist_team_name;
+                        $parts[] = 'Squad: '.$row->checklist_team_name;
                     }
 
                     $parts[] = $disposition;
 
                     if (! empty($row->checklist_item_notes)) {
-                        $parts[] = 'Item Note: ' . trim($row->checklist_item_notes);
+                        $parts[] = 'Item Note: '.trim($row->checklist_item_notes);
                     } elseif (! empty($row->checklist_notes)) {
-                        $parts[] = 'Checklist Note: ' . trim($row->checklist_notes);
+                        $parts[] = 'Checklist Note: '.trim($row->checklist_notes);
                     }
 
                     $description = implode(' • ', $parts);
@@ -570,7 +590,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             ->get(['user_id', 'given_name', 'middle_name', 'last_name', 'email', 'contact_number'])
             ->map(fn ($u) => [
                 'user_id' => $u->user_id,
-                'name' => trim("{$u->given_name} " . ($u->middle_name ? "{$u->middle_name} " : '') . "{$u->last_name}"),
+                'name' => trim("{$u->given_name} ".($u->middle_name ? "{$u->middle_name} " : '')."{$u->last_name}"),
                 'email' => $u->email,
                 'contact_number' => $u->contact_number,
             ]);
@@ -606,7 +626,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             ->get(['user_id', 'given_name', 'middle_name', 'last_name', 'email', 'contact_number'])
             ->map(fn ($u) => [
                 'user_id' => $u->user_id,
-                'name' => trim("{$u->given_name} " . ($u->middle_name ? "{$u->middle_name} " : '') . "{$u->last_name}"),
+                'name' => trim("{$u->given_name} ".($u->middle_name ? "{$u->middle_name} " : '')."{$u->last_name}"),
                 'email' => $u->email,
                 'contact_number' => $u->contact_number,
             ]);
@@ -620,134 +640,8 @@ class ToolsManInventoryController extends ToolsManBaseController
     {
         $this->authorizeRole($request);
 
-        $validated = $request->validate([
-            'client_id' => ['required', 'integer', Rule::exists('users', 'user_id')->where(fn ($q) => $q->where('role_id', 6))],
-            'quantity' => ['required', 'integer', 'min:1'],
-            'payment_method' => ['required', Rule::in(['Cash', 'GCash', 'Bank Transfer', 'Credit Card'])],
-            'unit_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-        ]);
-
-        $item = DB::table('inventory_items')->where('item_id', $itemId)->first();
-        if (! $item) {
-            abort(404, 'Inventory item not found.');
-        }
-
-        $qty = (int) $validated['quantity'];
-        if ((int) $item->quantity_on_hand < $qty) {
-            return response()->json([
-                'message' => "Insufficient stock. Only {$item->quantity_on_hand} available on hand.",
-            ], 422);
-        }
-
-        $customer = DB::table('users')->where('user_id', $validated['client_id'])->first();
-        $customerName = trim("{$customer->given_name} " . ($customer->middle_name ? "{$customer->middle_name} " : '') . "{$customer->last_name}");
-
-        $unitPrice = isset($validated['unit_price']) && $validated['unit_price'] !== null
-            ? (float) $validated['unit_price']
-            : ($item->selling_price !== null ? (float) $item->selling_price : ((float) $item->capital + (float) $item->profit));
-
-        $costPrice = (float) ($item->capital ?? 0);
-        $totalAmount = round($unitPrice * $qty, 2);
-        $totalProfit = round(($unitPrice - $costPrice) * $qty, 2);
-        $soldByUser = $request->user();
-        $soldByName = $soldByUser ? trim(($soldByUser->given_name ?? '') . ' ' . ($soldByUser->last_name ?? '')) : 'Tools Man';
-
-        [$bookingId, $saleRecord] = DB::transaction(function () use ($item, $qty, $customer, $unitPrice, $costPrice, $totalAmount, $totalProfit, $validated, $request, $customerName, $soldByUser, $soldByName) {
-            $serviceName = 'Retail Sale: ' . mb_substr($item->item_name, 0, 80);
-            $service = DB::table('services')->where('service_name', $serviceName)->first();
-            if (! $service) {
-                $serviceId = DB::table('services')->insertGetId([
-                    'service_name' => $serviceName,
-                    'description' => 'Retail sale of inventory item: ' . $item->item_name,
-                    'base_price' => $unitPrice,
-                ], 'service_id');
-            } else {
-                $serviceId = $service->service_id;
-            }
-
-            $bookingId = DB::table('bookings')->insertGetId([
-                'client_id' => $customer->user_id,
-                'service_id' => $serviceId,
-                'scheduled_date' => now(),
-                'booking_status' => 'Completed',
-                'notes' => "Retail Sale: {$qty}x {$item->item_name} ({$item->sub_category})",
-                'created_at' => now(),
-            ], 'booking_id');
-
-            $paymentId = DB::table('payment')->insertGetId([
-                'booking_id' => $bookingId,
-                'booking_price' => $totalAmount,
-                'unit_price' => $unitPrice,
-                'spare_parts_price' => 0.00,
-                'amount_paid' => $totalAmount,
-                'payment_status' => 'Paid',
-                'payment_method' => $validated['payment_method'],
-                'payment_date' => now(),
-            ], 'payment_id');
-
-            DB::table('booking_materials')->insert([
-                'booking_id' => $bookingId,
-                'item_id' => $item->item_id,
-                'quantity_used' => $qty,
-                'logged_at' => now(),
-            ]);
-
-            $saleRecord = null;
-            if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
-                $saleId = DB::table('inventory_sales')->insertGetId([
-                    'booking_id' => $bookingId,
-                    'payment_id' => $paymentId,
-                    'sale_type' => 'tools_materials',
-                    'item_id' => $item->item_id,
-                    'item_name' => $item->item_name,
-                    'serial_number' => $item->serial_number ?? null,
-                    'sub_category' => $item->sub_category ?: 'General',
-                    'item_type' => $item->item_type ?: 'Material',
-                    'quantity' => $qty,
-                    'unit' => $item->unit ?: 'pcs',
-                    'cost_price' => $costPrice,
-                    'unit_price' => $unitPrice,
-                    'total_amount' => $totalAmount,
-                    'profit' => $totalProfit,
-                    'payment_method' => $validated['payment_method'],
-                    'payment_status' => 'Paid',
-                    'client_id' => $customer->user_id,
-                    'customer_name' => $customerName,
-                    'customer_contact' => $customer->contact_number ?? null,
-                    'customer_address' => $customer->address ?? null,
-                    'sold_by' => $soldByUser?->user_id,
-                    'sold_by_name' => $soldByName ?: 'Tools Man',
-                    'notes' => "Retail Sale of {$qty} {$item->unit} × {$item->item_name}",
-                    'sold_at' => now(),
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ], 'sale_id');
-
-                $saleRecord = DB::table('inventory_sales')->where('sale_id', $saleId)->first();
-            }
-
-            $newOnHand = max(0, (int) $item->quantity_on_hand - $qty);
-            DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                'quantity_on_hand' => $newOnHand,
-                'last_updated' => now(),
-            ]);
-
-            $this->logActivity(
-                (int) $request->user()->user_id,
-                'SALE',
-                sprintf('Sold %dx %s to customer %s for ₱%s via %s.', $qty, $item->item_name, $customerName, number_format($totalAmount, 2), $validated['payment_method'])
-            );
-
-            return [$bookingId, $saleRecord];
-        });
-
         return response()->json([
-            'message' => "Sold {$qty}x {$item->item_name} to {$customerName} for ₱" . number_format($totalAmount, 2) . " ({$validated['payment_method']}).",
-            'booking_id' => $bookingId,
-            'amount_paid' => $totalAmount,
-            'customer_name' => $customerName,
-            'sold_record' => $saleRecord,
-            'data' => $this->getInventoryItemById($item->item_id),
-        ]);
+            'message' => 'Tools Man cannot sell inventory items. For-sale items are managed exclusively by Admin Assistant and Super Admin.',
+        ], 403);
     }
 }

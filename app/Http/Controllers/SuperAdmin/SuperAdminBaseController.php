@@ -33,7 +33,7 @@ abstract class SuperAdminBaseController extends Controller
 
     protected const AC_TYPES = ['Window', 'Split', 'Cassette', 'Floor Mounted', 'Ceiling Suspended'];
 
-    protected const AC_STATUSES = ['Available', 'Reserved', 'Sold', 'Order Base', 'Defect'];
+    protected const AC_STATUSES = ['Available', 'Reserved', 'Sold', 'Order Base', 'Defect', 'Archived'];
 
     protected const DOCUMENT_STATUSES = ['Draft', 'Exported', 'Finalized'];
 

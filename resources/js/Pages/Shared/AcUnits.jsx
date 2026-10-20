@@ -96,6 +96,155 @@ function SearchBar({ value, onChange, placeholder }) {
     );
 }
 
+// Brand Kebab Menu Component (Three dots action menu)
+function BrandKebabMenu({ onEdit, onDelete, isOpen, onToggle, onClose }) {
+    const menuRef = useRef(null);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleDocClick = (e) => {
+            if (menuRef.current && !menuRef.current.contains(e.target)) {
+                onClose();
+            }
+        };
+        document.addEventListener('mousedown', handleDocClick);
+        return () => document.removeEventListener('mousedown', handleDocClick);
+    }, [isOpen, onClose]);
+
+    return (
+        <div ref={menuRef} style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+            <button
+                type="button"
+                onClick={e => {
+                    e.stopPropagation();
+                    onToggle();
+                }}
+                title="Brand options"
+                aria-label="Brand options"
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    borderRadius: 7,
+                    border: '1px solid',
+                    borderColor: isOpen ? '#93C5FD' : '#E2E8F0',
+                    background: isOpen ? '#EFF6FF' : '#FFFFFF',
+                    color: isOpen ? '#1D4ED8' : '#64748B',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                }}
+                onMouseEnter={e => {
+                    if (!isOpen) {
+                        e.currentTarget.style.background = '#F8FAFC';
+                        e.currentTarget.style.borderColor = '#CBD5E1';
+                        e.currentTarget.style.color = '#0F172A';
+                    }
+                }}
+                onMouseLeave={e => {
+                    if (!isOpen) {
+                        e.currentTarget.style.background = '#FFFFFF';
+                        e.currentTarget.style.borderColor = '#E2E8F0';
+                        e.currentTarget.style.color = '#64748B';
+                    }
+                }}
+            >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="5" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="12" cy="19" r="2" />
+                </svg>
+            </button>
+
+            {isOpen && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 4px)',
+                        right: 0,
+                        width: 130,
+                        background: '#FFFFFF',
+                        borderRadius: 8,
+                        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08)',
+                        border: '1px solid #E2E8F0',
+                        padding: 4,
+                        zIndex: 60,
+                    }}
+                >
+                    <button
+                        type="button"
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '7px 10px',
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: '#334155',
+                            borderRadius: 6,
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'background 0.12s ease',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#F1F5F9'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        onClick={e => {
+                            e.stopPropagation();
+                            onClose();
+                            onEdit();
+                        }}
+                    >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                        </svg>
+                        Edit
+                    </button>
+                    <button
+                        type="button"
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '7px 10px',
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: '#DC2626',
+                            borderRadius: 6,
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'background 0.12s ease',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#FEF2F2'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        onClick={e => {
+                            e.stopPropagation();
+                            onClose();
+                            onDelete();
+                        }}
+                    >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
+                        Remove
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
 // Form templates
 const createEmptyForm = (defaultBrand = '', defaultType = '') => ({
     brand: defaultBrand,
@@ -329,6 +478,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
     const [editBrandTarget, setEditBrandTarget] = useState(null);
     const [editBrandForm, setEditBrandForm] = useState({ name: '', country_of_origin: '', description: '' });
     const [deleteBrandTarget, setDeleteBrandTarget] = useState(null);
+    const [openBrandMenu, setOpenBrandMenu] = useState(null);
     const [savingBrand, setSavingBrand] = useState(false);
     const [deletingBrand, setDeletingBrand] = useState(false);
 
@@ -361,6 +511,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
     const [confirmEditUnit, setConfirmEditUnit] = useState(false);
     const [deleteUnitTarget, setDeleteUnitTarget] = useState(null);
     const [deletingUnit, setDeletingUnit] = useState(false);
+    const [archiveUnitTarget, setArchiveUnitTarget] = useState(null);
+    const [archivingUnit, setArchivingUnit] = useState(false);
 
     // AC Unit Sold action states
     const [soldModal, setSoldModal] = useState(null);
@@ -511,10 +663,16 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         return Array.from(brandMap.values());
     }, [brands, parts]);
 
-    // Available Categories for AC Units
+    // Available Active Categories for AC Units
     const allCategories = useMemo(() => {
+        if (unitTypes.length > 0) return unitTypes.filter(c => c.is_active !== false && c.is_active !== 0);
+        return AC_TYPE_OPTIONS.map((t, idx) => ({ id: idx + 1, name: t, code: t, description: `${t} airconditioners`, is_active: true }));
+    }, [unitTypes]);
+
+    // All categories including archived (for Manage Categories modal)
+    const allCategoriesWithArchived = useMemo(() => {
         if (unitTypes.length > 0) return unitTypes;
-        return AC_TYPE_OPTIONS.map((t, idx) => ({ id: idx + 1, name: t, code: t, description: `${t} airconditioners` }));
+        return AC_TYPE_OPTIONS.map((t, idx) => ({ id: idx + 1, name: t, code: t, description: `${t} airconditioners`, is_active: true }));
     }, [unitTypes]);
 
     // Available Categories for Spare Parts
@@ -582,16 +740,25 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         });
     }, [allPartBrandCards, partCardSearch]);
 
-    // AC units under selected brand in active tab
+    // AC units under selected brand in active tab (excluding archived units)
     const activeBrandUnits = useMemo(() => {
-        if (!selectedBrand) return currentTabUnits;
-        return currentTabUnits.filter(u => (u.brand || '').toLowerCase() === selectedBrand.toLowerCase());
+        const base = selectedBrand
+            ? currentTabUnits.filter(u => (u.brand || '').toLowerCase() === selectedBrand.toLowerCase())
+            : currentTabUnits;
+        return base.filter(u => u.status !== 'Archived');
     }, [currentTabUnits, selectedBrand]);
+
+    // Archived units under selected brand
+    const archivedBrandUnits = useMemo(() => {
+        if (!selectedBrand) return units.filter(u => u.status === 'Archived');
+        return units.filter(u => (u.brand || '').toLowerCase() === selectedBrand.toLowerCase() && u.status === 'Archived');
+    }, [units, selectedBrand]);
 
     // Filtered AC units by category and search
     const filteredBrandUnits = useMemo(() => {
-        return activeBrandUnits.filter(u => {
-            if (selectedCategory !== 'all') {
+        const sourceUnits = selectedCategory === 'archived' ? archivedBrandUnits : activeBrandUnits;
+        return sourceUnits.filter(u => {
+            if (selectedCategory !== 'all' && selectedCategory !== 'archived') {
                 const matchName = (u.ac_type || '').toLowerCase() === selectedCategory.toLowerCase();
                 const matchedTypeObj = allCategories.find(c => c.name.toLowerCase() === selectedCategory.toLowerCase());
                 const matchCode = matchedTypeObj && matchedTypeObj.code && (u.ac_type || '').toLowerCase() === matchedTypeObj.code.toLowerCase();
@@ -608,7 +775,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             }
             return true;
         });
-    }, [activeBrandUnits, selectedCategory, unitTableSearch, allCategories]);
+    }, [activeBrandUnits, archivedBrandUnits, selectedCategory, unitTableSearch, allCategories]);
 
     // Spare parts under selected brand in active sub-tab
     const activeBrandParts = useMemo(() => {
@@ -651,6 +818,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
     // Tab change handlers
     const handleTabChange = (tabKey) => {
+        setOpenBrandMenu(null);
         setMainTab(tabKey);
         setSelectedBrand(null);
         setSelectedCategory('all');
@@ -659,6 +827,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
     };
 
     const handlePartSubTabChange = (subKey) => {
+        setOpenBrandMenu(null);
         setPartSubTab(subKey);
         setSelectedPartBrand(null);
         setSelectedPartCategory('all');
@@ -734,13 +903,29 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
     const handleDeleteBrand = async () => {
         if (!deleteBrandTarget) return;
+
+        // Check if any AC units exist under this brand
+        const unitsWithBrand = units.filter(u => (u.brand || '').toLowerCase() === deleteBrandTarget.name.toLowerCase()).length;
+        // Check if any spare parts exist under this brand
+        const partsWithBrand = parts.filter(p => {
+            const brandsStr = Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || '');
+            return brandsStr.toLowerCase().includes(deleteBrandTarget.name.toLowerCase());
+        }).length;
+
+        const totalItems = unitsWithBrand + partsWithBrand;
+        if (totalItems > 0) {
+            addToast(`Cannot remove brand "${deleteBrandTarget.name}" because ${totalItems} item(s) exist under it. Reassign or delete them first.`, "error");
+            setDeleteBrandTarget(null);
+            return;
+        }
+
         setDeletingBrand(true);
         try {
             if (deleteBrandTarget.id) {
                 const deleteUrl = ep.deleteBrand ? ep.deleteBrand(deleteBrandTarget.id) : `/super-admin/catalog/brands/${deleteBrandTarget.id}`;
                 await window.axios.delete(deleteUrl);
             }
-            addToast(`Brand "${deleteBrandTarget.name}" deleted.`);
+            addToast(`Brand "${deleteBrandTarget.name}" removed successfully.`);
             if (selectedBrand === deleteBrandTarget.name) {
                 setSelectedBrand(null);
             }
@@ -752,7 +937,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             await fetchUnits(false);
             await fetchParts();
         } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to delete brand."), "error");
+            addToast(extractErrorMessage(error, "Unable to remove brand."), "error");
         } finally {
             setDeletingBrand(false);
         }
@@ -814,11 +999,25 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
     const handleDeleteCategory = async () => {
         if (!deleteCategoryTarget) return;
+
+        // Check if any AC units exist under this category
+        const unitsWithCategory = units.filter(u => {
+            const matchName = (u.ac_type || '').toLowerCase() === deleteCategoryTarget.name.toLowerCase();
+            const matchCode = deleteCategoryTarget.code && (u.ac_type || '').toLowerCase() === deleteCategoryTarget.code.toLowerCase();
+            return matchName || matchCode;
+        }).length;
+
+        if (unitsWithCategory > 0) {
+            addToast(`Cannot remove category "${deleteCategoryTarget.name}" because ${unitsWithCategory} AC unit(s) exist under it. Reassign or delete them first.`, "error");
+            setDeleteCategoryTarget(null);
+            return;
+        }
+
         setDeletingCategory(true);
         try {
             const deleteUrl = ep.deleteUnitType ? ep.deleteUnitType(deleteCategoryTarget.id) : `/super-admin/catalog/unit-types/${deleteCategoryTarget.id}`;
             await window.axios.delete(deleteUrl);
-            addToast(`Category "${deleteCategoryTarget.name}" deleted.`);
+            addToast(`Category "${deleteCategoryTarget.name}" removed successfully.`);
             if (selectedCategory === deleteCategoryTarget.name || selectedCategory === deleteCategoryTarget.code) {
                 setSelectedCategory('all');
             }
@@ -826,9 +1025,22 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             await fetchCatalog();
             await fetchUnits(false);
         } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to delete category."), "error");
+            addToast(extractErrorMessage(error, "Unable to remove category."), "error");
         } finally {
             setDeletingCategory(false);
+        }
+    };
+
+    const handleRestoreCategory = async (cat) => {
+        if (!cat) return;
+        try {
+            const restoreUrl = ep.restoreUnitType ? ep.restoreUnitType(cat.id) : `/super-admin/catalog/unit-types/${cat.id}/restore`;
+            await window.axios.patch(restoreUrl);
+            addToast(`Category "${cat.name}" restored successfully.`);
+            await fetchCatalog();
+            await fetchUnits(false);
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to restore category."), "error");
         }
     };
 
@@ -886,18 +1098,33 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
     const handleDeletePartCategory = async () => {
         if (!deletePartCategoryTarget) return;
+
+        // Check if any spare parts exist under this category
+        const partsWithCat = parts.filter(p => {
+            const cat = p.sub_category || p.category || '';
+            const matchCat = cat.toLowerCase() === deletePartCategoryTarget.name.toLowerCase();
+            const matchName = (p.part_name || p.item_name || '').toLowerCase().includes(deletePartCategoryTarget.name.toLowerCase());
+            return matchCat || matchName;
+        }).length;
+
+        if (partsWithCat > 0) {
+            addToast(`Cannot remove category "${deletePartCategoryTarget.name}" because ${partsWithCat} spare part(s) exist under it. Reassign or delete them first.`, "error");
+            setDeletePartCategoryTarget(null);
+            return;
+        }
+
         setDeletingPartCategory(true);
         try {
             const deleteUrl = ep.deleteInventoryFolder ? ep.deleteInventoryFolder(deletePartCategoryTarget.id) : `/super-admin/inventory/folders/${deletePartCategoryTarget.id}`;
             await window.axios.delete(deleteUrl);
-            addToast(`Category "${deletePartCategoryTarget.name}" deleted.`);
+            addToast(`Category "${deletePartCategoryTarget.name}" removed successfully.`);
             if (selectedPartCategory === deletePartCategoryTarget.name) {
                 setSelectedPartCategory('all');
             }
             setDeletePartCategoryTarget(null);
             await fetchParts();
         } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to delete category."), "error");
+            addToast(extractErrorMessage(error, "Unable to remove category."), "error");
         } finally {
             setDeletingPartCategory(false);
         }
@@ -985,6 +1212,40 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             addToast(extractErrorMessage(error, "Unable to delete AC unit."), "error");
         } finally {
             setDeletingUnit(false);
+        }
+    };
+
+    const handleArchiveUnit = async () => {
+        if (!archiveUnitTarget || archivingUnit) return;
+        setArchivingUnit(true);
+        try {
+            await window.axios.patch(ep.updateAcUnit(archiveUnitTarget.ac_unit_id), {
+                status: 'Archived',
+            });
+            addToast(`AC unit "${archiveUnitTarget.brand} ${archiveUnitTarget.model}" (${archiveUnitTarget.serial_number}) archived successfully.`);
+            setArchiveUnitTarget(null);
+            setEditUnitTarget(null);
+            await fetchUnits(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to archive AC unit."), "error");
+        } finally {
+            setArchivingUnit(false);
+        }
+    };
+
+    const handleRestoreUnit = async (unit) => {
+        if (!unit) return;
+        try {
+            await window.axios.patch(ep.updateAcUnit(unit.ac_unit_id), {
+                status: 'Available',
+            });
+            addToast(`AC unit "${unit.brand} ${unit.model}" restored to Available.`);
+            setEditUnitTarget(null);
+            await fetchUnits(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to restore AC unit."), "error");
         }
     };
 
@@ -1283,6 +1544,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             await window.axios.delete(deleteUrl);
             addToast(`Spare part "${deletePartTarget.part_name || deletePartTarget.item_name}" deleted.`);
             setDeletePartTarget(null);
+            setEditPartTarget(null);
             await fetchParts();
             onDataChanged?.();
         } catch (error) {
@@ -1961,6 +2223,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         <div
                                             key={brand.name}
                                             onClick={() => {
+                                                setOpenBrandMenu(null);
                                                 setSelectedBrand(brand.name);
                                                 setSelectedCategory('all');
                                             }}
@@ -1975,6 +2238,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                 display: 'flex',
                                                 flexDirection: 'column',
                                                 justifyContent: 'space-between',
+                                                position: 'relative',
+                                                zIndex: openBrandMenu === `ac-${brand.name}` ? 30 : 1,
                                             }}
                                             onMouseEnter={e => {
                                                 e.currentTarget.style.transform = 'translateY(-3px)';
@@ -1999,31 +2264,22 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    {/* Edit / Delete Brand only visible in main Brands tab */}
+                                                    {/* Kebab Menu for Brand Actions only visible in main Brands tab */}
                                                     {mainTab === 'brands' && (
-                                                        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                                                            <button
-                                                                className="btn-secondary"
-                                                                style={{ padding: '3px 8px', fontSize: 11, borderRadius: 6 }}
-                                                                title="Edit Brand"
-                                                                onClick={() => {
-                                                                    setEditBrandTarget(brand);
-                                                                    setEditBrandForm({
-                                                                        name: brand.name,
-                                                                        country_of_origin: brand.country_of_origin || '',
-                                                                        description: brand.description || '',
-                                                                    });
-                                                                }}>
-                                                                Edit
-                                                            </button>
-                                                            <button
-                                                                className="btn-danger"
-                                                                style={{ padding: '3px 7px', fontSize: 11, borderRadius: 6 }}
-                                                                title="Delete Brand"
-                                                                onClick={() => setDeleteBrandTarget(brand)}>
-                                                                Delete
-                                                            </button>
-                                                        </div>
+                                                        <BrandKebabMenu
+                                                            isOpen={openBrandMenu === `ac-${brand.name}`}
+                                                            onToggle={() => setOpenBrandMenu(p => p === `ac-${brand.name}` ? null : `ac-${brand.name}`)}
+                                                            onClose={() => setOpenBrandMenu(null)}
+                                                            onEdit={() => {
+                                                                setEditBrandTarget(brand);
+                                                                setEditBrandForm({
+                                                                    name: brand.name,
+                                                                    country_of_origin: brand.country_of_origin || '',
+                                                                    description: brand.description || '',
+                                                                });
+                                                            }}
+                                                            onDelete={() => setDeleteBrandTarget(brand)}
+                                                        />
                                                     )}
                                                 </div>
 
@@ -2157,6 +2413,21 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                             </button>
                                         );
                                     })}
+
+                                    {/* Archived Category Filter */}
+                                    <button
+                                        onClick={() => setSelectedCategory('archived')}
+                                        style={{
+                                            padding: '6px 14px', borderRadius: 20, border: '1px solid', cursor: 'pointer',
+                                            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                                            borderColor: selectedCategory === 'archived' ? '#D97706' : '#FDE68A',
+                                            background: selectedCategory === 'archived' ? '#D97706' : '#FFFBEB',
+                                            color: selectedCategory === 'archived' ? '#FFFFFF' : '#B45309',
+                                            boxShadow: selectedCategory === 'archived' ? '0 2px 8px rgba(217,119,6,0.25)' : 'none',
+                                            transition: 'all 0.15s ease',
+                                        }}>
+                                        📦 Archived <span style={{ opacity: 0.9, fontSize: 11, marginLeft: 4 }}>({archivedBrandUnits.length})</span>
+                                    </button>
                                 </div>
                             </div>
 
@@ -2166,7 +2437,11 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                     <div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
-                                                {selectedCategory === 'all' ? `All ${selectedBrand} Units` : `${selectedBrand} — ${selectedCategory}`}
+                                                {selectedCategory === 'all'
+                                                    ? `All ${selectedBrand} Units`
+                                                    : selectedCategory === 'archived'
+                                                    ? `${selectedBrand} — Archived Units`
+                                                    : `${selectedBrand} — ${selectedCategory}`}
                                             </p>
                                             {selectedCategory !== 'all' && (
                                                 <button
@@ -2214,15 +2489,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                             {filteredBrandUnits.length === 0 ? (
                                                 <tr>
                                                     <td colSpan={12} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
-                                                        No AC units found for {selectedBrand} {selectedCategory !== 'all' ? `in "${selectedCategory}"` : ''}.
-                                                        <div style={{ marginTop: 10 }}>
-                                                            <button
-                                                                className="btn-primary"
-                                                                style={{ fontSize: 12, padding: '5px 12px' }}
-                                                                onClick={() => handleOpenAddUnit(selectedBrand, selectedCategory !== 'all' ? selectedCategory : null)}>
-                                                                + Add AC Unit Here
-                                                            </button>
-                                                        </div>
+                                                        {selectedCategory === 'archived'
+                                                            ? `No archived AC units found for ${selectedBrand}.`
+                                                            : `No AC units found for ${selectedBrand} ${selectedCategory !== 'all' ? `in "${selectedCategory}"` : ''}.`}
+                                                        {selectedCategory !== 'archived' && (
+                                                            <div style={{ marginTop: 10 }}>
+                                                                <button
+                                                                    className="btn-primary"
+                                                                    style={{ fontSize: 12, padding: '5px 12px' }}
+                                                                    onClick={() => handleOpenAddUnit(selectedBrand, selectedCategory !== 'all' ? selectedCategory : null)}>
+                                                                    + Add AC Unit Here
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ) : filteredBrandUnits.map(u => (
@@ -2324,14 +2603,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                                 }}>
                                                                 Manage
                                                             </button>
-                                                            <button
-                                                                className="btn-danger"
-                                                                style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                onClick={() => setDeleteUnitTarget(u)}>
-                                                                Delete
-                                                            </button>
-                                                        </div>
-                                                    </td>
+                                                            </div>
+                                                        </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -2548,6 +2821,7 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         <div
                                             key={brand.name}
                                             onClick={() => {
+                                                setOpenBrandMenu(null);
                                                 setSelectedPartBrand(brand.name);
                                                 setSelectedPartCategory('all');
                                             }}
@@ -2562,6 +2836,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                 display: 'flex',
                                                 flexDirection: 'column',
                                                 justifyContent: 'space-between',
+                                                position: 'relative',
+                                                zIndex: openBrandMenu === `part-${brand.name}` ? 30 : 1,
                                             }}
                                             onMouseEnter={e => {
                                                 e.currentTarget.style.transform = 'translateY(-3px)';
@@ -2586,31 +2862,22 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    {/* Edit / Delete Brand only visible in in_stock subtab and if it is not Universal */}
+                                                    {/* Kebab Menu for Brand Actions only visible in in_stock subtab and if it is not Universal */}
                                                     {partSubTab === 'in_stock' && brand.name.toLowerCase() !== 'universal' && (
-                                                        <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                                                            <button
-                                                                className="btn-secondary"
-                                                                style={{ padding: '3px 8px', fontSize: 11, borderRadius: 6 }}
-                                                                title="Edit Brand"
-                                                                onClick={() => {
-                                                                    setEditBrandTarget(brand);
-                                                                    setEditBrandForm({
-                                                                        name: brand.name,
-                                                                        country_of_origin: brand.country_of_origin || '',
-                                                                        description: brand.description || '',
-                                                                    });
-                                                                }}>
-                                                                Edit
-                                                            </button>
-                                                            <button
-                                                                className="btn-danger"
-                                                                style={{ padding: '3px 7px', fontSize: 11, borderRadius: 6 }}
-                                                                title="Delete Brand"
-                                                                onClick={() => setDeleteBrandTarget(brand)}>
-                                                                Delete
-                                                            </button>
-                                                        </div>
+                                                        <BrandKebabMenu
+                                                            isOpen={openBrandMenu === `part-${brand.name}`}
+                                                            onToggle={() => setOpenBrandMenu(p => p === `part-${brand.name}` ? null : `part-${brand.name}`)}
+                                                            onClose={() => setOpenBrandMenu(null)}
+                                                            onEdit={() => {
+                                                                setEditBrandTarget(brand);
+                                                                setEditBrandForm({
+                                                                    name: brand.name,
+                                                                    country_of_origin: brand.country_of_origin || '',
+                                                                    description: brand.description || '',
+                                                                });
+                                                            }}
+                                                            onDelete={() => setDeleteBrandTarget(brand)}
+                                                        />
                                                     )}
                                                 </div>
 
@@ -3006,13 +3273,35 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 </form>
             ))}
 
-            {/* Delete Brand Modal */}
+            {/* Remove Brand Modal */}
             <Modal
                 open={!!deleteBrandTarget}
-                title="Delete Brand?"
-                message={`Are you sure you want to delete "${deleteBrandTarget?.name}"? Any AC units and spare parts under this brand will remain safely recorded.`}
-                confirmLabel={deletingBrand ? "Deleting..." : "Yes, Delete Brand"}
-                confirmDisabled={deletingBrand}
+                title="Remove Brand?"
+                message={(() => {
+                    const unitsCount = units.filter(u => (u.brand || '').toLowerCase() === deleteBrandTarget?.name?.toLowerCase()).length;
+                    const partsCount = parts.filter(p => {
+                        const brandsStr = Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || '');
+                        return brandsStr.toLowerCase().includes(deleteBrandTarget?.name?.toLowerCase() || '');
+                    }).length;
+                    const total = unitsCount + partsCount;
+
+                    if (total > 0) {
+                        const details = [];
+                        if (unitsCount > 0) details.push(`${unitsCount} AC unit(s)`);
+                        if (partsCount > 0) details.push(`${partsCount} spare part(s)`);
+                        return `Cannot remove brand "${deleteBrandTarget?.name}" because ${details.join(' and ')} currently exist under it. Please reassign or delete these items first.`;
+                    }
+                    return `Are you sure you want to remove the brand "${deleteBrandTarget?.name}"? It currently has no units or parts assigned to it and will be deleted.`;
+                })()}
+                confirmLabel={deletingBrand ? "Removing..." : "Yes, Remove Brand"}
+                confirmDisabled={deletingBrand || (() => {
+                    const unitsCount = units.filter(u => (u.brand || '').toLowerCase() === deleteBrandTarget?.name?.toLowerCase()).length;
+                    const partsCount = parts.filter(p => {
+                        const brandsStr = Array.isArray(p.compatible_brands) ? p.compatible_brands.join(', ') : (p.compatible_brands || '');
+                        return brandsStr.toLowerCase().includes(deleteBrandTarget?.name?.toLowerCase() || '');
+                    }).length;
+                    return (unitsCount + partsCount) > 0;
+                })()}
                 variant="danger"
                 onConfirm={handleDeleteBrand}
                 onCancel={() => !deletingBrand && setDeleteBrandTarget(null)}
@@ -3094,12 +3383,20 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                     ) : null}
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
-                        {allCategories.map(cat => {
+                        {allCategoriesWithArchived.map(cat => {
+                            const isArchived = cat.is_active === false || cat.is_active === 0;
                             const count = units.filter(u => (u.ac_type || '').toLowerCase() === cat.name.toLowerCase() || (cat.code && (u.ac_type || '').toLowerCase() === cat.code.toLowerCase())).length;
                             return (
-                                <div key={cat.id || cat.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0' }}>
+                                <div key={cat.id || cat.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: isArchived ? '#F8FAFC' : '#FFFFFF', borderRadius: 10, border: '1px solid #E2E8F0', opacity: isArchived ? 0.75 : 1 }}>
                                     <div>
-                                        <p style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', margin: 0 }}>{cat.name}</p>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <p style={{ fontSize: 13, fontWeight: 600, color: '#0F172A', margin: 0 }}>{cat.name}</p>
+                                            {isArchived && (
+                                                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: '#E2E8F0', color: '#64748B' }}>
+                                                    Archived
+                                                </span>
+                                            )}
+                                        </div>
                                         <p style={{ fontSize: 11, color: '#64748B', margin: '2px 0 0' }}>{cat.description || 'No description'} · <strong style={{ color: '#2563EB' }}>{count} units in inventory</strong></p>
                                     </div>
                                     <div style={{ display: 'flex', gap: 6 }}>
@@ -3114,9 +3411,10 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         </button>
                                         <button
                                             className="btn-danger"
-                                            style={{ padding: '4px 8px', fontSize: 11 }}
+                                            style={{ padding: '4px 8px', fontSize: 11, opacity: count > 0 ? 0.6 : 1 }}
+                                            title={count > 0 ? `Cannot remove: ${count} unit(s) exist in this category` : 'Remove category'}
                                             onClick={() => setDeleteCategoryTarget(cat)}>
-                                            Delete
+                                            Remove
                                         </button>
                                     </div>
                                 </div>
@@ -3132,10 +3430,27 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
             <Modal
                 open={!!deleteCategoryTarget}
-                title="Delete AC Category?"
-                message={`Are you sure you want to delete "${deleteCategoryTarget?.name}"? Units currently under this category will remain safe in inventory records.`}
-                confirmLabel={deletingCategory ? "Deleting..." : "Yes, Delete Category"}
-                confirmDisabled={deletingCategory}
+                title="Remove AC Category?"
+                message={(() => {
+                    const count = units.filter(u => {
+                        const matchName = (u.ac_type || '').toLowerCase() === deleteCategoryTarget?.name?.toLowerCase();
+                        const matchCode = deleteCategoryTarget?.code && (u.ac_type || '').toLowerCase() === deleteCategoryTarget.code.toLowerCase();
+                        return matchName || matchCode;
+                    }).length;
+                    if (count > 0) {
+                        return `Cannot remove "${deleteCategoryTarget?.name}" because ${count} AC unit(s) are currently under this category. Please reassign or delete these units before removing this category.`;
+                    }
+                    return `Are you sure you want to remove the category "${deleteCategoryTarget?.name}"? It currently has no units assigned and will be deleted.`;
+                })()}
+                confirmLabel={deletingCategory ? "Removing..." : "Yes, Remove Category"}
+                confirmDisabled={deletingCategory || (() => {
+                    const count = units.filter(u => {
+                        const matchName = (u.ac_type || '').toLowerCase() === deleteCategoryTarget?.name?.toLowerCase();
+                        const matchCode = deleteCategoryTarget?.code && (u.ac_type || '').toLowerCase() === deleteCategoryTarget.code.toLowerCase();
+                        return matchName || matchCode;
+                    }).length;
+                    return count > 0;
+                })()}
                 variant="danger"
                 onConfirm={handleDeleteCategory}
                 onCancel={() => !deletingCategory && setDeleteCategoryTarget(null)}
@@ -3227,9 +3542,10 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                         </button>
                                         <button
                                             className="btn-danger"
-                                            style={{ padding: '4px 8px', fontSize: 11 }}
+                                            style={{ padding: '4px 8px', fontSize: 11, opacity: count > 0 ? 0.6 : 1 }}
+                                            title={count > 0 ? `Cannot remove: ${count} part(s) exist in this category` : 'Remove category'}
                                             onClick={() => setDeletePartCategoryTarget(cat)}>
-                                            Delete
+                                            Remove
                                         </button>
                                     </div>
                                 </div>
@@ -3245,10 +3561,29 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
 
             <Modal
                 open={!!deletePartCategoryTarget}
-                title="Delete Spare Part Category?"
-                message={`Are you sure you want to delete "${deletePartCategoryTarget?.name}"? Spare parts currently under this category will remain safe in inventory records.`}
-                confirmLabel={deletingPartCategory ? "Deleting..." : "Yes, Delete Category"}
-                confirmDisabled={deletingPartCategory}
+                title="Remove Spare Part Category?"
+                message={(() => {
+                    const count = parts.filter(p => {
+                        const cat = p.sub_category || p.category || '';
+                        const matchCat = cat.toLowerCase() === deletePartCategoryTarget?.name?.toLowerCase();
+                        const matchName = (p.part_name || p.item_name || '').toLowerCase().includes(deletePartCategoryTarget?.name?.toLowerCase() || '');
+                        return matchCat || matchName;
+                    }).length;
+                    if (count > 0) {
+                        return `Cannot remove "${deletePartCategoryTarget?.name}" because ${count} spare part(s) currently belong to this category. Please reassign or delete these parts before removing this category.`;
+                    }
+                    return `Are you sure you want to remove the spare part category "${deletePartCategoryTarget?.name}"? It currently has no spare parts assigned and will be deleted.`;
+                })()}
+                confirmLabel={deletingPartCategory ? "Removing..." : "Yes, Remove Category"}
+                confirmDisabled={deletingPartCategory || (() => {
+                    const count = parts.filter(p => {
+                        const cat = p.sub_category || p.category || '';
+                        const matchCat = cat.toLowerCase() === deletePartCategoryTarget?.name?.toLowerCase();
+                        const matchName = (p.part_name || p.item_name || '').toLowerCase().includes(deletePartCategoryTarget?.name?.toLowerCase() || '');
+                        return matchCat || matchName;
+                    }).length;
+                    return count > 0;
+                })()}
                 variant="danger"
                 onConfirm={handleDeletePartCategory}
                 onCancel={() => !deletingPartCategory && setDeletePartCategoryTarget(null)}
@@ -3363,6 +3698,26 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage AC Unit</h2>
                             <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Update unit details or move to another category / brand</p>
                         </div>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                            onClick={() => handleOpenMoveAcItem(editUnitTarget, 'unit')}
+                        >
+                            ⇄ Move Item
+                        </button>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                         <div>
@@ -3426,15 +3781,28 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             </select>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center' }}>
-                        <button
-                            type="button"
-                            className="btn-secondary"
-                            style={{ background: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                            onClick={() => handleOpenMoveAcItem(editUnitTarget, 'unit')}
-                        >
-                            ⇄ Move Item
-                        </button>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
+                        <div>
+                            {editUnitTarget.status === 'Archived' ? (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{ background: '#F0FDF4', color: '#16A34A', borderColor: '#BBF7D0', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13 }}
+                                    onClick={() => handleRestoreUnit(editUnitTarget)}
+                                >
+                                    ↺ Restore Unit
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{ background: '#FEF2F2', color: '#DC2626', borderColor: '#FECACA', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13 }}
+                                    onClick={() => setArchiveUnitTarget(editUnitTarget)}
+                                >
+                                    📦 Archive Unit
+                                </button>
+                            )}
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditUnitTarget(null)}>Cancel</button>
                             <button className="btn-primary" onClick={() => setConfirmEditUnit(true)}>Save Changes →</button>
@@ -3449,6 +3817,17 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 confirmLabel="Yes, Save"
                 onConfirm={handleEditUnit}
                 onCancel={() => setConfirmEditUnit(false)}
+            />
+
+            <Modal
+                open={!!archiveUnitTarget}
+                title="Archive AC Unit?"
+                message={`Archive "${archiveUnitTarget?.brand} ${archiveUnitTarget?.model}" (${archiveUnitTarget?.serial_number})? It will be moved to the Archived category and hidden from active inventory.`}
+                confirmLabel={archivingUnit ? "Archiving..." : "Yes, Archive"}
+                confirmDisabled={archivingUnit}
+                variant="danger"
+                onConfirm={handleArchiveUnit}
+                onCancel={() => !archivingUnit && setArchiveUnitTarget(null)}
             />
 
             <Modal
@@ -3663,9 +4042,31 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
             {/* Manage / Edit Spare Part Modal */}
             {editPartTarget && !confirmEditPart && renderModalWrapper(true, () => setEditPartTarget(null), (
                 <form onSubmit={(e) => { e.preventDefault(); setConfirmEditPart(true); }}>
-                    <div style={{ marginBottom: 16 }}>
-                        <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Spare Part</h2>
-                        <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Update spare part details or move to another sub-category</p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <div>
+                            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage Spare Part</h2>
+                            <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Update spare part details or move to another sub-category</p>
+                        </div>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{
+                                background: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #BFDBFE',
+                                padding: '6px 12px',
+                                borderRadius: 8,
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                            }}
+                            onClick={() => handleOpenMoveAcItem(editPartTarget, 'part')}
+                        >
+                            ⇄ Move Item
+                        </button>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 16 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
@@ -3768,15 +4169,17 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                             </select>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center' }}>
-                        <button
-                            type="button"
-                            className="btn-secondary"
-                            style={{ background: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                            onClick={() => handleOpenMoveAcItem(editPartTarget, 'part')}
-                        >
-                            ⇄ Move Item
-                        </button>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
+                        <div>
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{ background: '#FEF2F2', color: '#DC2626', borderColor: '#FECACA', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, fontSize: 13 }}
+                                onClick={() => setDeletePartTarget(editPartTarget)}
+                            >
+                                🗑 Delete Spare Part
+                            </button>
+                        </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button type="button" className="btn-secondary" onClick={() => setEditPartTarget(null)}>Cancel</button>
                             <button type="submit" className="btn-primary">Save Changes →</button>

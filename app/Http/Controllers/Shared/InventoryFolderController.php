@@ -154,7 +154,7 @@ class InventoryFolderController extends Controller
     }
 
     /**
-     * Delete a sub-category safely.
+     * Delete / remove a sub-category only if no items exist in it.
      */
     public function destroy(Request $request, int $id): JsonResponse
     {
@@ -164,29 +164,30 @@ class InventoryFolderController extends Controller
         $name = $folder->name;
         $fieldType = $folder->field_type;
 
-        // Reassign any items in this category to general uncategorized
-        $defaultFolderName = 'General ' . ucwords(str_replace('_', ' ', $fieldType));
-        $defaultFolder = InventoryFolder::where('field_type', $fieldType)
-            ->where('id', '!=', $id)
-            ->first();
+        // Check if any items exist in this category (by folder_id or sub_category name)
+        $itemsCount = DB::table('inventory_items')
+            ->where(function ($query) use ($id, $name) {
+                $query->where('folder_id', $id)
+                    ->orWhere('sub_category', $name);
+            })
+            ->count();
 
-        DB::table('inventory_items')
-            ->where('folder_id', $id)
-            ->update([
-                'folder_id' => $defaultFolder ? $defaultFolder->id : null,
-                'sub_category' => $defaultFolder ? $defaultFolder->name : $defaultFolderName,
-            ]);
+        if ($itemsCount > 0) {
+            return response()->json([
+                'message' => sprintf('Cannot remove sub-category "%s" because %d item(s) are currently assigned to it. Please reassign or delete the items first.', $name, $itemsCount),
+            ], 422);
+        }
 
         $folder->delete();
 
         $this->logActivity(
             $currentUser ? (int) $currentUser->user_id : 1,
             'DELETE',
-            sprintf('Deleted inventory sub-category "%s".', $name)
+            sprintf('Removed inventory sub-category "%s".', $name)
         );
 
         return response()->json([
-            'message' => sprintf('Sub-category "%s" deleted successfully. Items were moved to default category.', $name),
+            'message' => sprintf('Sub-category "%s" removed successfully.', $name),
         ]);
     }
 

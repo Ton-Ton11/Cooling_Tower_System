@@ -24,6 +24,7 @@ use App\Http\Controllers\AdminAssistant\AdminAssistantAcUnitController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantSparePartController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantSalesController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantAnnouncementController;
+use App\Http\Controllers\AdminAssistant\AdminAssistantInventoryController;
 
 use App\Http\Controllers\ToolsMan\ToolsManDashboardController;
 use App\Http\Controllers\ToolsMan\ToolsManInventoryController;
@@ -358,6 +359,28 @@ Route::prefix('admin-assistant')
             Route::post('/inventory/folders', 'store')->name('inventory.folders.store');
             Route::patch('/inventory/folders/{id}', 'update')->name('inventory.folders.update');
             Route::delete('/inventory/folders/{id}', 'destroy')->name('inventory.folders.destroy');
+        });
+
+        // ─── Inventory (For Sale & Materials/Tools Catalog) ───
+        Route::controller(AdminAssistantInventoryController::class)->group(function () {
+            Route::get('/inventory', 'inventoryIndex')->name('inventory.enhanced');
+            Route::get('/inventory-items', 'inventoryIndex')->name('inventory.index');
+            Route::get('/inventory/grouped', 'inventoryGroupedIndex')->name('inventory.grouped');
+            Route::post('/inventory', 'storeInventoryItem')->name('inventory.store.enhanced');
+            Route::patch('/inventory/{itemId}', 'updateInventoryItem')->name('inventory.update.enhanced');
+            Route::delete('/inventory/{itemId}', 'destroyInventoryItem')->name('inventory.destroy.enhanced');
+            Route::match(['post', 'patch', 'delete'], '/inventory/{itemId}/archive', 'archiveInventoryItem')->name('inventory.archive');
+            Route::match(['post', 'patch'], '/inventory/{itemId}/restore', 'restoreInventoryItem')->name('inventory.restore');
+
+            // Checkout & Usage Tracking
+            Route::post('/inventory/checkout', 'checkoutItem')->name('inventory.checkout.enhanced');
+            Route::post('/inventory/return', 'returnItem')->name('inventory.return.enhanced');
+            Route::get('/inventory/checkouts', 'checkoutsIndex')->name('inventory.checkouts.enhanced');
+            Route::get('/inventory/checkout-options', 'checkoutOptions')->name('inventory.checkouts.options.enhanced');
+
+            // Selling & Customer Lookup routes
+            Route::get('/inventory/customers', 'searchCustomers')->name('inventory.customers');
+            Route::post('/inventory/{itemId}/sell', 'sellItem')->name('inventory.sell');
         });
 
         // ─── Service Catalog & Pricing / Unit Types / Brands ───

@@ -15,7 +15,7 @@ const ic = {
 const navItems = [
     { id: "dashboard", label: "Dashboard", icon: ic.dashboard },
     { id: "checklists", label: "Checklists & Dispatches", icon: ic.checklists },
-    { id: "materials", label: "Materials & Tools", icon: ic.materials },
+    { id: "materials", label: "Worker's Inventory", icon: ic.materials },
     { id: "announcements", label: "Announcements", icon: ic.announcements },
 ];
 

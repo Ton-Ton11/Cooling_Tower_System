@@ -76,6 +76,13 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
             target: "sales",
             badge: "Finance",
         },
+        {
+            id: 5,
+            title: "Review tool checklists & dispatch requests",
+            sub: `${stats.pending_checklists ?? 0} checklists awaiting verification or dispatch`,
+            target: "checklists",
+            badge: "Dispatches",
+        },
     ];
 
     const activeStaffUsers = [
@@ -124,6 +131,15 @@ export default function Dashboard({ onNavigate, dashboardData, isLoading, onRefr
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
                                         {stats.pending_bookings ?? 0} Pending
                                     </span>
+                                    {Number(stats.pending_checklists ?? 0) > 0 && (
+                                        <button
+                                            onClick={() => onNavigate("checklists")}
+                                            className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 px-2.5 py-1 rounded-lg font-bold transition cursor-pointer"
+                                        >
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                                            {stats.pending_checklists} Checklists Pending
+                                        </button>
+                                    )}
                                     <span className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-lg">
                                         {stats.available_ac_units ?? 0} AC Units
                                     </span>

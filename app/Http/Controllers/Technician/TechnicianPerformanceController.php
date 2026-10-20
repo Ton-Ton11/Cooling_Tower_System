@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\DB;
 
 class TechnicianPerformanceController extends TechnicianBaseController
 {
+    protected function authorizeRole(Request $request): void
+    {
+        abort_unless($request->user() && in_array((int) $request->user()->role_id, [1, 2, 5, 7], true), 403);
+    }
+
     public function performanceIndex(Request $request): JsonResponse
     {
         $this->authorizeRole($request);

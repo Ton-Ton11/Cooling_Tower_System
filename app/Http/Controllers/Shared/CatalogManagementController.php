@@ -336,11 +336,42 @@ class CatalogManagementController extends Controller
     }
 
     /**
-     * Alias for archiveUnitType to support legacy DELETE routes.
+     * Delete / remove a unit type only if no AC units exist under it.
      */
     public function destroyUnitType(Request $request, int $id): JsonResponse
     {
-        return $this->archiveUnitType($request, $id);
+        $unitType = UnitType::findOrFail($id);
+        $name = $unitType->name;
+        $code = $unitType->code;
+
+        // Check if any AC units exist in inventory with this category/type
+        $unitsCount = DB::table('ac_units_inventory')
+            ->where(function ($query) use ($name, $code) {
+                $query->where('ac_type', $name);
+                if (!empty($code)) {
+                    $query->orWhere('ac_type', $code);
+                }
+            })
+            ->count();
+
+        if ($unitsCount > 0) {
+            return response()->json([
+                'message' => sprintf('Cannot remove category "%s" because %d AC unit(s) currently exist under this type. Please reassign or delete the units first.', $name, $unitsCount),
+            ], 422);
+        }
+
+        $unitType->delete();
+
+        $this->logActivity(
+            $request->user()->user_id,
+            'UNIT_TYPE_DELETE',
+            sprintf('Removed AC category / unit type "%s".', $name)
+        );
+
+        return response()->json([
+            'message' => sprintf('AC Category "%s" removed successfully.', $name),
+            'deleted' => true,
+        ]);
     }
 
     /**
@@ -500,11 +531,50 @@ class CatalogManagementController extends Controller
     }
 
     /**
-     * Alias for archiveBrand to support legacy DELETE routes.
+     * Delete / remove a brand only if no AC units or spare parts exist under it.
      */
     public function destroyBrand(Request $request, int $id): JsonResponse
     {
-        return $this->archiveBrand($request, $id);
+        $brand = Brand::findOrFail($id);
+        $name = $brand->name;
+
+        // Check if any AC units exist with this brand
+        $unitsCount = DB::table('ac_units_inventory')
+            ->whereRaw('LOWER(brand) = ?', [strtolower($name)])
+            ->count();
+
+        // Check if any spare parts exist with this compatible brand
+        $partsCount = DB::table('inventory_items')
+            ->where('item_type', 'Part')
+            ->where(function ($query) use ($name) {
+                $query->whereRaw('LOWER(compatible_brands) LIKE ?', ['%' . strtolower($name) . '%'])
+                    ->orWhereRaw('LOWER(sub_category) LIKE ?', ['%' . strtolower($name) . '%']);
+            })
+            ->count();
+
+        $totalExist = $unitsCount + $partsCount;
+        if ($totalExist > 0) {
+            $details = [];
+            if ($unitsCount > 0) $details[] = sprintf('%d AC unit(s)', $unitsCount);
+            if ($partsCount > 0) $details[] = sprintf('%d spare part(s)', $partsCount);
+
+            return response()->json([
+                'message' => sprintf('Cannot remove brand "%s" because %s currently exist under it. Please reassign or delete these items first.', $name, implode(' and ', $details)),
+            ], 422);
+        }
+
+        $brand->delete();
+
+        $this->logActivity(
+            $request->user()->user_id,
+            'BRAND_DELETE',
+            sprintf('Removed AC brand "%s".', $name)
+        );
+
+        return response()->json([
+            'message' => sprintf('AC Brand "%s" removed successfully.', $name),
+            'deleted' => true,
+        ]);
     }
 
     /**

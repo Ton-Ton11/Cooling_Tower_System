@@ -8,6 +8,7 @@ import Overview from "../Pages/SuperAdmin/Overview";
 import Bookings from "../Pages/Shared/Bookings";
 import StaffAccounts from "../Pages/Shared/StaffAccounts";
 import MaterialsTools from "../Pages/Shared/MaterialsTools";
+import Checklists from "../Pages/Shared/Checklists";
 import AcUnits from "../Pages/Shared/AcUnits";
 import SalesRecords from "../Pages/Shared/SalesRecords";
 import Documents from "../Pages/Shared/Documents";
@@ -123,6 +124,7 @@ function Shell() {
     const sidebarBadges = useMemo(
         () => ({
             bookings: dashboardData?.stats?.pending_bookings ?? 0,
+            checklists: dashboardData?.stats?.pending_checklists ?? 0,
             announcements: dashboardData?.stats?.announcements ?? 0,
         }),
         [dashboardData],
@@ -165,6 +167,14 @@ function Shell() {
             <MaterialsTools
                 addToast={addToast}
                 onDataChanged={handleDataChanged}
+                currentUser={currentUser}
+            />
+        ),
+        checklists: (
+            <Checklists
+                addToast={addToast}
+                onDataChanged={handleDataChanged}
+                endpoints={SUPER_ADMIN_ENDPOINTS}
                 currentUser={currentUser}
             />
         ),

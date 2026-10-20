@@ -19,15 +19,22 @@ class ToolsManDashboardController extends ToolsManBaseController
     {
         $this->authorizeRole($request);
 
+        $baseQuery = DB::table('inventory_items')
+            ->where(function ($q) {
+                $q->where('inventory_mode', 'worker')
+                  ->orWhereNull('inventory_mode');
+            })
+            ->where('is_archived', false);
+
         $stats = [
-            'total_items'    => DB::table('inventory_items')->count(),
-            'low_stock_items' => DB::table('inventory_items')->whereColumn('quantity_on_hand', '<=', 'reorder_level')->count(),
-            'total_tools'    => DB::table('inventory_items')->where('item_type', 'Tool')->count(),
-            'total_materials' => DB::table('inventory_items')->where('item_type', 'Material')->count(),
+            'total_items'    => (clone $baseQuery)->count(),
+            'low_stock_items' => (clone $baseQuery)->whereColumn('quantity_on_hand', '<=', 'reorder_level')->count(),
+            'total_tools'    => (clone $baseQuery)->where('item_type', 'Tool')->count(),
+            'total_materials' => (clone $baseQuery)->where('item_type', 'Material')->count(),
             'announcements'  => DB::table('announcements')->count(),
         ];
 
-        $recentItems = DB::table('inventory_items')
+        $recentItems = (clone $baseQuery)
             ->orderByDesc('last_updated')
             ->limit(6)
             ->get();
@@ -45,7 +52,7 @@ class ToolsManDashboardController extends ToolsManBaseController
             ->limit(4)
             ->get();
 
-        $lowStockItems = DB::table('inventory_items')
+        $lowStockItems = (clone $baseQuery)
             ->whereColumn('quantity_on_hand', '<=', 'reorder_level')
             ->orderBy('quantity_on_hand')
             ->limit(5)

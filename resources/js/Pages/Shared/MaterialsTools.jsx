@@ -159,14 +159,27 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     }
     const currentUserName = authUser?.name || [authUser?.given_name, authUser?.last_name].filter(Boolean).join(' ') || authUser?.email || 'Pedro Reyes';
 
+    const roleId = Number(authUser?.role_id ?? 0);
+    const isSuperAdmin = roleId === 1;
+    const isAdminAssistant = roleId === 3;
+    const isToolsMan = roleId === 4;
+
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
     const [items, setItems] = useState([]);
     const [folders, setFolders] = useState([]);
     const [loading, setLoading] = useState(true);
     
     // Main Tabs: 'worker' | 'sale' | 'archived'
-    const [mainTab, setMainTab] = useState('worker');
+    const [mainTab, setMainTab] = useState(() => (isAdminAssistant ? 'sale' : 'worker'));
     const [workerSubTab, setWorkerSubTab] = useState('materials');
+
+    useEffect(() => {
+        if (isAdminAssistant && mainTab !== 'sale' && mainTab !== 'archived') {
+            setMainTab('sale');
+        } else if (isToolsMan && mainTab === 'sale') {
+            setMainTab('worker');
+        }
+    }, [isAdminAssistant, isToolsMan]);
     
     // Active Sub-category Selection per Field ('all' or sub-category name)
     const [selectedMaterialCategory, setSelectedMaterialCategory] = useState('all');
@@ -179,6 +192,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const [powerSearch, setPowerSearch] = useState('');
     const [handSearch, setHandSearch] = useState('');
     const [saleSearch, setSaleSearch] = useState('');
+    const [archiveSearch, setArchiveSearch] = useState('');
+    const [archiveTypeFilter, setArchiveTypeFilter] = useState('all');
 
     // ── Quick Access & Recent Inventory History State (User-Scoped) ──
     const userId = authUser?.user_id || authUser?.id || null;
@@ -249,17 +264,20 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         for (const id of recentItemIds) {
             const found = items.find((it) => it.item_id === id);
             if (found && !list.some((x) => x.item_id === found.item_id)) {
+                if (isToolsMan && found.inventory_mode === 'sale') continue;
                 list.push(found);
             }
         }
         return list;
-    }, [items, recentItemIds]);
+    }, [items, recentItemIds, isToolsMan]);
 
     const handleJumpToRecentItem = (item) => {
         if (!item) return;
+        if (isToolsMan && item.inventory_mode === 'sale') return;
         trackRecentItem(item.item_id);
 
         if (item.inventory_mode === 'sale') {
+            if (isToolsMan) return;
             setMainTab('sale');
             setSelectedSaleCategory('all');
             setSaleSearch(item.item_name);
@@ -336,6 +354,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const [archiveTarget, setArchiveTarget] = useState(null);
     const [archiving, setArchiving] = useState(false);
     const [restoringId, setRestoringId] = useState(null);
+    const [confirmRestoreTarget, setConfirmRestoreTarget] = useState(null);
     
     const [confirmEditWM, setConfirmEditWM] = useState(false);
     const [confirmEditPT, setConfirmEditPT] = useState(false);
@@ -500,8 +519,147 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const activeSaleCategoryObj = useMemo(() => saleCategories.find(f => f.name === selectedSaleCategory), [saleCategories, selectedSaleCategory]);
 
     // Partition into Active and Archived items
-    const activeItems = useMemo(() => items.filter(i => !i.is_archived), [items]);
-    const archivedItems = useMemo(() => items.filter(i => Boolean(i.is_archived)), [items]);
+    const activeItems = useMemo(() => {
+        return items.filter(i => {
+            if (i.is_archived) return false;
+            if (isToolsMan && i.inventory_mode === 'sale') return false;
+            return true;
+        });
+    }, [items, isToolsMan]);
+
+    const archivedItems = useMemo(() => {
+        return items.filter(i => {
+            if (!i.is_archived) return false;
+            if (isToolsMan && i.inventory_mode === 'sale') return false;
+            return true;
+        });
+    }, [items, isToolsMan]);
+
+    const archivedCounts = useMemo(() => {
+        let materials = 0;
+        let power = 0;
+        let hand = 0;
+        let sale = 0;
+
+        archivedItems.forEach(i => {
+            if (i.inventory_mode === 'sale') {
+                if (!isToolsMan) sale++;
+            } else if (i.item_type === 'Tool') {
+                if (i.tool_subtype === 'power') power++;
+                else hand++;
+            } else {
+                materials++;
+            }
+        });
+
+        return { total: archivedItems.length, materials, power, hand, sale };
+    }, [archivedItems, isToolsMan]);
+
+    const filteredArchivedItems = useMemo(() => {
+        return archivedItems.filter(item => {
+            const isTool = item.item_type === 'Tool';
+            const type = item.inventory_mode === 'sale'
+                ? 'sale'
+                : isTool
+                ? (item.tool_subtype === 'power' ? 'power_tool' : 'hand_tool')
+                : 'material';
+
+            if (archiveTypeFilter !== 'all' && type !== archiveTypeFilter) {
+                return false;
+            }
+
+            if (archiveSearch.trim()) {
+                const q = archiveSearch.toLowerCase().trim();
+                const matchesName = (item.item_name || '').toLowerCase().includes(q);
+                const matchesSerial = (item.serial_number || '').toLowerCase().includes(q);
+                const matchesSubCat = (item.sub_category || '').toLowerCase().includes(q);
+                const matchesId = String(item.item_id || '').includes(q);
+                const matchesManaged = (item.managed_by || '').toLowerCase().includes(q);
+                if (!matchesName && !matchesSerial && !matchesSubCat && !matchesId && !matchesManaged) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }, [archivedItems, archiveTypeFilter, archiveSearch]);
+
+    const formatArchiveDate = (dateStr) => {
+        if (!dateStr) return '—';
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch {
+            return dateStr;
+        }
+    };
+
+    const handleOpenManageArchivedItem = (item) => {
+        trackRecentItem(item.item_id);
+        if (item.inventory_mode === 'sale') {
+            setEditSaleTarget(item);
+            setEditSaleForm({
+                item_name: item.item_name,
+                item_type: item.item_type || 'Material',
+                sub_category: item.sub_category || 'General',
+                folder_id: item.folder_id,
+                unit: item.unit,
+                capital: String(item.capital || 0),
+                profit: String(item.profit || 0),
+                selling_price: String(item.selling_price || 0),
+                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                quantity_on_hand: String(item.quantity_on_hand),
+                reorder_level: String(item.reorder_level || 2),
+                supplier_name: item.supplier_name || '',
+                managed_by: currentUserName,
+            });
+        } else if (item.item_type === 'Tool' && item.tool_subtype === 'power') {
+            setEditPTTarget(item);
+            setEditPTForm({
+                item_name: item.item_name,
+                unit: item.unit,
+                sub_category: item.sub_category || 'General Tools',
+                folder_id: item.folder_id,
+                serial_number: item.serial_number || '',
+                status: item.status || 'Available',
+                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                quantity_on_hand: String(item.quantity_on_hand),
+                reorder_level: String(item.reorder_level || 2),
+                managed_by: currentUserName,
+            });
+        } else if (item.item_type === 'Tool' && item.tool_subtype === 'hand') {
+            setEditHTTarget(item);
+            setEditHTForm({
+                item_name: item.item_name,
+                unit: item.unit,
+                sub_category: item.sub_category || 'General Tools',
+                folder_id: item.folder_id,
+                reorder_level: String(item.reorder_level || 2),
+                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                quantity_on_hand: String(item.quantity_on_hand),
+                managed_by: currentUserName,
+            });
+        } else {
+            setEditWMTarget(item);
+            setEditWMForm({
+                item_name: item.item_name,
+                unit: item.unit,
+                sub_category: item.sub_category || 'General Materials',
+                folder_id: item.folder_id,
+                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                quantity_on_hand: String(item.quantity_on_hand),
+                reorder_level: String(item.reorder_level),
+                managed_by: currentUserName,
+            });
+        }
+    };
 
     // Filtered items by category & sub-category from active inventory
     const workerMaterials = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool'), [activeItems]);
@@ -762,11 +920,17 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
     const handleDeleteCategory = async () => {
         if (!deleteCategoryTarget) return;
+        const itemCount = items.filter(i => i.sub_category === deleteCategoryTarget.name || i.folder_id === deleteCategoryTarget.id).length;
+        if (itemCount > 0) {
+            addToast(`Cannot remove category "${deleteCategoryTarget.name}" because ${itemCount} item(s) exist in it. Move or delete them first.`, "error");
+            setDeleteCategoryTarget(null);
+            return;
+        }
         setDeletingCategory(true);
         try {
             const deleteUrl = ep.deleteInventoryFolder ? ep.deleteInventoryFolder(deleteCategoryTarget.id) : `/super-admin/inventory/folders/${deleteCategoryTarget.id}`;
             await window.axios.delete(deleteUrl);
-            addToast(`Sub-category "${deleteCategoryTarget.name}" deleted.`);
+            addToast(`Sub-category "${deleteCategoryTarget.name}" removed successfully.`);
             setDeleteCategoryTarget(null);
             // Reset active filter if we were inside that deleted sub-category
             if (selectedMaterialCategory === deleteCategoryTarget.name) setSelectedMaterialCategory('all');
@@ -776,7 +940,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             await fetchFolders();
             await fetchItems(false);
         } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to delete sub-category."), "error");
+            addToast(extractErrorMessage(error, "Unable to remove sub-category."), "error");
         } finally {
             setDeletingCategory(false);
         }
@@ -1341,9 +1505,19 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* Top Page Header */}
             <div className="page-header" style={{ marginBottom: 20 }}>
                 <div>
-                    <h1 className="page-title font-display">Materials & Tools Inventory</h1>
+                    <h1 className="page-title font-display">
+                        {isToolsMan
+                            ? "Worker's Materials & Tools Inventory"
+                            : isAdminAssistant
+                            ? "For Sale Catalog & Inventory"
+                            : "Materials & Tools Inventory"}
+                    </h1>
                     <p className="page-subtitle">
-                        Organized in dynamic sub-categories · {items.length} items tracked · {lowStockWorker.length + lowStockSale.length} low stock alerts
+                        {isToolsMan
+                            ? `Field tools and consumable worker materials · ${workerMaterials.length + powerTools.length + handTools.length} worker items tracked · ${lowStockWorker.length} low stock alerts`
+                            : isAdminAssistant
+                            ? `Retail merchandise, parts pricing, and catalog stock · ${saleItems.length} items for sale · ${lowStockSale.length} low stock alerts`
+                            : `Organized in dynamic sub-categories · ${items.length} items tracked · ${lowStockWorker.length + lowStockSale.length} low stock alerts`}
                     </p>
                 </div>
             </div>
@@ -1600,9 +1774,11 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 <button className={`tab-item ${mainTab === 'worker' ? 'active' : ''}`} onClick={() => setMainTab('worker')}>
                     Workers' Inventory ({workerMaterials.length + powerTools.length + handTools.length})
                 </button>
-                <button className={`tab-item ${mainTab === 'sale' ? 'active' : ''}`} onClick={() => setMainTab('sale')}>
-                    For Sale ({saleItems.length})
-                </button>
+                {!isToolsMan && (
+                    <button className={`tab-item ${mainTab === 'sale' ? 'active' : ''}`} onClick={() => setMainTab('sale')}>
+                        For Sale ({saleItems.length})
+                    </button>
+                )}
                 <button className={`tab-item ${mainTab === 'archived' ? 'active' : ''}`} onClick={() => setMainTab('archived')}>
                     Archived Items ({archivedItems.length})
                 </button>
@@ -1611,6 +1787,31 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             {/* ─── WORKERS' INVENTORY ─── */}
             {mainTab === 'worker' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {/* Admin Assistant Read-Only Notice */}
+                    {isAdminAssistant && (
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 12,
+                            padding: '12px 18px',
+                            borderRadius: 10,
+                            background: '#EFF6FF',
+                            border: '1px solid #BFDBFE',
+                            color: '#1E40AF',
+                            fontSize: 13,
+                            fontWeight: 600,
+                        }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="16" x2="12" y2="12" />
+                                <line x1="12" y1="8" x2="12.01" y2="8" />
+                            </svg>
+                            <span style={{ lineHeight: 1.5 }}>
+                                <strong>Administrative Notice:</strong> The Worker's Inventory (Materials, Power Tools, Hand Tools, and Dispatch Logs) is managed directly by the <strong>Tools Man</strong> and <strong>Super Admin</strong>. This tab is presented in read-only mode for administrative reference while you manage the <strong>For Sale Catalog</strong>.
+                            </span>
+                        </div>
+                    )}
+
                     {/* Worker Field Sub-Tabs */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                         <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', borderRadius: 10, padding: 4 }}>
@@ -1636,27 +1837,34 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
                         {/* Top Action Buttons for the Active Field */}
                         {workerSubTab !== 'logs' ? (
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <button
-                                    className="btn-secondary"
-                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                    onClick={() => {
-                                        const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
-                                        setCategoryFieldType(fieldType);
-                                        setManageCategoriesModal(true);
-                                    }}>
-                                    Manage Sub-categories
-                                </button>
-                                <button
-                                    className="btn-primary"
-                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                    onClick={() => {
-                                        const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
-                                        handleOpenCreateCategory(fieldType);
-                                    }}>
-                                    + New Sub-category
-                                </button>
-                            </div>
+                            isAdminAssistant ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#F1F5F9', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#64748B' }}>
+                                    <LockIcon size={12} color="#64748B" />
+                                    <span>Managed by Tools Man</span>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button
+                                        className="btn-secondary"
+                                        style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                        onClick={() => {
+                                            const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
+                                            setCategoryFieldType(fieldType);
+                                            setManageCategoriesModal(true);
+                                        }}>
+                                        Manage Sub-categories
+                                    </button>
+                                    <button
+                                        className="btn-primary"
+                                        style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                        onClick={() => {
+                                            const fieldType = workerSubTab === 'materials' ? 'materials' : workerSubTab === 'power' ? 'power_tools' : 'hand_tools';
+                                            handleOpenCreateCategory(fieldType);
+                                        }}>
+                                        + New Sub-category
+                                    </button>
+                                </div>
+                            )
                         ) : (
                             <button
                                 className="btn-secondary"
@@ -1752,12 +1960,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     </div>
                                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                         <SearchBar value={materialSearch} onChange={setMaterialSearch} placeholder="Search materials or sub-category..." />
-                                        <button
-                                            className="btn-primary"
-                                            style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
-                                            onClick={() => handleOpenAddMaterial(selectedMaterialCategory !== 'all' ? selectedMaterialCategory : null)}>
-                                            + Add Material {selectedMaterialCategory !== 'all' ? `to ${selectedMaterialCategory}` : ''}
-                                        </button>
+                                        {!isAdminAssistant && (
+                                            <button
+                                                className="btn-primary"
+                                                style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                                onClick={() => handleOpenAddMaterial(selectedMaterialCategory !== 'all' ? selectedMaterialCategory : null)}>
+                                                + Add Material {selectedMaterialCategory !== 'all' ? `to ${selectedMaterialCategory}` : ''}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -1847,25 +2057,31 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                             }}
                                                             onClick={e => e.stopPropagation()}
                                                         >
-                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                                <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                    onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
-                                                                <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
-                                                                    onClick={() => {
-                                                                        trackRecentItem(item.item_id);
-                                                                        setEditWMTarget(item);
-                                                                        setEditWMForm({
-                                                                            item_name: item.item_name,
-                                                                            unit: item.unit,
-                                                                            sub_category: item.sub_category || 'General Materials',
-                                                                            folder_id: item.folder_id,
-                                                                            initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
-                                                                            quantity_on_hand: String(item.quantity_on_hand),
-                                                                            reorder_level: String(item.reorder_level),
-                                                                            managed_by: currentUserName,
-                                                                        });
-                                                                    }}>Manage</button>
-                                                            </div>
+                                                            {isAdminAssistant ? (
+                                                                <div style={{ textAlign: 'right' }}>
+                                                                    <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>Tools Man Only</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                                    <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                        onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
+                                                                    <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
+                                                                        onClick={() => {
+                                                                            trackRecentItem(item.item_id);
+                                                                            setEditWMTarget(item);
+                                                                            setEditWMForm({
+                                                                                item_name: item.item_name,
+                                                                                unit: item.unit,
+                                                                                sub_category: item.sub_category || 'General Materials',
+                                                                                folder_id: item.folder_id,
+                                                                                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                                                                                quantity_on_hand: String(item.quantity_on_hand),
+                                                                                reorder_level: String(item.reorder_level),
+                                                                                managed_by: currentUserName,
+                                                                            });
+                                                                        }}>Manage</button>
+                                                                </div>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 );
@@ -1952,12 +2168,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     </div>
                                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                         <SearchBar value={powerSearch} onChange={setPowerSearch} placeholder="Search power tools, serial or sub-category..." />
-                                        <button
-                                            className="btn-primary"
-                                            style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
-                                            onClick={() => handleOpenAddPowerTool(selectedPowerCategory !== 'all' ? selectedPowerCategory : null)}>
-                                            + Add Power Tool {selectedPowerCategory !== 'all' ? `to ${selectedPowerCategory}` : ''}
-                                        </button>
+                                        {!isAdminAssistant && (
+                                            <button
+                                                className="btn-primary"
+                                                style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                                onClick={() => handleOpenAddPowerTool(selectedPowerCategory !== 'all' ? selectedPowerCategory : null)}>
+                                                + Add Power Tool {selectedPowerCategory !== 'all' ? `to ${selectedPowerCategory}` : ''}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -1992,14 +2210,16 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                 <tr>
                                                     <td colSpan={8} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
                                                         No power tools match your filter {selectedPowerCategory !== 'all' ? `in "${selectedPowerCategory}"` : ''}.
-                                                        <div style={{ marginTop: 10 }}>
-                                                            <button
-                                                                className="btn-primary"
-                                                                style={{ fontSize: 12, padding: '5px 12px' }}
-                                                                onClick={() => handleOpenAddPowerTool(selectedPowerCategory !== 'all' ? selectedPowerCategory : null)}>
-                                                                + Add Power Tool Here
-                                                            </button>
-                                                        </div>
+                                                        {!isAdminAssistant && (
+                                                            <div style={{ marginTop: 10 }}>
+                                                                <button
+                                                                    className="btn-primary"
+                                                                    style={{ fontSize: 12, padding: '5px 12px' }}
+                                                                    onClick={() => handleOpenAddPowerTool(selectedPowerCategory !== 'all' ? selectedPowerCategory : null)}>
+                                                                    + Add Power Tool Here
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ) : filteredPower.map(item => {
@@ -2037,26 +2257,32 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                             }}
                                                             onClick={e => e.stopPropagation()}
                                                         >
-                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                                <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                    onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
-                                                                <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
-                                                                    onClick={() => {
-                                                                        trackRecentItem(item.item_id);
-                                                                        setEditPTTarget(item);
-                                                                        setEditPTForm({
-                                                                            item_name: item.item_name,
-                                                                            serial_number: item.serial_number || '',
-                                                                            unit: item.unit,
-                                                                            status: item.status || 'Available',
-                                                                            sub_category: item.sub_category || 'General Power Tools',
-                                                                            folder_id: item.folder_id,
-                                                                            initial_stock: String(item.initial_stock ?? item.quantity_on_hand ?? 1),
-                                                                            quantity_on_hand: String(item.quantity_on_hand ?? 1),
-                                                                            managed_by: currentUserName,
-                                                                        });
-                                                                    }}>Manage</button>
-                                                            </div>
+                                                            {isAdminAssistant ? (
+                                                                <div style={{ textAlign: 'right' }}>
+                                                                    <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>Tools Man Only</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                                    <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                        onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
+                                                                    <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
+                                                                        onClick={() => {
+                                                                            trackRecentItem(item.item_id);
+                                                                            setEditPTTarget(item);
+                                                                            setEditPTForm({
+                                                                                item_name: item.item_name,
+                                                                                serial_number: item.serial_number || '',
+                                                                                unit: item.unit,
+                                                                                status: item.status || 'Available',
+                                                                                sub_category: item.sub_category || 'General Power Tools',
+                                                                                folder_id: item.folder_id,
+                                                                                initial_stock: String(item.initial_stock ?? item.quantity_on_hand ?? 1),
+                                                                                quantity_on_hand: String(item.quantity_on_hand ?? 1),
+                                                                                managed_by: currentUserName,
+                                                                            });
+                                                                        }}>Manage</button>
+                                                                </div>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 );
@@ -2143,12 +2369,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     </div>
                                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                         <SearchBar value={handSearch} onChange={setHandSearch} placeholder="Search hand tools or sub-category..." />
-                                        <button
-                                            className="btn-primary"
-                                            style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
-                                            onClick={() => handleOpenAddHandTool(selectedHandCategory !== 'all' ? selectedHandCategory : null)}>
-                                            + Add Hand Tool {selectedHandCategory !== 'all' ? `to ${selectedHandCategory}` : ''}
-                                        </button>
+                                        {!isAdminAssistant && (
+                                            <button
+                                                className="btn-primary"
+                                                style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                                onClick={() => handleOpenAddHandTool(selectedHandCategory !== 'all' ? selectedHandCategory : null)}>
+                                                + Add Hand Tool {selectedHandCategory !== 'all' ? `to ${selectedHandCategory}` : ''}
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -2183,14 +2411,16 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                 <tr>
                                                     <td colSpan={9} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
                                                         No hand tools match your filter {selectedHandCategory !== 'all' ? `in "${selectedHandCategory}"` : ''}.
-                                                        <div style={{ marginTop: 10 }}>
-                                                            <button
-                                                                className="btn-primary"
-                                                                style={{ fontSize: 12, padding: '5px 12px' }}
-                                                                onClick={() => handleOpenAddHandTool(selectedHandCategory !== 'all' ? selectedHandCategory : null)}>
-                                                                + Add Hand Tool Here
-                                                            </button>
-                                                        </div>
+                                                        {!isAdminAssistant && (
+                                                            <div style={{ marginTop: 10 }}>
+                                                                <button
+                                                                    className="btn-primary"
+                                                                    style={{ fontSize: 12, padding: '5px 12px' }}
+                                                                    onClick={() => handleOpenAddHandTool(selectedHandCategory !== 'all' ? selectedHandCategory : null)}>
+                                                                    + Add Hand Tool Here
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ) : filteredHand.map(item => {
@@ -2237,25 +2467,31 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                             }}
                                                             onClick={e => e.stopPropagation()}
                                                         >
-                                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                                <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                    onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
-                                                                <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
-                                                                    onClick={() => {
-                                                                        trackRecentItem(item.item_id);
-                                                                        setEditHTTarget(item);
-                                                                        setEditHTForm({
-                                                                            item_name: item.item_name,
-                                                                            unit: item.unit,
-                                                                            sub_category: item.sub_category || 'General Hand Tools',
-                                                                            folder_id: item.folder_id,
-                                                                            initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
-                                                                            quantity_on_hand: String(item.quantity_on_hand),
-                                                                            reorder_level: String(item.reorder_level),
-                                                                            managed_by: currentUserName,
-                                                                        });
-                                                                    }}>Manage</button>
-                                                            </div>
+                                                            {isAdminAssistant ? (
+                                                                <div style={{ textAlign: 'right' }}>
+                                                                    <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>Tools Man Only</span>
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                                    <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                        onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
+                                                                    <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
+                                                                        onClick={() => {
+                                                                            trackRecentItem(item.item_id);
+                                                                            setEditHTTarget(item);
+                                                                            setEditHTForm({
+                                                                                item_name: item.item_name,
+                                                                                unit: item.unit,
+                                                                                sub_category: item.sub_category || 'General Hand Tools',
+                                                                                folder_id: item.folder_id,
+                                                                                initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                                                                                quantity_on_hand: String(item.quantity_on_hand),
+                                                                                reorder_level: String(item.reorder_level),
+                                                                                managed_by: currentUserName,
+                                                                            });
+                                                                        }}>Manage</button>
+                                                                </div>
+                                                            )}
                                                         </td>
                                                     </tr>
                                                 );
@@ -2892,97 +3128,269 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
             {/* ─── ARCHIVED ITEMS TAB ─── */}
             {mainTab === 'archived' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div className="card" style={{ padding: '20px 24px', background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 10 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    {/* Category Pill Selector Bar for Archived Items */}
+                    <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
+                                Archived Categories
+                            </span>
+                            <span style={{ fontSize: 12, color: '#64748B' }}>
+                                {archivedItems.length} total archived items
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {[
+                                { key: 'all', label: 'All Archived', count: archivedCounts.total },
+                                { key: 'material', label: 'Materials', count: archivedCounts.materials },
+                                { key: 'power_tool', label: 'Power Tools', count: archivedCounts.power },
+                                { key: 'hand_tool', label: 'Hand Tools', count: archivedCounts.hand },
+                                ...(!isToolsMan ? [{ key: 'sale', label: 'For Sale', count: archivedCounts.sale }] : []),
+                            ].map(pill => {
+                                const isSelected = archiveTypeFilter === pill.key;
+                                return (
+                                    <button
+                                        key={pill.key}
+                                        onClick={() => setArchiveTypeFilter(pill.key)}
+                                        style={{
+                                            padding: '6px 14px',
+                                            borderRadius: 20,
+                                            border: '1px solid',
+                                            cursor: 'pointer',
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            fontFamily: 'inherit',
+                                            borderColor: isSelected ? '#3B82F6' : '#CBD5E1',
+                                            background: isSelected ? '#EFF6FF' : '#fff',
+                                            color: isSelected ? '#1D4ED8' : '#334155',
+                                            boxShadow: isSelected ? '0 2px 6px rgba(59,130,246,0.15)' : 'none',
+                                            transition: 'all 0.15s ease',
+                                        }}
+                                    >
+                                        {pill.label} <span style={{ opacity: 0.85, fontSize: 11, marginLeft: 4 }}>({pill.count})</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Main Archived Card */}
+                    <div className="card" style={{ padding: 20 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                             <div>
-                                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: 0 }}>
-                                    Archived Inventory Items ({archivedItems.length})
-                                </h3>
-                                <p style={{ fontSize: 12, color: '#64748B', margin: '3px 0 0' }}>
-                                    These items are hidden from active technician checklists and worker inventory. You can restore any item to active inventory at any time.
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                        {archiveTypeFilter === 'all'
+                                            ? 'All Archived Items'
+                                            : archiveTypeFilter === 'material'
+                                            ? 'Archived Materials'
+                                            : archiveTypeFilter === 'power_tool'
+                                            ? 'Archived Power Tools'
+                                            : archiveTypeFilter === 'hand_tool'
+                                            ? 'Archived Hand Tools'
+                                            : 'Archived For Sale Items'}
+                                    </p>
+                                    {archiveTypeFilter !== 'all' && (
+                                        <button
+                                            onClick={() => setArchiveTypeFilter('all')}
+                                            style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                                            View All
+                                        </button>
+                                    )}
+                                </div>
+                                <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                    Showing {filteredArchivedItems.length} of {archivedItems.length} archived inventory items · Hidden from field technicians & checklists
                                 </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <SearchBar
+                                    value={archiveSearch}
+                                    onChange={setArchiveSearch}
+                                    placeholder="Search archived items..."
+                                />
                             </div>
                         </div>
 
-                        {archivedItems.length === 0 ? (
-                            <div style={{ padding: '36px 16px', textAlign: 'center', color: '#94A3B8', fontSize: 13, background: '#F8FAFC', borderRadius: 8, border: '1px dashed #CBD5E1' }}>
-                                No archived tools or materials found. All inventory items are currently active.
+                        {filteredArchivedItems.length === 0 ? (
+                            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8', fontSize: 13, background: '#F8FAFC', borderRadius: 10, border: '1px dashed #CBD5E1' }}>
+                                {archiveSearch || archiveTypeFilter !== 'all'
+                                    ? 'No archived items match your current search or filter criteria.'
+                                    : 'No archived tools or materials found. All inventory items are currently active.'}
+                                {(archiveSearch || archiveTypeFilter !== 'all') && (
+                                    <div style={{ marginTop: 10 }}>
+                                        <button
+                                            className="btn-secondary"
+                                            style={{ fontSize: 12, padding: '5px 14px' }}
+                                            onClick={() => { setArchiveSearch(''); setArchiveTypeFilter('all'); }}
+                                        >
+                                            Clear Filter & Search
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         ) : (
-                            <div className="table-container">
-                                <table className="table">
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
                                     <thead>
-                                        <tr>
-                                            <th>Item ID</th>
-                                            <th>Item Name</th>
-                                            <th>Category / Type</th>
-                                            <th>Sub-Category</th>
-                                            <th>Stock / Qty</th>
-                                            <th>Status</th>
-                                            <th>Managed By</th>
-                                            <th>Archived At</th>
-                                            <th className="sticky-action-col" style={{ textAlign: 'right', position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' }}>Actions</th>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['Item ID', 'Item Name', 'Category / Type', 'Sub-Category', 'Stock / Qty', 'Status', 'Managed By', 'Archived Date', 'Actions'].map(h => (
+                                                <th
+                                                    key={h}
+                                                    className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        textAlign: h === 'Actions' ? 'right' : 'left',
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        letterSpacing: '0.05em',
+                                                        textTransform: 'uppercase',
+                                                        color: '#64748B',
+                                                        whiteSpace: 'nowrap',
+                                                        borderBottom: '1px solid #E2E8F0',
+                                                        ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                    }}
+                                                >
+                                                    {h}
+                                                </th>
+                                            ))}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {archivedItems.map((item) => {
+                                        {filteredArchivedItems.map((item) => {
                                             const isTool = item.item_type === 'Tool';
-                                            const typeLabel = item.inventory_mode === 'sale'
-                                                ? 'For Sale'
+                                            const typeConfig = item.inventory_mode === 'sale'
+                                                ? { label: 'For Sale', bg: '#ECFDF5', text: '#047857', border: '#A7F3D0' }
                                                 : isTool
-                                                ? (item.tool_subtype === 'power' ? 'Power Tool' : 'Hand Tool')
-                                                : 'Worker Material';
+                                                ? (item.tool_subtype === 'power'
+                                                    ? { label: 'Power Tool', bg: '#F5F3FF', text: '#6D28D9', border: '#DDD6FE' }
+                                                    : { label: 'Hand Tool', bg: '#FFFBEB', text: '#B45309', border: '#FDE68A' })
+                                                : { label: 'Worker Material', bg: '#EFF6FF', text: '#1E40AF', border: '#DBEAFE' };
 
                                             return (
-                                                <tr key={item.item_id}>
-                                                    <td style={{ fontWeight: 600, color: '#64748B' }}>#{item.item_id}</td>
-                                                    <td style={{ fontWeight: 700, color: '#0F172A' }}>
-                                                        {item.item_name}
+                                                <tr
+                                                    key={item.item_id}
+                                                    style={{ borderTop: '1px solid #F1F5F9', cursor: isAdminAssistant && item.inventory_mode !== 'sale' ? 'default' : 'pointer' }}
+                                                    onClick={() => {
+                                                        if (isAdminAssistant && item.inventory_mode !== 'sale') return;
+                                                        handleOpenManageArchivedItem(item);
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                                >
+                                                    <td style={{ padding: '12px', fontSize: 12, fontWeight: 600, color: '#2563EB' }}>
+                                                        #{item.item_id}
+                                                    </td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        <div style={{ fontWeight: 600, color: '#0F172A', fontSize: 13 }}>
+                                                            {item.item_name}
+                                                        </div>
                                                         {item.serial_number && (
-                                                            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 400 }}>
-                                                                SN: {item.serial_number}
-                                                            </div>
+                                                            <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#475569', background: '#F1F5F9', padding: '1px 6px', borderRadius: 4, display: 'inline-block', marginTop: 2 }}>
+                                                                S/N: {item.serial_number}
+                                                            </span>
                                                         )}
                                                     </td>
-                                                    <td>
-                                                        <span className="badge" style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, background: '#F1F5F9', color: '#475569' }}>
-                                                            {typeLabel}
+                                                    <td style={{ padding: '12px' }}>
+                                                        <span style={{
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            padding: '3px 8px',
+                                                            borderRadius: 6,
+                                                            background: typeConfig.bg,
+                                                            color: typeConfig.text,
+                                                            border: `1px solid ${typeConfig.border}`,
+                                                            display: 'inline-block',
+                                                        }}>
+                                                            {typeConfig.label}
                                                         </span>
                                                     </td>
-                                                    <td style={{ fontSize: 13, color: '#334155' }}>{item.sub_category || 'General'}</td>
-                                                    <td style={{ fontWeight: 600, color: '#0F172A' }}>
-                                                        {item.quantity_on_hand} {item.unit || ''}
-                                                    </td>
-                                                    <td>
-                                                        <span className="badge badge-gray" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>
-                                                            Archived
+                                                    <td style={{ padding: '12px' }}>
+                                                        <span style={{
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            padding: '3px 8px',
+                                                            borderRadius: 6,
+                                                            background: '#F1F5F9',
+                                                            color: '#334155',
+                                                            border: '1px solid #E2E8F0',
+                                                            display: 'inline-block',
+                                                        }}>
+                                                            {item.sub_category || 'General'}
                                                         </span>
                                                     </td>
-                                                    <td style={{ fontSize: 12, color: '#64748B' }}>
+                                                    <td style={{ padding: '12px', fontSize: 13, fontWeight: 600, color: '#0F172A' }}>
+                                                        {item.quantity_on_hand} <span style={{ fontSize: 12, fontWeight: 400, color: '#64748B' }}>{item.unit || ''}</span>
+                                                    </td>
+                                                    <td style={{ padding: '12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            gap: 4,
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            padding: '2px 8px',
+                                                            borderRadius: 6,
+                                                            background: '#FEF2F2',
+                                                            color: '#DC2626',
+                                                            border: '1px solid #FECACA',
+                                                        }}>
+                                                            📦 Archived
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '12px', fontSize: 12, color: '#64748B' }}>
                                                         {item.managed_by || '—'}
                                                     </td>
-                                                    <td style={{ fontSize: 12, color: '#94A3B8' }}>
-                                                        {item.archived_at ? new Date(item.archived_at).toLocaleString() : '—'}
+                                                    <td style={{ padding: '12px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>
+                                                        {formatArchiveDate(item.archived_at || item.last_updated)}
                                                     </td>
                                                     <td
                                                         className="sticky-action-col"
                                                         style={{
+                                                            padding: '12px',
                                                             textAlign: 'right',
                                                             position: 'sticky',
                                                             right: 0,
                                                             zIndex: 5,
                                                             background: '#FFFFFF',
                                                         }}
+                                                        onClick={e => e.stopPropagation()}
                                                     >
-                                                        <button
-                                                            className="btn-primary"
-                                                            style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6 }}
-                                                            disabled={restoringId === item.item_id}
-                                                            onClick={() => handleRestore(item)}
-                                                        >
-                                                            {restoringId === item.item_id ? 'Restoring...' : '↺ Restore Item'}
-                                                        </button>
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                            {isAdminAssistant && item.inventory_mode !== 'sale' ? (
+                                                                <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>Tools Man Only</span>
+                                                            ) : (
+                                                                <>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="btn-secondary"
+                                                                        style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                        onClick={() => handleOpenManageArchivedItem(item)}
+                                                                    >
+                                                                        Manage
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="btn-secondary"
+                                                                        style={{
+                                                                            background: '#F0FDF4',
+                                                                            color: '#16A34A',
+                                                                            borderColor: '#BBF7D0',
+                                                                            fontWeight: 600,
+                                                                            fontSize: 11,
+                                                                            padding: '4px 10px',
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            gap: 4,
+                                                                            borderRadius: 6,
+                                                                        }}
+                                                                        disabled={restoringId === item.item_id}
+                                                                        onClick={() => setConfirmRestoreTarget(item)}
+                                                                    >
+                                                                        {restoringId === item.item_id ? 'Restoring...' : '↺ Restore'}
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
@@ -3112,9 +3520,10 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         </button>
                                         <button
                                             className="btn-danger"
-                                            style={{ padding: '4px 8px', fontSize: 11 }}
+                                            style={{ padding: '4px 8px', fontSize: 11, opacity: count > 0 ? 0.6 : 1 }}
+                                            title={count > 0 ? `Cannot remove: ${count} item(s) exist in this category` : 'Remove sub-category'}
                                             onClick={() => setDeleteCategoryTarget(cat)}>
-                                            Delete
+                                            Remove
                                         </button>
                                     </div>
                                 </div>
@@ -3128,13 +3537,19 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 </div>
             ))}
 
-            {/* Delete Sub-category Modal */}
+            {/* Remove Sub-category Modal */}
             <Modal
                 open={!!deleteCategoryTarget}
-                title="Delete Sub-category?"
-                message={`Are you sure you want to delete the sub-category "${deleteCategoryTarget?.name}"? Any items currently in this sub-category will remain safe and be moved to General category.`}
-                confirmLabel={deletingCategory ? "Deleting..." : "Yes, Delete Sub-category"}
-                confirmDisabled={deletingCategory}
+                title="Remove Sub-category?"
+                message={(() => {
+                    const catCount = items.filter(i => i.sub_category === deleteCategoryTarget?.name || i.folder_id === deleteCategoryTarget?.id).length;
+                    if (catCount > 0) {
+                        return `Cannot remove "${deleteCategoryTarget?.name}" because ${catCount} item(s) are currently in this category. Please move or delete all items before removing this category.`;
+                    }
+                    return `Are you sure you want to remove the sub-category "${deleteCategoryTarget?.name}"? This category has no items and will be deleted.`;
+                })()}
+                confirmLabel={deletingCategory ? "Removing..." : "Yes, Remove Sub-category"}
+                confirmDisabled={deletingCategory || (items.filter(i => i.sub_category === deleteCategoryTarget?.name || i.folder_id === deleteCategoryTarget?.id).length > 0)}
                 variant="danger"
                 onConfirm={handleDeleteCategory}
                 onCancel={() => !deletingCategory && setDeleteCategoryTarget(null)}
@@ -3189,7 +3604,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             ))}
 
             {/* Sell Modal */}
-            {sellTarget && !confirmSell && renderModalWrapper(true, () => setSellTarget(null), (() => {
+            {sellTarget && !isToolsMan && !confirmSell && renderModalWrapper(true, () => setSellTarget(null), (() => {
                 const unitSellingPrice = (sellTarget.selling_price !== null && sellTarget.selling_price !== undefined && sellTarget.selling_price !== '')
                     ? Number(sellTarget.selling_price)
                     : ((sellTarget.capital || 0) + (sellTarget.profit || 0));
@@ -3422,7 +3837,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 );
             })())}
             <Modal
-                open={confirmSell}
+                open={confirmSell && !isToolsMan}
                 title="Confirm Sale & Record Transaction?"
                 message={`Sell ${sellQty}x "${sellTarget?.item_name}" to customer "${selectedCustomer?.name}" (ID #${selectedCustomer?.user_id}) for ₱${((sellTarget?.selling_price !== null && sellTarget?.selling_price !== undefined ? Number(sellTarget.selling_price) : ((sellTarget?.capital || 0) + (sellTarget?.profit || 0))) * (parseInt(sellQty) || 1)).toLocaleString()} via ${sellMethod}? This will immediately record the sale in Sales & Records and deduct ${sellQty} from inventory stock.`}
                 confirmLabel={sellingInProgress ? "Recording Sale..." : "Yes, Record Sale"}
@@ -3773,38 +4188,49 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#FEE2E2',
-                                    color: '#DC2626',
-                                    border: '1px solid #FECACA',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => setArchiveTarget(editWMTarget)}
-                            >
-                                Archive Material
-                            </button>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#EFF6FF',
-                                    color: '#2563EB',
-                                    border: '1px solid #BFDBFE',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => handleOpenMoveItem(editWMTarget, 'material')}
-                            >
-                                ⇄ Move Item
-                            </button>
+                            {editWMTarget.is_archived ? (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#F0FDF4',
+                                        color: '#16A34A',
+                                        borderColor: '#BBF7D0',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setConfirmRestoreTarget(editWMTarget)}
+                                >
+                                    ↺ Restore Material
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#FEF2F2',
+                                        color: '#DC2626',
+                                        borderColor: '#FECACA',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setArchiveTarget(editWMTarget)}
+                                >
+                                    📦 Archive Material
+                                </button>
+                            )}
                         </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditWMTarget(null)}>Cancel</button>
@@ -3909,38 +4335,49 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#FEE2E2',
-                                    color: '#DC2626',
-                                    border: '1px solid #FECACA',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => setArchiveTarget(editPTTarget)}
-                            >
-                                Archive Tool
-                            </button>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#EFF6FF',
-                                    color: '#2563EB',
-                                    border: '1px solid #BFDBFE',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => handleOpenMoveItem(editPTTarget, 'power_tool')}
-                            >
-                                ⇄ Move Item
-                            </button>
+                            {editPTTarget.is_archived ? (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#F0FDF4',
+                                        color: '#16A34A',
+                                        borderColor: '#BBF7D0',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setConfirmRestoreTarget(editPTTarget)}
+                                >
+                                    ↺ Restore Power Tool
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#FEF2F2',
+                                        color: '#DC2626',
+                                        borderColor: '#FECACA',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setArchiveTarget(editPTTarget)}
+                                >
+                                    📦 Archive Tool
+                                </button>
+                            )}
                         </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditPTTarget(null)}>Cancel</button>
@@ -4033,38 +4470,49 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#FEE2E2',
-                                    color: '#DC2626',
-                                    border: '1px solid #FECACA',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => setArchiveTarget(editHTTarget)}
-                            >
-                                Archive Tool
-                            </button>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#EFF6FF',
-                                    color: '#2563EB',
-                                    border: '1px solid #BFDBFE',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => handleOpenMoveItem(editHTTarget, 'hand_tool')}
-                            >
-                                ⇄ Move Item
-                            </button>
+                            {editHTTarget.is_archived ? (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#F0FDF4',
+                                        color: '#16A34A',
+                                        borderColor: '#BBF7D0',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setConfirmRestoreTarget(editHTTarget)}
+                                >
+                                    ↺ Restore Hand Tool
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#FEF2F2',
+                                        color: '#DC2626',
+                                        borderColor: '#FECACA',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setArchiveTarget(editHTTarget)}
+                                >
+                                    📦 Archive Tool
+                                </button>
+                            )}
                         </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditHTTarget(null)}>Cancel</button>
@@ -4220,38 +4668,49 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#FEE2E2',
-                                    color: '#DC2626',
-                                    border: '1px solid #FECACA',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => setArchiveTarget(editSaleTarget)}
-                            >
-                                Archive Item
-                            </button>
-                            <button
-                                type="button"
-                                style={{
-                                    background: '#EFF6FF',
-                                    color: '#2563EB',
-                                    border: '1px solid #BFDBFE',
-                                    padding: '8px 14px',
-                                    borderRadius: 8,
-                                    fontSize: 13,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                }}
-                                onClick={() => handleOpenMoveItem(editSaleTarget, 'for_sale')}
-                            >
-                                ⇄ Move Item
-                            </button>
+                            {editSaleTarget.is_archived ? (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#F0FDF4',
+                                        color: '#16A34A',
+                                        borderColor: '#BBF7D0',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setConfirmRestoreTarget(editSaleTarget)}
+                                >
+                                    ↺ Restore Item
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    style={{
+                                        background: '#FEF2F2',
+                                        color: '#DC2626',
+                                        borderColor: '#FECACA',
+                                        padding: '8px 14px',
+                                        borderRadius: 8,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                    }}
+                                    onClick={() => setArchiveTarget(editSaleTarget)}
+                                >
+                                    📦 Archive Item
+                                </button>
+                            )}
                         </div>
                         <div style={{ display: 'flex', gap: 10 }}>
                             <button className="btn-secondary" onClick={() => setEditSaleTarget(null)}>Cancel</button>
@@ -4387,6 +4846,21 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 variant="danger"
                 onConfirm={handleArchive}
                 onCancel={() => !archiving && setArchiveTarget(null)}
+            />
+
+            {/* ── Restore Confirmation Modal ── */}
+            <Modal
+                open={!!confirmRestoreTarget}
+                title="Restore Inventory Item?"
+                message={`Restore "${confirmRestoreTarget?.item_name}" back to active ${confirmRestoreTarget?.inventory_mode === 'sale' ? 'For Sale' : confirmRestoreTarget?.item_type === 'Tool' ? (confirmRestoreTarget?.tool_subtype === 'power' ? 'Power Tools' : 'Hand Tools') : 'Worker Materials'} inventory? Technicians and staff will be able to view and manage it again.`}
+                confirmLabel={restoringId ? "Restoring..." : "Yes, Restore Item"}
+                confirmDisabled={Boolean(restoringId)}
+                onConfirm={() => {
+                    const target = confirmRestoreTarget;
+                    setConfirmRestoreTarget(null);
+                    handleRestore(target);
+                }}
+                onCancel={() => !restoringId && setConfirmRestoreTarget(null)}
             />
 
             {/* ── Checkout / Borrow / Material Usage Modal ── */}
