@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Customer;
 
+use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Shared\LocationAutocompleteController;
 use App\Models\Booking;
 use App\Models\CustomerUnitDetail;
 use App\Models\Payment;
@@ -218,10 +220,58 @@ class CustomerBookingController extends Controller
     }
 
     /**
+     * Automatically cancel bookings in 'Payment Incomplete' status whose 10-minute deadline has expired,
+     * and mark their reservation payment status as 'Returned'.
+     */
+    public static function autoExpireIncompletePayments(): void
+    {
+        $expiredBookings = Booking::with('payments')
+            ->where('booking_status', 'Payment Incomplete')
+            ->get();
+
+        foreach ($expiredBookings as $booking) {
+            $details = is_array($booking->service_details) ? $booking->service_details : [];
+            $dueAtStr = $details['payment_due_at'] ?? null;
+            $dueAt = $dueAtStr ? Carbon::parse($dueAtStr) : ($booking->updated_at ? $booking->updated_at->copy()->addMinutes(10) : now()->subMinute());
+
+            if (now()->greaterThanOrEqualTo($dueAt)) {
+                DB::transaction(function () use ($booking, $details) {
+                    $details['payment_expired_at'] = now()->toISOString();
+                    $details['payment_returned'] = true;
+
+                    $booking->update([
+                        'booking_status' => 'Cancelled',
+                        'cancellation_reason' => 'Automatically cancelled: Incomplete payment was not completed within the 10-minute window. Payment returned.',
+                        'service_details' => $details,
+                        'updated_at' => now(),
+                    ]);
+
+                    DB::table('payments')
+                        ->where('booking_id', $booking->booking_id)
+                        ->update([
+                            'payment_status' => 'Returned',
+                            'notes' => 'Payment returned after 10-minute payment completion timeout.',
+                            'updated_at' => now(),
+                        ]);
+
+                    DB::table('activity_logs')->insert([
+                        'user_id' => $booking->client_id,
+                        'action_type' => 'BOOKING_AUTO_CANCEL_PAYMENT_TIMEOUT',
+                        'description' => "Booking #{$booking->booking_id} was automatically cancelled after the 10-minute payment completion timer expired. Payment status set to Returned.",
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                });
+            }
+        }
+    }
+
+    /**
      * List bookings belonging to the authenticated customer.
      */
     public function bookingsIndex(Request $request): JsonResponse
     {
+        static::autoExpireIncompletePayments();
         $userId = (int) $request->user()->user_id;
 
         $query = Booking::with(['service', 'technician', 'team', 'payments', 'feedback', 'rescheduleBookings'])
@@ -230,7 +280,7 @@ class CustomerBookingController extends Controller
 
         if ($status = $request->string('status')->trim()->value()) {
             if ($status === 'Active') {
-                $query->whereIn('booking_status', ['Approved', 'Dispatched', 'In-Progress']);
+                $query->whereIn('booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Payment Incomplete', 'Reschedule Notice']);
             } elseif ($status !== 'All') {
                 $query->where('booking_status', $status);
             }
@@ -409,19 +459,40 @@ class CustomerBookingController extends Controller
             'alternative_schedule' => ['nullable', 'string', 'max:150'],
             'service_payment_method' => ['required', 'string', Rule::in(['Cash', 'GCash'])],
             'booking_fee' => ['nullable', 'numeric', 'min:0'],
-            'reference_number' => ['required', 'string', 'min:5', 'max:100'],
+            'reference_number' => ['required', 'string', 'min:5', 'max:13'],
             'sender_name' => ['nullable', 'string', 'max:150'],
             'sender_number' => ['nullable', 'string', 'max:50'],
             'notes' => ['nullable', 'string', 'max:1500'],
-            'service_address' => ['nullable', 'string', 'max:1000'],
+            'service_address' => [
+                'nullable',
+                'string',
+                'max:1000',
+                function ($attribute, $value, $fail) use ($user, $request) {
+                    $effectiveAddress = trim((string) ($value ?: $user->address));
+                    $lat = $request->filled('service_latitude') ? (float) $request->input('service_latitude') : null;
+                    $lon = $request->filled('service_longitude') ? (float) $request->input('service_longitude') : null;
+                    $eval = LocationAutocompleteController::evaluateGeospatialLocation($effectiveAddress, $lat, $lon);
+                    if (! $eval['is_within_zamboanga_city']) {
+                        $fail('This booking service is available within Zamboanga City only. Your forward-geocoded location (' . ($eval['detected_city'] ?: $effectiveAddress) . ') is outside Zamboanga City.');
+                    }
+                },
+            ],
+            'service_latitude' => ['nullable', 'numeric'],
+            'service_longitude' => ['nullable', 'numeric'],
             'contact_number' => ['nullable', 'string', 'max:50'],
             'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            'repair_media' => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,mp4,mov,webm', 'max:20480'],
             'policy_acknowledged' => ['nullable'],
         ]);
 
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
             $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
+        }
+
+        $repairMediaPath = null;
+        if ($request->hasFile('repair_media')) {
+            $repairMediaPath = $request->file('repair_media')->store('repair_media', 'public');
         }
 
         $service = Service::findOrFail($validated['service_id']);
@@ -504,6 +575,13 @@ class CustomerBookingController extends Controller
             $serviceDetails['preferred_arrival_time'] = $preferredArrivalTime;
             $serviceDetails['rate_type'] = $rateType;
             $serviceDetails['is_differential'] = $isDiff;
+            if ($repairMediaPath) {
+                $serviceDetails['repair_media_path'] = $repairMediaPath;
+                $serviceDetails['repair_media_url'] = asset('storage/' . $repairMediaPath);
+            }
+            if ((int) $service->service_id === 1 && ! array_key_exists('company_supplied_unit', $serviceDetails)) {
+                $serviceDetails['company_supplied_unit'] = (($serviceDetails['unit_available'] ?? 'Yes') === 'No');
+            }
 
             $booking = Booking::create([
                 'client_id' => $userId,
@@ -642,7 +720,98 @@ class CustomerBookingController extends Controller
     }
 
     /**
-     * Reschedule a booking (requires GCash rescheduling fee).
+     * Complete an incomplete payment within the 10-minute deadline set by Manager.
+     */
+    public function completePayment(Request $request, int $bookingId): JsonResponse
+    {
+        static::autoExpireIncompletePayments();
+        $userId = (int) $request->user()->user_id;
+
+        $booking = Booking::where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        if ($booking->booking_status !== 'Payment Incomplete') {
+            throw ValidationException::withMessages([
+                'booking' => ['This booking is no longer awaiting payment completion (it may have expired or already been updated).'],
+            ]);
+        }
+
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        if (! empty($details['payment_due_at']) && now()->greaterThanOrEqualTo(Carbon::parse($details['payment_due_at']))) {
+            static::autoExpireIncompletePayments();
+            throw ValidationException::withMessages([
+                'booking' => ['The 10-minute payment window has expired. Your booking was automatically cancelled and your payment marked for return.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'reference_number' => ['required', 'string', 'min:5', 'max:13'],
+            'amount_paid' => ['nullable', 'numeric', 'min:1'],
+            'sender_name' => ['nullable', 'string', 'max:150'],
+            'sender_number' => ['nullable', 'string', 'max:50'],
+            'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+        ]);
+
+        $receiptPath = null;
+        if ($request->hasFile('receipt_image')) {
+            $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
+        }
+
+        DB::beginTransaction();
+        try {
+            $details['payment_completed_at'] = now()->toISOString();
+            unset($details['payment_due_at']);
+
+            $booking->update([
+                'booking_status' => 'Pending',
+                'service_details' => $details,
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "[Customer]: Completed reservation payment within 10-minute window (Ref: {$validated['reference_number']})."),
+                'updated_at' => now(),
+            ]);
+
+            Payment::create([
+                'booking_id' => $booking->booking_id,
+                'booking_price' => 0.00,
+                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : 300.00,
+                'payment_status' => 'Paid',
+                'payment_method' => 'GCash',
+                'payment_type' => 'Appointment Reservation Fee (Completed)',
+                'reference_number' => $validated['reference_number'],
+                'sender_name' => $validated['sender_name'] ?? $request->user()->name,
+                'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
+                'receipt_image' => $receiptPath,
+                'notes' => 'Completed payment within 10-minute deadline.',
+                'payment_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'BOOKING_PAYMENT_COMPLETED',
+                'description' => "Customer completed payment for Booking #{$booking->booking_id} within the 10-minute deadline (GCash Ref: {$validated['reference_number']}). Status reset to Pending.",
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Payment submitted successfully! Your booking has been returned to Pending for manager approval.',
+                'booking' => $booking->fresh(['service', 'technician', 'payments']),
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            if ($receiptPath) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Reschedule a booking (requires GCash rescheduling fee unless Manager set Reschedule Notice).
      */
     public function reschedule(Request $request, int $bookingId): JsonResponse
     {
@@ -658,64 +827,108 @@ class CustomerBookingController extends Controller
             ]);
         }
 
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        $isManagerRescheduleNotice = $booking->booking_status === 'Reschedule Notice'
+            || ! empty($details['reschedule_notice_by_manager']);
+
         $validated = $request->validate([
             'new_scheduled_date' => ['required', 'date', 'after:now'],
             'reschedule_fee' => ['nullable', 'numeric', 'min:0'],
-            'reference_number' => ['required', 'string', 'min:5', 'max:100'],
+            'reference_number' => $isManagerRescheduleNotice
+                ? ['nullable', 'string', 'max:13']
+                : ['required', 'string', 'min:5', 'max:13'],
             'sender_name' => ['nullable', 'string', 'max:150'],
             'sender_number' => ['nullable', 'string', 'max:50'],
             'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             'reschedule_reason' => ['nullable', 'string', 'max:500'],
         ]);
 
+        $newDate = Carbon::parse($validated['new_scheduled_date']);
+
+        // Enforce half-day slot blocking on the original date if triggered by Manager's Reschedule Notice
+        if ($isManagerRescheduleNotice) {
+            $blockedDate = $details['reschedule_notice_original_date']
+                ?? ($booking->scheduled_date ? $booking->scheduled_date->format('Y-m-d') : null);
+            $blockedPeriod = $details['reschedule_notice_blocked_period']
+                ?? (($booking->scheduled_date && (int) $booking->scheduled_date->hour < 13) ? 'morning_noon' : 'afternoon_evening');
+
+            if ($blockedDate && $newDate->format('Y-m-d') === $blockedDate) {
+                $newHour = (int) $newDate->hour;
+                if ($blockedPeriod === 'morning_noon' && $newHour < 13) {
+                    throw ValidationException::withMessages([
+                        'new_scheduled_date' => ['Morning and noon slots are unavailable on this date per the reschedule notice. Please choose an afternoon slot or another date.'],
+                    ]);
+                }
+                if ($blockedPeriod === 'afternoon_evening' && $newHour >= 13) {
+                    throw ValidationException::withMessages([
+                        'new_scheduled_date' => ['Afternoon and evening slots are unavailable on this date per the reschedule notice. Please choose a morning/noon slot or another date.'],
+                    ]);
+                }
+            }
+        }
+
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
             $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
         }
 
-        $rescheduleFee = isset($validated['reschedule_fee']) && (float) $validated['reschedule_fee'] > 0
-            ? (float) $validated['reschedule_fee']
-            : 150.00;
-
-        $newDate = Carbon::parse($validated['new_scheduled_date']);
+        $rescheduleFee = $isManagerRescheduleNotice
+            ? 0.00
+            : (isset($validated['reschedule_fee']) && (float) $validated['reschedule_fee'] > 0
+                ? (float) $validated['reschedule_fee']
+                : 150.00);
 
         DB::beginTransaction();
         try {
             $oldDate = $booking->scheduled_date;
             $oldDateStr = $oldDate ? $oldDate->format('M d, Y h:i A') : 'N/A';
 
+            $details['preferred_arrival_time'] = $newDate->format('h:i A');
+            $details['preferred_arrival_time_raw'] = $newDate->format('H:i');
+            unset(
+                $details['reschedule_notice_by_manager'],
+                $details['reschedule_notice_original_date'],
+                $details['reschedule_notice_blocked_period'],
+                $details['reschedule_notice_message']
+            );
+
             $booking->update([
                 'scheduled_date' => $newDate,
                 'booking_status' => 'Pending', // Resets to Pending so Admin/Manager can re-dispatch
-                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "Rescheduled from {$oldDateStr}. Reason: " . ($validated['reschedule_reason'] ?? 'Customer request')),
+                'service_details' => $details,
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "Rescheduled from {$oldDateStr} to " . $newDate->format('M d, Y h:i A') . ($isManagerRescheduleNotice ? ' (Free via Manager Reschedule Notice)' : '') . ". Reason: " . ($validated['reschedule_reason'] ?? 'Customer request')),
                 'updated_at' => now(),
             ]);
 
-            $payment = Payment::create([
-                'booking_id' => $booking->booking_id,
-                'booking_price' => 0.00,
-                'amount_paid' => $rescheduleFee,
-                'payment_status' => 'Paid',
-                'payment_method' => 'GCash',
-                'payment_type' => 'Reschedule Fee',
-                'reference_number' => $validated['reference_number'],
-                'sender_name' => $validated['sender_name'] ?? $request->user()->name,
-                'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
-                'receipt_image' => $receiptPath,
-                'notes' => 'Rescheduling Fee payment',
-                'payment_date' => now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $paymentId = null;
+            if (! $isManagerRescheduleNotice && $rescheduleFee > 0) {
+                $payment = Payment::create([
+                    'booking_id' => $booking->booking_id,
+                    'booking_price' => 0.00,
+                    'amount_paid' => $rescheduleFee,
+                    'payment_status' => 'Paid',
+                    'payment_method' => 'GCash',
+                    'payment_type' => 'Reschedule Fee',
+                    'reference_number' => $validated['reference_number'],
+                    'sender_name' => $validated['sender_name'] ?? $request->user()->name,
+                    'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
+                    'receipt_image' => $receiptPath,
+                    'notes' => 'Rescheduling Fee payment',
+                    'payment_date' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                $paymentId = $payment->payment_id;
+            }
 
             $reschedule = RescheduleBooking::create([
                 'booking_id' => $booking->booking_id,
                 'client_id' => $userId,
                 'previous_scheduled_date' => $oldDate,
                 'new_scheduled_date' => $newDate,
-                'reschedule_reason' => $validated['reschedule_reason'] ?? 'Customer request',
+                'reschedule_reason' => $validated['reschedule_reason'] ?? ($isManagerRescheduleNotice ? 'Manager Reschedule Notice' : 'Customer request'),
                 'reschedule_fee' => $rescheduleFee,
-                'payment_id' => $payment->payment_id,
+                'payment_id' => $paymentId,
                 'status' => 'Pending',
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -725,10 +938,10 @@ class CustomerBookingController extends Controller
                 'user_id' => $userId,
                 'action_type' => 'BOOKING_RESCHEDULE',
                 'description' => sprintf(
-                    'Customer rescheduled booking #%d to %s. GCash Ref: %s. Reschedule record #%d.',
+                    'Customer rescheduled booking #%d to %s (%s). Reschedule record #%d.',
                     $booking->booking_id,
                     $newDate->format('M d, Y h:i A'),
-                    $validated['reference_number'],
+                    $isManagerRescheduleNotice ? 'Free Reschedule Notice' : ('GCash Ref: ' . ($validated['reference_number'] ?? 'N/A')),
                     $reschedule->reschedule_id
                 ),
                 'created_at' => now(),

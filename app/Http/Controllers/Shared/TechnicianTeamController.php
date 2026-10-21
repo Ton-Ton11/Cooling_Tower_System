@@ -14,7 +14,7 @@ use Illuminate\Validation\Rule;
 class TechnicianTeamController extends Controller
 {
     /**
-     * Authorize access for Head Technician (role 5 with is_head_technician) or Super Admin (role 1) or Manager (role 2).
+     * Authorize access for Head Technician (role 7) or Super Admin (role 1) or Manager (role 2).
      */
     protected function authorizeTeamManager(Request $request): void
     {
@@ -25,8 +25,7 @@ class TechnicianTeamController extends Controller
 
         $isAuthorized = (int) $user->role_id === 1
             || (int) $user->role_id === 2
-            || (int) $user->role_id === 7
-            || ((int) $user->role_id === 5 && (bool) $user->is_head_technician);
+            || (int) $user->role_id === 7;
 
         abort_unless($isAuthorized, 403, 'Unauthorized to manage technician teams.');
     }
@@ -122,11 +121,7 @@ class TechnicianTeamController extends Controller
     {
         $roleIds = $this->getTechnicianRoleIds();
 
-        return User::where(function ($query) use ($roleIds) {
-                $query->whereIn('role_id', $roleIds)
-                    ->orWhere('is_head_technician', true)
-                    ->orWhere('is_head_technician', 1);
-            })
+        return User::whereIn('role_id', $roleIds)
             ->where(function ($query) {
                 $query->whereNull('is_active')
                     ->orWhere('is_active', 1)
@@ -135,10 +130,11 @@ class TechnicianTeamController extends Controller
             ->with(['role', 'technicianTeams:technician_teams.team_id,team_name,status', 'ledTeams:team_id,team_name,status'])
             ->orderBy('last_name')
             ->orderBy('given_name')
-            ->get(['user_id', 'role_id', 'given_name', 'middle_name', 'last_name', 'email', 'contact_number', 'is_head_technician', 'is_active'])
+            ->get(['user_id', 'role_id', 'given_name', 'middle_name', 'last_name', 'email', 'contact_number', 'is_active'])
             ->map(function ($tech) {
                 $name = $tech->name ?: trim("{$tech->given_name} {$tech->last_name}");
-                $roleName = $tech->role?->role_name ?? ($tech->is_head_technician ? 'Head Technician' : 'Technician');
+                $isHead = (int) $tech->role_id === 7;
+                $roleName = $tech->role?->role_name ?? ($isHead ? 'Head Technician' : 'Technician');
 
                 $allTeams = $tech->technicianTeams
                     ->filter(fn ($t) => ($t->status ?? '') !== 'Archived')
@@ -159,7 +155,7 @@ class TechnicianTeamController extends Controller
                     'contact_number' => $tech->contact_number,
                     'role_id' => (int) $tech->role_id,
                     'role_name' => $roleName,
-                    'is_head_technician' => (bool) $tech->is_head_technician,
+                    'is_head_technician' => $isHead,
                     'teams' => $allTeams,
                     'is_assigned' => $allTeams->isNotEmpty(),
                     'current_team_name' => $allTeams->first()['team_name'] ?? null,
@@ -177,8 +173,8 @@ class TechnicianTeamController extends Controller
         $this->authorizeTeamManager($request);
 
         $teams = TechnicianTeam::with([
-            'leader:user_id,given_name,middle_name,last_name,email,contact_number,is_head_technician',
-            'technicians:users.user_id,given_name,middle_name,last_name,email,contact_number,is_head_technician',
+            'leader:user_id,role_id,given_name,middle_name,last_name,email,contact_number',
+            'technicians:users.user_id,role_id,given_name,middle_name,last_name,email,contact_number',
             'creator:user_id,given_name,last_name',
         ])
             ->withCount(['bookings', 'members'])
@@ -197,7 +193,7 @@ class TechnicianTeamController extends Controller
                         'full_name' => $team->leader->name ?: trim("{$team->leader->given_name} {$team->leader->last_name}"),
                         'email' => $team->leader->email,
                         'contact_number' => $team->leader->contact_number,
-                        'is_head_technician' => (bool) $team->leader->is_head_technician,
+                        'is_head_technician' => (int) $team->leader->role_id === 7,
                     ] : null,
                     'leader_name' => $team->leader ? ($team->leader->name ?: trim("{$team->leader->given_name} {$team->leader->last_name}")) : null,
                     'creator_name' => $team->creator ? $team->creator->name : null,
@@ -213,7 +209,7 @@ class TechnicianTeamController extends Controller
                             'email' => $tech->email,
                             'contact_number' => $tech->contact_number,
                             'role_in_team' => $tech->pivot?->role_in_team ?? 'Member',
-                            'is_head_technician' => (bool) $tech->is_head_technician,
+                            'is_head_technician' => (int) $tech->role_id === 7,
                         ];
                     })->values(),
                     'created_at' => $team->created_at?->toISOString(),
@@ -243,11 +239,7 @@ class TechnicianTeamController extends Controller
                 'nullable',
                 'integer',
                 Rule::exists('users', 'user_id')->where(function ($q) use ($roleIds) {
-                    $q->where(function ($sq) use ($roleIds) {
-                        $sq->whereIn('role_id', $roleIds)
-                            ->orWhere('is_head_technician', true)
-                            ->orWhere('is_head_technician', 1);
-                    });
+                    $q->whereIn('role_id', $roleIds);
                 }),
             ],
             'description' => ['nullable', 'string', 'max:500'],
@@ -255,11 +247,7 @@ class TechnicianTeamController extends Controller
             'member_ids.*' => [
                 'integer',
                 Rule::exists('users', 'user_id')->where(function ($q) use ($roleIds) {
-                    $q->where(function ($sq) use ($roleIds) {
-                        $sq->whereIn('role_id', $roleIds)
-                            ->orWhere('is_head_technician', true)
-                            ->orWhere('is_head_technician', 1);
-                    });
+                    $q->whereIn('role_id', $roleIds);
                 }),
             ],
         ]);
@@ -342,11 +330,7 @@ class TechnicianTeamController extends Controller
                 'nullable',
                 'integer',
                 Rule::exists('users', 'user_id')->where(function ($q) use ($roleIds) {
-                    $q->where(function ($sq) use ($roleIds) {
-                        $sq->whereIn('role_id', $roleIds)
-                            ->orWhere('is_head_technician', true)
-                            ->orWhere('is_head_technician', 1);
-                    });
+                    $q->whereIn('role_id', $roleIds);
                 }),
             ],
             'status' => ['nullable', 'string', Rule::in(['Active', 'Inactive', 'Archived'])],
@@ -355,11 +339,7 @@ class TechnicianTeamController extends Controller
             'member_ids.*' => [
                 'integer',
                 Rule::exists('users', 'user_id')->where(function ($q) use ($roleIds) {
-                    $q->where(function ($sq) use ($roleIds) {
-                        $sq->whereIn('role_id', $roleIds)
-                            ->orWhere('is_head_technician', true)
-                            ->orWhere('is_head_technician', 1);
-                    });
+                    $q->whereIn('role_id', $roleIds);
                 }),
             ],
         ]);
@@ -444,11 +424,7 @@ class TechnicianTeamController extends Controller
                 'required',
                 'integer',
                 Rule::exists('users', 'user_id')->where(function ($q) use ($roleIds) {
-                    $q->where(function ($sq) use ($roleIds) {
-                        $sq->whereIn('role_id', $roleIds)
-                            ->orWhere('is_head_technician', true)
-                            ->orWhere('is_head_technician', 1);
-                    });
+                    $q->whereIn('role_id', $roleIds);
                 }),
             ],
             'role_in_team' => ['nullable', 'string', 'max:50'],

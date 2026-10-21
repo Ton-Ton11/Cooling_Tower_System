@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Shared\LocationAutocompleteController;
 use App\Models\User;
+use App\Services\GmailVerificationService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -52,9 +54,26 @@ class RegisteredUserController extends Controller
             'last_name' => 'required|string|max:255',
             'birthdate' => 'required|date|before:today',
             'sex' => 'required|in:Male,Female',
-            'address' => 'required|string|max:1000',
+            'address' => [
+                'required',
+                'string',
+                'min:3',
+                'max:1000',
+            ],
             'contact_number' => 'required|string|max:50',
-            'email' => ['required','string','email','max:255','unique:users,email'],
+            'email' => [
+                'required',
+                'string',
+                'email',
+                'max:255',
+                'unique:users,email',
+                function ($attribute, $value, $fail) {
+                    $normalized = strtolower(trim((string) $value));
+                    if (! str_ends_with($normalized, '@gmail.com') && ! str_ends_with($normalized, '@googlemail.com')) {
+                        $fail('Please register using a valid Gmail account (@gmail.com) so we can send your verification code to your Gmail inbox.');
+                    }
+                },
+            ],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
@@ -71,10 +90,56 @@ class RegisteredUserController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        event(new Registered($user));
-
         Auth::login($user);
 
-        return redirect()->route('customer.dashboard');
+        // Send verification email + 6-digit OTP to customer's Gmail account
+        GmailVerificationService::sendCustomerVerificationEmail($user);
+
+        return redirect()->route('verification.notice')->with('status', 'verification-link-sent');
+    }
+
+    public static function isZamboangaCityAddress(string $address): bool
+    {
+        $normalized = strtolower(trim($address));
+        if ($normalized === '') {
+            return false;
+        }
+
+        // Explicitly reject other cities/provinces if mentioned without Zamboanga City
+        $outsideCities = [
+            'manila', 'quezon city', 'makati', 'taguig', 'pasig', 'cebu', 'davao',
+            'cagayan de oro', 'iloilo', 'bacolod', 'general santos', 'butuan',
+            'dipolog', 'pagadian', 'ipil', 'basilan', 'isabela city', 'jolo', 'bongao',
+            'zamboanga del norte', 'zamboanga del sur', 'zamboanga sibugay',
+        ];
+        foreach ($outsideCities as $outside) {
+            if (str_contains($normalized, $outside) && ! str_contains($normalized, 'zamboanga city')) {
+                return false;
+            }
+        }
+
+        if (str_contains($normalized, 'zamboanga city') || str_contains($normalized, 'zamboanga') || str_contains($normalized, '7000')) {
+            return true;
+        }
+
+        $zamboangaBarangays = [
+            'tetuan', 'putik', 'guiwan', 'sta. maria', 'santa maria', 'pasonanca', 'tumaga',
+            'boalan', 'divisoria', 'zambowood', 'mercedes', 'culianan', 'talon-talon', 'talon talon',
+            'mampang', 'arena blanco', 'tugbungan', 'kasanyangan', 'sta. catalina', 'santa catalina',
+            'san jose cawa-cawa', 'san jose gusu', 'baliwasan', 'san roque', 'suterville',
+            'campo islam', 'malagutay', 'calarian', 'sinunuc', 'maasin', 'reclamation', 'ayala',
+            'talisayan', 'san ramon', 'labuan', 'cabatangan', 'lunzuran', 'bunguiao', 'curuan',
+            'vitali', 'manicahan', 'sangali', 'bolong', 'canelar', 'camino nuevo', 'zone i',
+            'zone ii', 'zone iii', 'zone iv', 'pueblo', 'sta. barbara', 'santa barbara', 'rio hondo',
+            'mariki', 'pasobolong', 'salaan', 'cacao', 'lapakan', 'lamisahan', 'victoria',
+        ];
+
+        foreach ($zamboangaBarangays as $brgy) {
+            if (str_contains($normalized, $brgy)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

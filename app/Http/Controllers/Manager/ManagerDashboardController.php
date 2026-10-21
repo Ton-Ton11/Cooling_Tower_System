@@ -23,7 +23,7 @@ class ManagerDashboardController extends ManagerBaseController
 
         $stats = [
             'pending_bookings' => DB::table('bookings')->where('booking_status', 'Pending')->count(),
-            'active_bookings'  => DB::table('bookings')->whereIn('booking_status', ['Approved', 'Dispatched'])->count(),
+            'active_bookings'  => DB::table('bookings')->whereIn('booking_status', ['Approved', 'In-Progress'])->count(),
             'completed_bookings' => DB::table('bookings')->where('booking_status', 'Completed')->count(),
             'announcements'    => DB::table('announcements')->count(),
         ];

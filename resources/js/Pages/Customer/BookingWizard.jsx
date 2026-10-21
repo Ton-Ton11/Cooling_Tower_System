@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatDateTime } from "../../utils/superAdmin";
 import { resolveScheduleSlots, formatTime24To12 } from "../../utils/bookingSchedule";
+import GeospatialAddressAutocomplete, { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
 
 // Fallback primary services if catalog fetch is delayed
 const DEFAULT_PRIMARY_SERVICES = [
@@ -113,12 +114,12 @@ const COMMERCIAL_CAPACITIES = [
 
 const REPAIR_PROBLEMS = [
     "Not Cooling",
-    "Weak Cooling",
     "Water Leaking",
-    "Ice Forming",
-    "Unusual Noise",
-    "Bad Smell",
+    "Ice Forming on Coils",
+    "Unusual Vibration or Noise",
     "Unit Not Turning On",
+    "Foul Odor",
+    "Weak Cooling",
     "Remote / Control Problem",
     "Electrical Issue",
     "Error Code",
@@ -126,10 +127,10 @@ const REPAIR_PROBLEMS = [
 ];
 
 const CLEANING_TYPES = [
-    "Basic Cleaning",
-    "Deep Cleaning",
-    "Chemical Cleaning",
-    "Preventive Maintenance",
+    "Standard Basic Filter Cleaning",
+    "Deep Disassembly Cleaning",
+    "Chemical Coil Washdown",
+    "General Preventive Maintenance",
     "Not Sure — Let Technician Assess",
 ];
 
@@ -137,9 +138,42 @@ const CLEANING_INTERVALS = [
     "Less than 3 months ago",
     "3–6 months ago",
     "6–12 months ago",
-    "More than 1 year ago",
+    "Over a year",
     "Not Sure",
 ];
+
+const ZAMBOANGA_BARANGAYS = [
+    "tetuan", "putik", "guiwan", "sta. maria", "santa maria", "pasonanca", "tumaga",
+    "boalan", "divisoria", "zambowood", "mercedes", "culianan", "talon-talon", "talon talon",
+    "mampang", "arena blanco", "tugbungan", "kasanyangan", "sta. catalina", "santa catalina",
+    "san jose cawa-cawa", "san jose gusu", "baliwasan", "san roque", "suterville",
+    "campo islam", "malagutay", "calarian", "sinunuc", "maasin", "reclamation", "ayala",
+    "talisayan", "san ramon", "labuan", "cabatangan", "lunzuran", "bunguiao", "curuan",
+    "vitali", "manicahan", "sangali", "bolong", "canelar", "camino nuevo", "zone i",
+    "zone ii", "zone iii", "zone iv", "pueblo", "sta. barbara", "santa barbara", "rio hondo",
+    "mariki", "pasobolong", "salaan", "cacao", "lapakan", "lamisahan", "victoria"
+];
+
+const OUTSIDE_CITIES = [
+    "manila", "quezon city", "makati", "taguig", "pasig", "cebu", "davao",
+    "cagayan de oro", "iloilo", "bacolod", "general santos", "butuan",
+    "dipolog", "pagadian", "ipil", "basilan", "isabela city", "jolo", "bongao",
+    "zamboanga del norte", "zamboanga del sur", "zamboanga sibugay"
+];
+
+function isZamboangaAddress(address) {
+    const norm = (address || "").toLowerCase().trim();
+    if (!norm) return false;
+    for (const outside of OUTSIDE_CITIES) {
+        if (norm.includes(outside) && !norm.includes("zamboanga city")) {
+            return false;
+        }
+    }
+    if (norm.includes("zamboanga city") || norm.includes("zamboanga") || norm.includes("7000")) {
+        return true;
+    }
+    return ZAMBOANGA_BARANGAYS.some(brgy => norm.includes(brgy));
+}
 
 export default function BookingWizard({ dashboardData, addToast, onBookingCreated, initialServiceId = null }) {
     const [step, setStep] = useState(1);
@@ -220,15 +254,35 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
 
     // Cleaning Specifics
     const [cleaningDetails, setCleaningDetails] = useState({
-        service_type: "Deep Cleaning",
+        service_type: "Deep Disassembly Cleaning",
         last_cleaned: "3–6 months ago",
         notes: "",
     });
 
     // Location & Contact
     const [serviceAddress, setServiceAddress] = useState(dashboardData?.user?.address || "");
+    const [serviceCoords, setServiceCoords] = useState({
+        lat: dashboardData?.user?.location_verification?.latitude ?? null,
+        lon: dashboardData?.user?.location_verification?.longitude ?? null,
+    });
+    const [geocodeVerification, setGeocodeVerification] = useState(null);
+    const [outsideZamboangaModalOpen, setOutsideZamboangaModalOpen] = useState(false);
     const [contactNumber, setContactNumber] = useState(dashboardData?.user?.contact_number || "");
     const [generalNotes, setGeneralNotes] = useState("");
+
+    useEffect(() => {
+        if (dashboardData?.user?.address && !serviceAddress) {
+            setServiceAddress(dashboardData.user.address);
+        }
+        // If user attempts to open BookingWizard while their registered address is outside Zamboanga City, immediately alert them
+        const addrToCheck = serviceAddress || dashboardData?.user?.address || "";
+        if (addrToCheck.trim().length > 2) {
+            const evalRes = evaluateZamboangaGeospatial(addrToCheck);
+            if (!evalRes.is_within_zamboanga_city) {
+                setOutsideZamboangaModalOpen(true);
+            }
+        }
+    }, [dashboardData?.user?.address]);
 
     // Step 3: Scheduling
     const tomorrow = useMemo(() => {
@@ -398,15 +452,23 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     };
 
     // Step Validation
+    const addressGeoCheck = useMemo(
+        () => geocodeVerification || evaluateZamboangaGeospatial(serviceAddress, serviceCoords.lat, serviceCoords.lon),
+        [geocodeVerification, serviceAddress, serviceCoords.lat, serviceCoords.lon]
+    );
+    const isAddressInZamboanga = Boolean(addressGeoCheck?.is_within_zamboanga_city);
+
     const canProceedStep1 = Boolean(selectedServiceId);
     const canProceedStep2 = Boolean(
         units.length > 0 &&
         serviceAddress.trim().length >= 5 &&
+        isAddressInZamboanga &&
         contactNumber.trim().length >= 7
     );
     const canProceedStep3 = Boolean(scheduledDate && scheduledTime);
     const canProceedStep4 = Boolean(
         refNumber.trim().length >= 5 &&
+        refNumber.trim().length <= 13 &&
         policyAccepted &&
         servicePaymentMethod
     );
@@ -417,6 +479,13 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
             addToast("Please choose one of the three service categories to proceed.", "error");
             return;
         }
+        if (step === 1) {
+            const checkAddr = (serviceAddress || dashboardData?.user?.address || "").trim();
+            if (checkAddr.length > 2 && !evaluateZamboangaGeospatial(checkAddr, serviceCoords.lat, serviceCoords.lon).is_within_zamboanga_city) {
+                setOutsideZamboangaModalOpen(true);
+                addToast("Alert: This booking service is available within Zamboanga City only.", "error");
+            }
+        }
         if (step === 2) {
             if (units.length === 0) {
                 addToast("Please add at least one aircon unit to your request.", "error");
@@ -424,6 +493,11 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
             }
             if (!serviceAddress.trim()) {
                 addToast("Please enter your complete service address.", "error");
+                return;
+            }
+            if (!isAddressInZamboanga) {
+                setOutsideZamboangaModalOpen(true);
+                addToast("This booking service is available within Zamboanga City only. Please select a verified Zamboanga City address.", "error");
                 return;
             }
             if (!contactNumber.trim()) {
@@ -436,8 +510,8 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
             return;
         }
         if (step === 4) {
-            if (!refNumber.trim() || refNumber.trim().length < 5) {
-                addToast("Please enter your 13-digit GCash reference number.", "error");
+            if (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13) {
+                addToast("Please enter a valid GCash reference number (maximum 13 digits).", "error");
                 return;
             }
             if (!policyAccepted) {
@@ -477,9 +551,15 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         // Compile service-specific questionnaire
         let serviceQuestions = {};
         if (serviceCategory === "installation") {
-            serviceQuestions = { ...installDetails, category: "Installation" };
+            const { area_photo, area_photo_preview, ...restInstall } = installDetails;
+            serviceQuestions = {
+                ...restInstall,
+                company_supplied_unit: restInstall.unit_available === "No",
+                category: "Installation",
+            };
         } else if (serviceCategory === "repair") {
-            serviceQuestions = { ...repairDetails, category: "Repair / Check-up" };
+            const { media_file, media_preview, ...restRepair } = repairDetails;
+            serviceQuestions = { ...restRepair, category: "Repair / Check-up" };
         } else {
             serviceQuestions = { ...cleaningDetails, category: "Cleaning / Preventive Maintenance" };
         }
@@ -526,9 +606,14 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         if (senderName.trim()) formData.append("sender_name", senderName.trim());
         if (senderNumber.trim()) formData.append("sender_number", senderNumber.trim());
         formData.append("service_address", serviceAddress.trim());
+        if (addressGeoCheck?.lat) formData.append("service_latitude", addressGeoCheck.lat);
+        if (addressGeoCheck?.lon) formData.append("service_longitude", addressGeoCheck.lon);
         formData.append("contact_number", contactNumber.trim());
         if (generalNotes.trim()) formData.append("notes", generalNotes.trim());
         if (receiptFile) formData.append("receipt_image", receiptFile);
+        if (serviceCategory === "repair" && repairDetails.media_file) {
+            formData.append("repair_media", repairDetails.media_file);
+        }
         formData.append("policy_acknowledged", "1");
 
         // Send structured unit & service details
@@ -1191,6 +1276,41 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                             <p className="text-[11px] text-gray-400 mt-1">If the remote or unit display shows an error code, please indicate it here.</p>
                                         </div>
                                     </div>
+
+                                    <div>
+                                        <label className="block font-bold text-gray-700 mb-1">
+                                            Upload Photo or Short Video Clip of Leaking / Faulty Unit (Optional)
+                                        </label>
+                                        <input
+                                            type="file"
+                                            accept="image/*,video/mp4,video/webm,video/quicktime"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0] || null;
+                                                setRepairDetails({
+                                                    ...repairDetails,
+                                                    media_file: file,
+                                                    media_preview: file ? URL.createObjectURL(file) : null,
+                                                });
+                                            }}
+                                            className="w-full text-xs text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer bg-white border border-gray-300 rounded-xl p-1.5"
+                                        />
+                                        {repairDetails.media_preview && (
+                                            <div className="mt-2 flex items-center gap-3">
+                                                {repairDetails.media_file?.type?.startsWith("video/") ? (
+                                                    <video src={repairDetails.media_preview} controls className="w-40 h-24 rounded-xl border border-gray-200 object-cover" />
+                                                ) : (
+                                                    <img src={repairDetails.media_preview} alt="Faulty unit preview" className="w-24 h-24 rounded-xl border border-gray-200 object-cover" />
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRepairDetails({ ...repairDetails, media_file: null, media_preview: null })}
+                                                    className="text-xs font-bold text-red-600 hover:underline"
+                                                >
+                                                    Remove file
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -1244,15 +1364,23 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
                             <div>
                                 <label className="block font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-                                    Service Address / Unit Location <span className="text-red-500">*</span>
+                                    Service Address / Unit Location (Zamboanga City Only) <span className="text-red-500">*</span>
                                 </label>
-                                <textarea
-                                    rows={2}
+                                <GeospatialAddressAutocomplete
+                                    id="booking_service_address"
                                     value={serviceAddress}
-                                    onChange={(e) => setServiceAddress(e.target.value)}
-                                    placeholder="Enter complete building / house number, street, barangay, city..."
-                                    required
-                                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition resize-none"
+                                    allowOutsideSave={false}
+                                    placeholder="Search street, barangay in Zamboanga City (real-time geospatial autocomplete)..."
+                                    onChange={(val, item) => {
+                                        setServiceAddress(val);
+                                        if (item && item.lat && item.lon) {
+                                            setServiceCoords({ lat: Number(item.lat), lon: Number(item.lon) });
+                                            if (!item.is_within_zamboanga_city) {
+                                                setOutsideZamboangaModalOpen(true);
+                                            }
+                                        }
+                                    }}
+                                    onGeocodeResult={(res) => setGeocodeVerification(res)}
                                 />
                             </div>
 
@@ -1607,16 +1735,18 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
 
                             <div>
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">
-                                    GCash Reference Number (13 digits) <span className="text-red-500">*</span>
+                                    GCash Reference Number (Max 13 digits) <span className="text-red-500">*</span>
                                 </label>
                                 <input
                                     type="text"
+                                    maxLength={13}
                                     placeholder="e.g. 1002345678901"
                                     value={refNumber}
-                                    onChange={(e) => setRefNumber(e.target.value)}
+                                    onChange={(e) => setRefNumber(e.target.value.replace(/[^0-9A-Za-z]/g, "").slice(0, 13))}
                                     required
                                     className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                                 />
+                                <p className="text-[11px] text-gray-400 mt-1">{refNumber.length}/13 characters (maximum 13 digits)</p>
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2115,6 +2245,49 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                 className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition"
                             >
                                 {editingUnitIndex >= 0 ? "Save Unit Details" : "Add to Service Request"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════════
+                MODAL: OUTSIDE ZAMBOANGA CITY ALERT
+            ══════════════════════════════════════════════════════════════════ */}
+            {outsideZamboangaModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-rose-200 p-6 sm:p-7 space-y-5 animate-in fade-in zoom-in-95 duration-200 text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-600 mx-auto flex items-center justify-center border border-rose-200">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <div className="space-y-2">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-extrabold uppercase tracking-wider">
+                                Geospatial Location Alert
+                            </span>
+                            <h3 className="text-xl font-extrabold text-slate-900">
+                                Booking Available Within Zamboanga City Only
+                            </h3>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                                Our automated forward-geocoding check detected that your current address (<strong>{serviceAddress || dashboardData?.user?.address || "Unverified Location"}</strong>) is <strong>outside Zamboanga City</strong>.
+                            </p>
+                            <p className="text-xs text-rose-800 bg-rose-50/80 border border-rose-200/80 rounded-xl p-3 font-semibold">
+                                Cooling Tower Airconditioning Services currently dispatches field technicians exclusively within Zamboanga City (7000). To proceed with booking, please provide a valid Zamboanga City service address in Step 2.
+                            </p>
+                        </div>
+                        <div className="flex items-center justify-center gap-3 pt-1">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setOutsideZamboangaModalOpen(false);
+                                    if (step === 1 && selectedServiceId) {
+                                        setStep(2);
+                                    }
+                                }}
+                                className="w-full py-3 rounded-xl bg-[#0E1A33] hover:bg-blue-900 text-white text-xs font-extrabold shadow-md transition"
+                            >
+                                I Understand — Enter a Zamboanga City Service Address
                             </button>
                         </div>
                     </div>

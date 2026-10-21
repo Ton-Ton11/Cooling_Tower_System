@@ -18,6 +18,13 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
     const [cancelBooking, setCancelBooking] = useState(null);
     const [feedbackBooking, setFeedbackBooking] = useState(null);
     const [viewDetailsBooking, setViewDetailsBooking] = useState(null);
+    const [completePaymentBooking, setCompletePaymentBooking] = useState(null);
+    const [paymentRefNumber, setPaymentRefNumber] = useState("");
+    const [paymentSenderName, setPaymentSenderName] = useState("");
+    const [paymentSenderNumber, setPaymentSenderNumber] = useState("");
+    const [paymentReceiptFile, setPaymentReceiptFile] = useState(null);
+    const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+    const [nowMs, setNowMs] = useState(Date.now());
 
     // Quotation action state
     const [quotationActionLoading, setQuotationActionLoading] = useState(false);
@@ -40,10 +47,51 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
         fetchBookings();
     }, [fetchBookings]);
 
+    useEffect(() => {
+        const hasPaymentIncomplete = bookings.some(b => b.booking_status === "Payment Incomplete");
+        if (!hasPaymentIncomplete) return;
+        const timer = setInterval(() => {
+            setNowMs(Date.now());
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [bookings]);
+
+    const handleCompletePaymentSubmit = async (e) => {
+        e.preventDefault();
+        if (!completePaymentBooking) return;
+        if (!paymentRefNumber.trim() || paymentRefNumber.trim().length < 5 || paymentRefNumber.trim().length > 13) {
+            addToast("Please enter a valid GCash reference number (maximum 13 digits).", "error");
+            return;
+        }
+        setPaymentSubmitting(true);
+        const fd = new FormData();
+        fd.append("reference_number", paymentRefNumber.trim());
+        fd.append("amount_paid", 300);
+        if (paymentSenderName.trim()) fd.append("sender_name", paymentSenderName.trim());
+        if (paymentSenderNumber.trim()) fd.append("sender_number", paymentSenderNumber.trim());
+        if (paymentReceiptFile) fd.append("receipt_image", paymentReceiptFile);
+
+        try {
+            const { data } = await window.axios.post(CUSTOMER_ENDPOINTS.completePayment(completePaymentBooking.booking_id), fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            addToast(data.message || "Payment completed successfully!", "success");
+            setCompletePaymentBooking(null);
+            setPaymentRefNumber("");
+            setPaymentReceiptFile(null);
+            fetchBookings(false);
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Failed to submit payment completion."), "error");
+            fetchBookings(false);
+        } finally {
+            setPaymentSubmitting(false);
+        }
+    };
+
     const filteredBookings = useMemo(() => {
         return bookings.filter((b) => {
             let matchTab = true;
-            if (tab === "Pending") matchTab = b.booking_status === "Pending" || b.booking_status === "Rescheduled";
+            if (tab === "Pending") matchTab = ["Pending", "Rescheduled", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status);
             else if (tab === "Active") matchTab = ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status);
             else if (tab === "Completed") matchTab = b.booking_status === "Completed";
             else if (tab === "Cancelled") matchTab = b.booking_status === "Cancelled";
@@ -64,7 +112,7 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
 
     const counts = useMemo(() => {
         return {
-            Pending: bookings.filter(b => b.booking_status === "Pending" || b.booking_status === "Rescheduled").length,
+            Pending: bookings.filter(b => ["Pending", "Rescheduled", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status)).length,
             Active: bookings.filter(b => ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status)).length,
             Completed: bookings.filter(b => b.booking_status === "Completed").length,
             Cancelled: bookings.filter(b => b.booking_status === "Cancelled").length,
@@ -199,11 +247,22 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
             ) : (
                 <div className="grid grid-cols-1 gap-4">
                     {filteredBookings.map((b) => {
-                        const isPending = b.booking_status === "Pending" || b.booking_status === "Rescheduled";
+                        const isPending = ["Pending", "Rescheduled", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status);
+                        const isPaymentIncomplete = b.booking_status === "Payment Incomplete";
+                        const isRescheduleNotice = b.booking_status === "Reschedule Notice" || Boolean(b.service_details?.reschedule_notice_by_manager);
                         const isCompleted = b.booking_status === "Completed";
                         const isCancelled = b.booking_status === "Cancelled";
                         const canReschedule = isPending || ["Approved"].includes(b.booking_status);
                         const canCancel = isPending;
+
+                        let remainingSeconds = 0;
+                        if (isPaymentIncomplete) {
+                            const dueIso = b.service_details?.payment_due_at;
+                            const dueTime = dueIso ? new Date(dueIso).getTime() : 0;
+                            remainingSeconds = dueTime ? Math.max(0, Math.floor((dueTime - nowMs) / 1000)) : 0;
+                        }
+                        const minsLeft = String(Math.floor(remainingSeconds / 60)).padStart(2, "0");
+                        const secsLeft = String(remainingSeconds % 60).padStart(2, "0");
                         const unitsCount = b.total_units_count
                             ? b.total_units_count
                             : Array.isArray(b.units_data) && b.units_data.length > 0
@@ -270,13 +329,29 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                             </button>
                                         )}
 
+                                        {isPaymentIncomplete && (
+                                            <button
+                                                onClick={() => {
+                                                    setCompletePaymentBooking(b);
+                                                    setPaymentRefNumber("");
+                                                }}
+                                                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5"
+                                            >
+                                                <span>Complete Payment ({minsLeft}:{secsLeft})</span>
+                                            </button>
+                                        )}
+
                                         {canReschedule && (
                                             <button
                                                 onClick={() => setRescheduleBooking(b)}
-                                                className="px-3.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 text-blue-700 text-xs font-bold transition flex items-center gap-1.5"
+                                                className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 ${
+                                                    isRescheduleNotice
+                                                        ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                                                        : "border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 text-blue-700"
+                                                }`}
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                Reschedule (₱150)
+                                                {isRescheduleNotice ? "Reschedule (Free)" : "Reschedule (₱150)"}
                                             </button>
                                         )}
 
@@ -382,9 +457,57 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                                     </div>
                                 </div>
 
+                                {isPaymentIncomplete && (
+                                    <div className="mt-3 bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950">
+                                        <div>
+                                            <p className="font-extrabold text-amber-900 uppercase tracking-wider">
+                                                ⚠ Action Required: Payment Incomplete — Complete within {minsLeft}:{secsLeft}
+                                            </p>
+                                            <p className="text-amber-800 mt-0.5">
+                                                The Manager marked your reservation payment as incomplete. Please complete your payment within 10 minutes, otherwise your booking will be automatically cancelled and your payment returned.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setCompletePaymentBooking(b);
+                                                setPaymentRefNumber("");
+                                            }}
+                                            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0"
+                                        >
+                                            Complete Payment Now
+                                        </button>
+                                    </div>
+                                )}
+
+                                {isRescheduleNotice && (
+                                    <div className="mt-3 bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-indigo-950">
+                                        <div>
+                                            <p className="font-extrabold text-indigo-900 uppercase tracking-wider">
+                                                📅 Reschedule Notice from Manager (Free Reschedule — ₱0.00)
+                                            </p>
+                                            <p className="text-indigo-800 mt-0.5">
+                                                {b.service_details?.reschedule_notice_message || "Your preferred date/time slot is no longer available. Please choose a vacant schedule at no extra cost."}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRescheduleBooking(b)}
+                                            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shrink-0"
+                                        >
+                                            Choose New Schedule (Free)
+                                        </button>
+                                    </div>
+                                )}
+
                                 {isCancelled && b.cancellation_reason && (
                                     <div className="mt-3 bg-rose-50/80 border border-rose-100 rounded-xl p-3 text-xs text-rose-900">
                                         <span className="font-bold">Cancellation Reason:</span> {b.cancellation_reason}
+                                        {b.payment_status === "Returned" && (
+                                            <span className="ml-2 inline-block px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 font-bold text-[10px]">
+                                                Payment Returned
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -417,6 +540,93 @@ export default function MyBookings({ addToast, onNavigate, defaultTab = "Pending
                 onSuccess={() => fetchBookings(false)}
                 addToast={addToast}
             />
+
+            {/* Complete Payment Modal (10-Minute Deadline) */}
+            {completePaymentBooking && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-100 overflow-hidden">
+                        <div className="bg-amber-600 p-5 text-white flex items-center justify-between">
+                            <div>
+                                <h3 className="text-base font-extrabold">Complete Reservation Payment</h3>
+                                <p className="text-xs text-amber-100 mt-0.5">Booking #{completePaymentBooking.booking_id} — 10-Minute Window</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setCompletePaymentBooking(null)}
+                                className="text-white/80 hover:text-white p-1.5 rounded-lg bg-white/10"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <form onSubmit={handleCompletePaymentSubmit} className="p-5 space-y-4 text-xs">
+                            <p className="text-gray-600 leading-relaxed">
+                                Please submit your valid 13-digit GCash reference number and receipt proof to complete your ₱300.00 reservation payment before the 10-minute timer expires.
+                            </p>
+                            <div>
+                                <label className="block font-bold text-gray-700 uppercase mb-1">
+                                    GCash Reference Number (Max 13 digits) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    maxLength={13}
+                                    value={paymentRefNumber}
+                                    onChange={(e) => setPaymentRefNumber(e.target.value.replace(/[^0-9A-Za-z]/g, "").slice(0, 13))}
+                                    placeholder="e.g. 1002345678901"
+                                    required
+                                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm font-mono"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-gray-600 mb-1">Sender Name</label>
+                                    <input
+                                        type="text"
+                                        value={paymentSenderName}
+                                        onChange={(e) => setPaymentSenderName(e.target.value)}
+                                        placeholder="GCash name"
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-600 mb-1">Sender Number</label>
+                                    <input
+                                        type="text"
+                                        value={paymentSenderNumber}
+                                        onChange={(e) => setPaymentSenderNumber(e.target.value)}
+                                        placeholder="09XX XXX XXXX"
+                                        className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-gray-600 mb-1">Upload GCash Receipt Proof</label>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => setPaymentReceiptFile(e.target.files?.[0] || null)}
+                                    className="w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-50 file:text-amber-700"
+                                />
+                            </div>
+                            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => setCompletePaymentBooking(null)}
+                                    className="px-4 py-2 rounded-xl border border-gray-200 font-bold text-gray-600"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={paymentSubmitting}
+                                    className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-sm disabled:opacity-50"
+                                >
+                                    {paymentSubmitting ? "Submitting..." : "Submit Payment"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* ══════════════════════════════════════════════════════════════════
                 VIEW DETAILS & OFFICIAL QUOTATION MODAL

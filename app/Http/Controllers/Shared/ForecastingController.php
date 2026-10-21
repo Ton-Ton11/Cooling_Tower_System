@@ -16,6 +16,69 @@ class ForecastingController extends Controller
     ) {}
 
     /**
+     * List technician certifications for the Technician Certificate Status Monitoring tab.
+     */
+    public function indexCertifications(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            abort(401);
+        }
+
+        $this->forecastingService->ensureTablesExist();
+
+        $roleId = (int) $user->role_id;
+        $userId = (int) $user->user_id;
+
+        // Ensure all technicians have certifications initialized
+        $techUsers = \App\Models\User::whereIn('role_id', [5, 7])
+            ->orderBy('role_id', 'desc')
+            ->orderBy('given_name')
+            ->get();
+
+        foreach ($techUsers as $tUser) {
+            $this->forecastingService->getTechnicianCertifications((int) $tUser->user_id);
+        }
+
+        $personalCerts = in_array($roleId, [5, 7], true)
+            ? $this->forecastingService->getTechnicianCertifications($userId)
+            : [];
+
+        $analytics = $this->forecastingService->getManagerForecastAnalytics();
+        $allCerts = $analytics['technician_alerts'] ?? [];
+
+        // If regular technician (role 5), scope to their own certifications
+        $visibleCerts = ($roleId === 5)
+            ? $personalCerts
+            : $allCerts;
+
+        $summary = [
+            'total_certificates'           => count($visibleCerts),
+            'active_compliant'             => collect($visibleCerts)->where('status', 'Active')->count(),
+            'expiring_within_1_week'       => collect($visibleCerts)->filter(fn ($c) => ($c['days_until_expiry'] ?? 99) <= 7 && ($c['status'] ?? '') !== 'Renewal Submitted')->count(),
+            'pending_manager_verification' => collect($visibleCerts)->where('status', 'Renewal Submitted')->count(),
+        ];
+
+        $technicianOptions = $techUsers->map(fn ($u) => [
+            'user_id'    => (int) $u->user_id,
+            'name'       => $u->name,
+            'role_id'    => (int) $u->role_id,
+            'role_label' => (int) $u->role_id === 7 ? 'Head Technician' : 'Technician',
+        ])->values()->all();
+
+        return response()->json([
+            'role_id'                 => $roleId,
+            'is_manager'              => in_array($roleId, [1, 2], true),
+            'is_head_technician'      => $roleId === 7,
+            'is_technician'           => in_array($roleId, [5, 7], true),
+            'summary'                 => $summary,
+            'certifications'          => $visibleCerts,
+            'personal_certifications' => $personalCerts,
+            'technicians'             => $technicianOptions,
+        ]);
+    }
+
+    /**
      * Store a new certification for a technician.
      */
     public function storeCertification(Request $request): JsonResponse
@@ -27,28 +90,31 @@ class ForecastingController extends Controller
 
         $validated = $request->validate([
             'user_id'            => ['nullable', 'integer', 'exists:users,user_id'],
+            'technician_user_id' => ['nullable', 'integer', 'exists:users,user_id'],
             'certification_name' => ['required', 'string', 'max:180'],
             'issuing_body'       => ['required', 'string', 'max:120'],
             'certificate_number' => ['nullable', 'string', 'max:100'],
             'issued_date'        => ['required', 'date'],
             'expiry_date'        => ['required', 'date', 'after_or_equal:issued_date'],
-            'renewal_lead_days'  => ['nullable', 'integer', 'min:7', 'max:180'],
+            'renewal_lead_days'  => ['nullable', 'integer', 'min:1', 'max:180'],
             'notes'              => ['nullable', 'string', 'max:500'],
         ]);
 
-        $isLeaderOrAdmin = in_array((int) $user->role_id, [1, 2, 3, 7], true) || (bool) $user->is_head_technician;
+        $isManagerOrSuperAdmin = in_array((int) $user->role_id, [1, 2], true);
+        if (! $isManagerOrSuperAdmin) {
+            abort(403, 'Only the Manager can register new technician certificates.');
+        }
 
-        // Technicians can only add for themselves unless Manager/Super Admin/Head Tech
-        $targetUserId = ($isLeaderOrAdmin && ! empty($validated['user_id']))
+        $targetUserId = ! empty($validated['user_id'])
             ? (int) $validated['user_id']
-            : (int) $user->user_id;
+            : (! empty($validated['technician_user_id']) ? (int) $validated['technician_user_id'] : (int) $user->user_id);
 
         $this->forecastingService->ensureTablesExist();
 
         $expiry = Carbon::parse($validated['expiry_date'])->startOfDay();
         $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
-        $leadDays = (int) ($validated['renewal_lead_days'] ?? 45);
-        $status = $daysLeft < 0 ? 'Expired' : ($daysLeft <= 14 ? 'Critical' : ($daysLeft <= $leadDays ? 'Expiring Soon' : 'Active'));
+        $leadDays = 7; // 1-week forecasting validation window
+        $status = $daysLeft < 0 ? 'Expired' : ($daysLeft <= 3 ? 'Critical' : ($daysLeft <= $leadDays ? 'Expiring Soon' : 'Active'));
 
         TechnicianCertification::create([
             'user_id'            => $targetUserId,
@@ -63,13 +129,14 @@ class ForecastingController extends Controller
         ]);
 
         return response()->json([
-            'message'        => 'Certification added and compliance forecast updated.',
+            'message'        => 'Certification added and 1-week forecasting monitor activated.',
             'certifications' => $this->forecastingService->getTechnicianCertifications($targetUserId),
         ], 201);
     }
 
     /**
-     * Mark a technician certification as renewed or renewal submitted.
+     * Handle Technician single-submission of renewed certificate (when within 1 week of expiry)
+     * OR Manager verification & new expiration date confirmation to restart the countdown.
      */
     public function renewCertification(Request $request, int $certificationId): JsonResponse
     {
@@ -81,37 +148,125 @@ class ForecastingController extends Controller
         $this->forecastingService->ensureTablesExist();
 
         $cert = TechnicianCertification::findOrFail($certificationId);
-        $isLeaderOrAdmin = in_array((int) $user->role_id, [1, 2, 3, 7], true) || (bool) $user->is_head_technician;
+        $roleId = (int) $user->role_id;
+        $isManagerOrSuperAdmin = in_array($roleId, [1, 2], true);
+        $isOwnerOrHeadTech = ((int) $cert->user_id === (int) $user->user_id) || $roleId === 7;
 
-        if ((int) $cert->user_id !== (int) $user->user_id && ! $isLeaderOrAdmin) {
-            abort(403, 'Unauthorized to update this certification.');
+        $action = $request->input('action', $isManagerOrSuperAdmin ? 'update_dates' : 'submit_renewal');
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 1: TECHNICIAN SUBMITS RENEWED CERTIFICATE (CAN ONLY SUBMIT ONCE)
+        // ─────────────────────────────────────────────────────────────────────
+        if ($action === 'submit_renewal') {
+            if (! $isOwnerOrHeadTech && ! $isManagerOrSuperAdmin) {
+                abort(403, 'You can only submit a renewed certificate for your own certification record.');
+            }
+
+            // Enforce single submission rule: Technician can only submit once per renewal cycle
+            if ($cert->status === 'Renewal Submitted') {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'certificate_number' => ['You have already submitted your renewed certificate (1 submission maximum). Please wait for the Manager to verify your certificate and enter the new expiration date.'],
+                ]);
+            }
+
+            $expiry = Carbon::parse($cert->expiry_date)->startOfDay();
+            $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
+
+            // Forecasting validation: Reminder & submission unlock when certificate is about to expire 1 week (7 days) from now or less
+            if ($daysLeft > 7 && ! $isManagerOrSuperAdmin) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'certificate_number' => ["Forecasting validation: This certificate still has {$daysLeft} days remaining. The renewal reminder and submission unlock when the certificate is 1 week (7 days) away from expiration."],
+                ]);
+            }
+
+            $validated = $request->validate([
+                'certificate_number' => ['required', 'string', 'min:3', 'max:100'],
+                'submission_notes'   => ['nullable', 'string', 'max:500'],
+                'certificate_file'   => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+            ], [
+                'certificate_number.required' => 'Please enter your renewed certificate number for Manager verification.',
+            ]);
+
+            $proofPath = null;
+            if ($request->hasFile('certificate_file')) {
+                $file = $request->file('certificate_file');
+                $filename = 'cert_' . $cert->certification_id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                $destDir = public_path('uploads/certificates');
+                if (! is_dir($destDir)) {
+                    @mkdir($destDir, 0755, true);
+                }
+                $file->move($destDir, $filename);
+                $proofPath = '/uploads/certificates/' . $filename;
+            }
+
+            $submissionSummary = sprintf(
+                '[Submitted by Technician %s on %s]: Renewed Cert #%s%s%s',
+                $user->name,
+                now()->format('M d, Y h:i A'),
+                trim($validated['certificate_number']),
+                ! empty($validated['submission_notes']) ? ' — ' . trim($validated['submission_notes']) : '',
+                $proofPath ? " (Proof: {$proofPath})" : ''
+            );
+
+            $cert->update([
+                'certificate_number' => trim($validated['certificate_number']),
+                'status'             => 'Renewal Submitted',
+                'last_reminded_at'   => now(),
+                'notes'              => $submissionSummary,
+            ]);
+
+            return response()->json([
+                'message'        => 'Renewed certificate submitted (1/1)! The Manager will now verify your certificate, confirm the renewal status, and enter the new expiration date.',
+                'certifications' => $this->forecastingService->getTechnicianCertifications((int) $cert->user_id),
+            ]);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 2: MANAGER VERIFIES CERTIFICATE & ENTERS NEW EXPIRATION DATE
+        // ─────────────────────────────────────────────────────────────────────
+        if (! $isManagerOrSuperAdmin) {
+            abort(403, 'Only the Manager can verify submitted certificates, confirm renewal status, and enter the new expiration date.');
         }
 
         $validated = $request->validate([
-            'action'             => ['nullable', 'string', 'in:submit_renewal,update_dates'],
-            'new_expiry_date'    => ['nullable', 'date'],
-            'certificate_number' => ['nullable', 'string', 'max:100'],
+            'new_expiry_date'      => ['required', 'date', 'after:today'],
+            'certificate_number'   => ['nullable', 'string', 'max:100'],
+            'certificate_verified' => ['nullable', 'boolean'],
+            'verification_notes'   => ['nullable', 'string', 'max:500'],
+        ], [
+            'new_expiry_date.required' => 'Please enter the new expiration date so the certificate countdown can start over again.',
+            'new_expiry_date.after'    => 'The new expiration date must be a future date.',
         ]);
 
-        if (($validated['action'] ?? 'submit_renewal') === 'update_dates' && ! empty($validated['new_expiry_date'])) {
-            $cert->update([
-                'issued_date'        => now()->toDateString(),
-                'expiry_date'        => $validated['new_expiry_date'],
-                'certificate_number' => $validated['certificate_number'] ?? $cert->certificate_number,
-                'status'             => 'Active',
-                'last_reminded_at'   => null,
-            ]);
-            $msg = 'Certification renewed and new expiry date recorded!';
-        } else {
-            $cert->update([
-                'status'           => 'Renewal Submitted',
-                'last_reminded_at' => now(),
-            ]);
-            $msg = 'Certification marked as Renewal Submitted.';
+        $newExpiry = Carbon::parse($validated['new_expiry_date'])->startOfDay();
+        $daysUntilNewExpiry = (int) now()->startOfDay()->diffInDays($newExpiry, false);
+        $newStatus = $daysUntilNewExpiry <= 7 ? 'Expiring Soon' : 'Active';
+
+        $cert->update([
+            'issued_date'        => now()->toDateString(),
+            'expiry_date'        => $newExpiry->toDateString(),
+            'certificate_number' => ! empty($validated['certificate_number']) ? trim($validated['certificate_number']) : $cert->certificate_number,
+            'renewal_lead_days'  => 7,
+            'status'             => $newStatus,
+            'last_reminded_at'   => null,
+            'notes'              => sprintf(
+                '[Verified & Renewed by Manager %s on %s]: New expiration set to %s (%d days). Forecasting countdown restarted.%s',
+                $user->name,
+                now()->format('M d, Y h:i A'),
+                $newExpiry->format('M d, Y'),
+                $daysUntilNewExpiry,
+                ! empty($validated['verification_notes']) ? ' Note: ' . trim($validated['verification_notes']) : ''
+            ),
+        ]);
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('technician_details')) {
+            \Illuminate\Support\Facades\DB::table('technician_details')
+                ->where('user_id', $cert->user_id)
+                ->update(['certificate_expiry' => $newExpiry->toDateString()]);
         }
 
         return response()->json([
-            'message'        => $msg,
+            'message'        => "Certificate verified and renewed! Forecasting countdown has restarted until {$newExpiry->format('M d, Y')} ({$daysUntilNewExpiry} days).",
             'certifications' => $this->forecastingService->getTechnicianCertifications((int) $cert->user_id),
         ]);
     }
@@ -122,7 +277,7 @@ class ForecastingController extends Controller
     public function triggerReminderEvaluation(Request $request): JsonResponse
     {
         $user = $request->user();
-        $isAllowed = $user && (in_array((int) $user->role_id, [1, 2, 3, 7], true) || (bool) $user->is_head_technician);
+        $isAllowed = $user && in_array((int) $user->role_id, [1, 2, 3, 7], true);
         if (! $isAllowed) {
             abort(403);
         }

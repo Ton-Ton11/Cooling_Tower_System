@@ -29,6 +29,10 @@ const icons = {
 export default function ManagerDashboardOverview({ addToast, onNavigate, dashboardData, isLoading, onRefresh }) {
     const [activeTab, setActiveTab] = useState("pending"); // "pending" | "active" | "chart" | "forecasting"
     const [evaluatingReminders, setEvaluatingReminders] = useState(false);
+    const [renewingCert, setRenewingCert] = useState(null);
+    const [renewCertNumber, setRenewCertNumber] = useState("");
+    const [renewExpiryDate, setRenewExpiryDate] = useState("");
+    const [submittingCertRenewal, setSubmittingCertRenewal] = useState(false);
 
     const stats = dashboardData?.stats ?? {};
     const pendingBookings = dashboardData?.pending_bookings ?? [];
@@ -54,16 +58,29 @@ export default function ManagerDashboardOverview({ addToast, onNavigate, dashboa
         }
     };
 
-    const handleManagerRenewTechCert = async (certId) => {
+    const openRenewCertModal = (cert) => {
+        setRenewingCert(cert);
+        setRenewCertNumber(cert.certificate_number || "");
+        setRenewExpiryDate(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+    };
+
+    const handleManagerRenewTechCert = async (e) => {
+        if (e) e.preventDefault();
+        if (!renewingCert) return;
         try {
-            const res = await window.axios.patch(`/forecasting/certifications/${certId}/renew`, {
+            setSubmittingCertRenewal(true);
+            const res = await window.axios.patch(`/forecasting/certifications/${renewingCert.certification_id}/renew`, {
                 action: "update_dates",
-                new_expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+                certificate_number: renewCertNumber.trim() || undefined,
+                new_expiry_date: renewExpiryDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
             });
-            if (addToast) addToast(res.data?.message || "Technician certification renewed.", "success");
+            if (addToast) addToast(res.data?.message || "Technician renewed certificate submitted and verified.", "success");
+            setRenewingCert(null);
             if (onRefresh) onRefresh();
         } catch (err) {
             if (addToast) addToast(err?.response?.data?.message || "Failed to update certification.", "error");
+        } finally {
+            setSubmittingCertRenewal(false);
         }
     };
 
@@ -579,13 +596,22 @@ export default function ManagerDashboardOverview({ addToast, onNavigate, dashboa
 
                             {/* TECHNICIAN CERTIFICATION COMPLIANCE MATRIX */}
                             <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
-                                <div>
-                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">
-                                        Workforce Qualification & Safety Compliance
-                                    </span>
-                                    <h3 className="text-base font-extrabold text-slate-900">
-                                        Technician Certification Expiry & Renewal Forecast
-                                    </h3>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div>
+                                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">
+                                            Workforce Qualification & 1-Week Expiry Validation
+                                        </span>
+                                        <h3 className="text-base font-extrabold text-slate-900">
+                                            Technician Certificate Status Monitoring & Verification
+                                        </h3>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => onNavigate("certificates")}
+                                        className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-extrabold transition shrink-0 self-start sm:self-center"
+                                    >
+                                        Open Certificate Monitoring Tab &rarr;
+                                    </button>
                                 </div>
 
                                 <div className="space-y-3">
@@ -605,28 +631,105 @@ export default function ManagerDashboardOverview({ addToast, onNavigate, dashboa
                                                                 ? "bg-rose-100 text-rose-800"
                                                                 : ta.status === "Expiring Soon"
                                                                 ? "bg-amber-100 text-amber-800"
+                                                                : ta.status === "Renewal Submitted"
+                                                                ? "bg-blue-100 text-blue-800"
                                                                 : "bg-emerald-100 text-emerald-800"
                                                         }`}
                                                     >
                                                         {ta.status}
                                                     </span>
+                                                    {ta.status === "Renewal Submitted" && (
+                                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-600 text-white">
+                                                            Technician Submitted (1/1)
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-slate-700 font-semibold">
-                                                    {ta.certification_name} ({ta.issuing_body})
+                                                    {ta.certification_name} ({ta.issuing_body}) • Cert #: {ta.certificate_number || "On File"}
                                                 </p>
                                                 <p className="text-[11px] text-slate-500">
                                                     Expires: <strong>{ta.expiry_date}</strong> ({ta.days_until_expiry < 0 ? `${Math.abs(ta.days_until_expiry)}d ago` : `${ta.days_until_expiry} days left`})
                                                 </p>
                                             </div>
                                             <button
-                                                onClick={() => handleManagerRenewTechCert(ta.certification_id)}
-                                                className="px-3 py-1.5 rounded-xl bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold transition shrink-0 self-end sm:self-center"
+                                                type="button"
+                                                onClick={() => openRenewCertModal(ta)}
+                                                className={`px-3.5 py-2 rounded-xl text-white text-xs font-bold transition shrink-0 self-end sm:self-center shadow-xs ${
+                                                    ta.status === "Renewal Submitted"
+                                                        ? "bg-emerald-600 hover:bg-emerald-700"
+                                                        : "bg-indigo-600 hover:bg-indigo-700"
+                                                }`}
                                             >
-                                                Verify & Renew (+1 Yr)
+                                                {ta.status === "Renewal Submitted"
+                                                    ? "Verify & Set New Expiration"
+                                                    : "Verify & Renew Certificate"}
                                             </button>
                                         </div>
                                     ))}
                                 </div>
+
+                                {renewingCert && (
+                                    <form
+                                        onSubmit={handleManagerRenewTechCert}
+                                        className="mt-4 p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-3 text-xs"
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="font-extrabold text-indigo-950">
+                                                Verify Certificate & Reset Expiration Countdown — {renewingCert.technician_name} ({renewingCert.certification_name})
+                                            </h4>
+                                            <button
+                                                type="button"
+                                                onClick={() => setRenewingCert(null)}
+                                                className="text-slate-500 hover:text-slate-800 font-bold"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block font-bold text-slate-700 mb-1">
+                                                    Verified Certificate Number
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    required
+                                                    value={renewCertNumber}
+                                                    onChange={(e) => setRenewCertNumber(e.target.value)}
+                                                    placeholder="e.g. TESDA-NC2-2026-8841"
+                                                    className="w-full rounded-xl border border-slate-300 px-3 py-2 bg-white text-xs"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block font-bold text-slate-700 mb-1">
+                                                    New Expiration Date (Restarts Countdown)
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    required
+                                                    value={renewExpiryDate}
+                                                    onChange={(e) => setRenewExpiryDate(e.target.value)}
+                                                    className="w-full rounded-xl border border-slate-300 px-3 py-2 bg-white text-xs"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end gap-2 pt-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => setRenewingCert(null)}
+                                                className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-600 font-bold"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={submittingCertRenewal}
+                                                className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
+                                            >
+                                                {submittingCertRenewal ? "Verifying..." : "Verify & Confirm Renew Status"}
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
                             </div>
                         </div>
                     )}

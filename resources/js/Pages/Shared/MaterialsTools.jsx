@@ -662,9 +662,14 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     };
 
     // Filtered items by category & sub-category from active inventory
-    const workerMaterials = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool'), [activeItems]);
-    const powerTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'power'), [activeItems]);
-    const handTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'hand'), [activeItems]);
+    const isDamagedOrLostItem = (i) =>
+        ['Lost/Damaged', 'Damaged', 'Lost', 'Broken'].includes(i.status) ||
+        (i.sub_category || '').toLowerCase() === 'damaged / lost';
+
+    const workerMaterials = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool' && !isDamagedOrLostItem(i)), [activeItems]);
+    const powerTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'power' && !isDamagedOrLostItem(i)), [activeItems]);
+    const handTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'hand' && !isDamagedOrLostItem(i)), [activeItems]);
+    const damagedLostTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && isDamagedOrLostItem(i)), [activeItems]);
     const saleItems = useMemo(() => activeItems.filter(i => i.inventory_mode === 'sale'), [activeItems]);
     
     const lowStockWorker = useMemo(() => workerMaterials.filter(i => i.quantity_on_hand <= i.reorder_level), [workerMaterials]);
@@ -1814,11 +1819,12 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
                     {/* Worker Field Sub-Tabs */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-                        <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', borderRadius: 10, padding: 4 }}>
+                        <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', borderRadius: 10, padding: 4, flexWrap: 'wrap' }}>
                             {[
                                 { key: 'materials', label: 'Materials', count: workerMaterials.length, fieldType: 'materials' },
                                 { key: 'power', label: 'Power Tools', count: powerTools.length, fieldType: 'power_tools' },
                                 { key: 'hand', label: 'Hand Tools & Hardware', count: handTools.length, fieldType: 'hand_tools' },
+                                { key: 'damaged_lost', label: 'Damaged / Lost', count: damagedLostTools.length, fieldType: null },
                                 { key: 'logs', label: 'Usage & Borrowing Logs', count: checkouts.length, fieldType: null },
                             ].map(t => (
                                 <button key={t.key} onClick={() => setWorkerSubTab(t.key)}
@@ -1836,7 +1842,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
 
                         {/* Top Action Buttons for the Active Field */}
-                        {workerSubTab !== 'logs' ? (
+                        {workerSubTab !== 'logs' && workerSubTab !== 'damaged_lost' ? (
                             isAdminAssistant ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#F1F5F9', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#64748B' }}>
                                     <LockIcon size={12} color="#64748B" />
@@ -2501,6 +2507,80 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 </div>
                             </div>
                         </>
+                    )}
+
+                    {/* ══════════════════════════════════════════════════════════════
+                        3B. DAMAGED / LOST CATEGORY SUB-TAB
+                       ══════════════════════════════════════════════════════════════ */}
+                    {workerSubTab === 'damaged_lost' && (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#991B1B', margin: 0 }}>
+                                        Damaged / Lost Tools & Equipment Category
+                                    </p>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        Tools and equipment reported as Damaged or Lost during checklist return inspection
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+                                    <thead>
+                                        <tr style={{ background: '#FEF2F2' }}>
+                                            {['ID', 'Item Name', 'Tool Subtype', 'Serial Number', 'Qty', 'Status', 'Category', 'Last Updated'].map(h => (
+                                                <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#991B1B', whiteSpace: 'nowrap', borderBottom: '1px solid #FECACA' }}>
+                                                    {h}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {damagedLostTools.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={8} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No damaged or lost tools recorded in inventory.
+                                                </td>
+                                            </tr>
+                                        ) : damagedLostTools.map(item => (
+                                            <tr key={item.item_id} style={{ borderTop: '1px solid #FEE2E2' }}>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>#{item.item_id}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{item.item_name}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569', textTransform: 'capitalize' }}>
+                                                    {item.tool_subtype === 'power' ? 'Power Tool' : 'Hand Tool'}
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, fontFamily: 'monospace', color: '#64748B' }}>
+                                                    {item.serial_number || '—'}
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: '#991B1B' }}>
+                                                    {item.quantity_on_hand || 1} {item.unit || 'pc'}
+                                                </td>
+                                                <td style={{ padding: '10px 12px' }}>
+                                                    <span style={{
+                                                        display: 'inline-block',
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        padding: '3px 10px',
+                                                        borderRadius: 9999,
+                                                        background: item.status === 'Lost' ? '#1F2937' : '#FEE2E2',
+                                                        color: item.status === 'Lost' ? '#FFFFFF' : '#DC2626',
+                                                    }}>
+                                                        {item.status || 'Damaged / Lost'}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#B91C1C' }}>
+                                                    Damaged / Lost
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8' }}>
+                                                    {item.last_updated || '—'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     )}
 
                     {/* ══════════════════════════════════════════════════════════════

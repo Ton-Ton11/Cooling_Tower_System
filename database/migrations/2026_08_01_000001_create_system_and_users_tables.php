@@ -128,7 +128,6 @@ return new class extends Migration
             Schema::create('users', function (Blueprint $table) {
                 $table->integer('user_id')->autoIncrement();
                 $table->integer('role_id');
-                $table->boolean('is_head_technician')->default(false);
                 $table->string('given_name', 100);
                 $table->string('middle_name', 100)->nullable();
                 $table->string('last_name', 100);
@@ -200,6 +199,18 @@ return new class extends Migration
             });
         }
 
+        // 11. Email Verification & Password Reset OTPs (6-digit Gmail codes)
+        if (! Schema::hasTable('email_otps')) {
+            Schema::create('email_otps', function (Blueprint $table) {
+                $table->id();
+                $table->string('email', 150)->index();
+                $table->string('purpose', 40)->default('email_verification')->index();
+                $table->string('code', 10);
+                $table->timestamp('expires_at');
+                $table->timestamps();
+            });
+        }
+
         Schema::enableForeignKeyConstraints();
     }
 
@@ -210,6 +221,7 @@ return new class extends Migration
     {
         Schema::disableForeignKeyConstraints();
 
+        Schema::dropIfExists('email_otps');
         Schema::dropIfExists('user_notification_reads');
         Schema::dropIfExists('staff_messages');
         Schema::dropIfExists('announcements');

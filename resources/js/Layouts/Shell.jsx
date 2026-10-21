@@ -17,6 +17,7 @@ import ActivityLogs from "../Pages/Shared/ActivityLogs";
 import Performance from "../Pages/Shared/Performance";
 import ServiceCatalog from "../Pages/Shared/ServiceCatalog";
 import TeamManagement from "../Pages/Shared/TeamManagement";
+import CertificateMonitoring from "../Pages/Shared/CertificateMonitoring";
 import UserProfileSettings from "../Pages/Shared/UserProfileSettings";
 import {
     SUPER_ADMIN_ENDPOINTS,
@@ -154,6 +155,12 @@ function Shell() {
             <TeamManagement
                 addToast={addToast}
                 endpoints={SUPER_ADMIN_ENDPOINTS}
+                onDataChanged={handleDataChanged}
+            />
+        ),
+        certificates: (
+            <CertificateMonitoring
+                addToast={addToast}
                 onDataChanged={handleDataChanged}
             />
         ),

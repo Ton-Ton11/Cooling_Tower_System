@@ -124,6 +124,7 @@ export const MANAGER_ENDPOINTS = {
     announcements: "/manager/announcements",
     deleteAnnouncement: (id) => `/manager/announcements/${id}`,
     performance: "/manager/performance",
+    salesRecords: "/manager/sales-records",
 
     // Catalog Management endpoints
     catalog: "/manager/catalog",
@@ -274,6 +275,7 @@ export const TECHNICIAN_ENDPOINTS = {
     checklists: "/technician/checklists",
     storeChecklist: "/technician/checklists",
     updateChecklist: (id) => `/technician/checklists/${id}`,
+    updateChecklistItemStatus: (checklistId, itemId) => `/technician/checklists/${checklistId}/items/${itemId}/status`,
     availableCatalog: "/technician/available-catalog",
     announcements: "/technician/announcements",
     performance: "/technician/performance",
@@ -300,6 +302,7 @@ export const HEAD_TECHNICIAN_ENDPOINTS = {
     checklists: "/head-technician/checklists",
     storeChecklist: "/head-technician/checklists",
     updateChecklist: (id) => `/head-technician/checklists/${id}`,
+    updateChecklistItemStatus: (checklistId, itemId) => `/head-technician/checklists/${checklistId}/items/${itemId}/status`,
     availableCatalog: "/head-technician/available-catalog",
     announcements: "/head-technician/announcements",
     performance: "/head-technician/performance",
@@ -313,6 +316,7 @@ export const CUSTOMER_ENDPOINTS = {
     bookings: "/customer/bookings",
     storeBooking: "/customer/bookings",
     rescheduleBooking: (bookingId) => `/customer/bookings/${bookingId}/reschedule`,
+    completePayment: (bookingId) => `/customer/bookings/${bookingId}/complete-payment`,
     cancelBooking: (bookingId) => `/customer/bookings/${bookingId}/cancel`,
     respondQuotation: (bookingId) => `/customer/bookings/${bookingId}/quotation-response`,
     feedback: "/customer/feedback",

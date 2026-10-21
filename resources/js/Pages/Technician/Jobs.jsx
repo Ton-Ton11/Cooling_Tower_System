@@ -97,6 +97,9 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
         ac_brand: "",
         ac_type: "Split",
         unit_serial_number: "",
+        payment_method: "Cash",
+        total_service_price: "",
+        reference_number: "",
     });
 
     const [materialModal, setMaterialModal] = useState(null);
@@ -148,10 +151,23 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
         setStarting(true);
         try {
             const { data } = await window.axios.post(TECHNICIAN_ENDPOINTS.startJob(startModal.booking_id));
-            addToast(data?.message || "Job is now In-Progress.");
+            addToast(data?.message || "Job started! Now create your tools & materials checklist.");
+            const startedJob = startModal;
             setStartModal(null);
             await fetchBookings(false);
             onDataChanged?.();
+            localStorage.setItem(
+                "cooling_tower_selected_booking_checklist",
+                JSON.stringify({
+                    booking_id: startedJob.booking_id,
+                    client_name: startedJob.client_name,
+                    service: startedJob.service,
+                    team_name: startedJob.assigned_team_name || (startedJob.lead_technician_name ? `${startedJob.lead_technician_name} & ${startedJob.assistant_technician_name || ""}`.trim() : ""),
+                })
+            );
+            if (onNavigate) {
+                onNavigate("tools");
+            }
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to start job."), "error");
         } finally {
@@ -159,20 +175,35 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
         }
     };
 
-    // Handle Complete Job
+    // Handle Complete Job (Collect Payment & Turn Over to Manager)
     const handleCompleteJob = async () => {
         if (!completeModal || completing) return;
         if (!reportForm.diagnosis.trim() || !reportForm.work_done.trim()) {
             addToast("Please provide diagnosis findings and work performed.", "error");
             return;
         }
+        const totalSvcPrice = Number(reportForm.total_service_price);
+        if (!Number.isFinite(totalSvcPrice) || totalSvcPrice < 300) {
+            addToast("Please enter a valid total service fee (minimum ₱300.00).", "error");
+            return;
+        }
+        if (reportForm.payment_method === "GCash") {
+            const cleanRef = (reportForm.reference_number || "").trim();
+            if (!/^\d{1,13}$/.test(cleanRef)) {
+                addToast("Please enter a valid numeric GCash reference number (maximum 13 digits).", "error");
+                return;
+            }
+        }
         setCompleting(true);
         try {
             const { data } = await window.axios.post(
                 TECHNICIAN_ENDPOINTS.completeJob(completeModal.booking_id),
-                reportForm
+                {
+                    ...reportForm,
+                    total_service_price: totalSvcPrice,
+                }
             );
-            addToast(data?.message || "Service report submitted and job completed!");
+            addToast(data?.message || "Service report and payment turnover submitted to Manager!");
             setCompleteModal(null);
             setReportForm({
                 diagnosis: "",
@@ -182,11 +213,14 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                 ac_brand: "",
                 ac_type: "Split",
                 unit_serial_number: "",
+                payment_method: "Cash",
+                total_service_price: "",
+                reference_number: "",
             });
             await fetchBookings(false);
             onDataChanged?.();
         } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to complete job."), "error");
+            addToast(extractErrorMessage(error, "Unable to submit service report and payment turnover."), "error");
         } finally {
             setCompleting(false);
         }
@@ -280,6 +314,9 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                             const isAssigned = ["Approved", "Dispatched"].includes(job.booking_status);
                             const isInProgress = job.booking_status === "In-Progress";
                             const isCompleted = job.booking_status === "Completed";
+                            const isJobStartedByTech = Boolean(job.job_started_by_tech);
+                            const hasAnotherStartedJob = Boolean(job.active_started_booking_id) && Number(job.active_started_booking_id) !== Number(job.booking_id);
+                            const hasPaymentTurnedOver = job.payment_turnover?.status === "Turned Over";
                             const latestChecklist = Array.isArray(job.checklists) && job.checklists.length > 0
                                 ? job.checklists[0]
                                 : null;
@@ -288,11 +325,11 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                 <div
                                     key={job.booking_id}
                                     style={{
-                                        border: "1px solid #E5E7EB",
+                                        border: job.is_recommended_closest ? "2px solid #2563EB" : "1px solid #E5E7EB",
                                         borderRadius: 14,
                                         padding: 20,
-                                        background: "#fff",
-                                        boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                                        background: job.is_recommended_closest ? "#F8FAFF" : "#fff",
+                                        boxShadow: job.is_recommended_closest ? "0 4px 14px rgba(37,99,235,0.08)" : "0 1px 3px rgba(0,0,0,0.03)",
                                         display: "flex",
                                         flexDirection: "column",
                                         gap: 14,
@@ -305,6 +342,56 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                     #{job.booking_id} · {job.client_name}
                                                 </span>
                                                 <StatusBadge status={job.booking_status} />
+                                                {job.is_recommended_closest && (
+                                                    <span style={{
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: 5,
+                                                        background: "linear-gradient(135deg, #2563EB, #1D4ED8)",
+                                                        color: "#FFFFFF",
+                                                        padding: "3px 10px",
+                                                        borderRadius: 9999,
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
+                                                    }}>
+                                                        <StarIcon size={11} color="#FDE047" />
+                                                        <span>Recommended Closest Schedule</span>
+                                                    </span>
+                                                )}
+                                                {isJobStartedByTech && isAssigned && (
+                                                    <span style={{
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: 4,
+                                                        background: "#FEF3C7",
+                                                        color: "#B45309",
+                                                        padding: "2px 8px",
+                                                        borderRadius: 8,
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        border: "1px solid #FDE68A",
+                                                    }}>
+                                                        <span>Job Started · Awaiting Tools Man Checklist Approval</span>
+                                                    </span>
+                                                )}
+                                                {hasPaymentTurnedOver && !isCompleted && (
+                                                    <span style={{
+                                                        display: "inline-flex",
+                                                        alignItems: "center",
+                                                        gap: 4,
+                                                        background: "#DCFCE7",
+                                                        color: "#15803D",
+                                                        padding: "2px 8px",
+                                                        borderRadius: 8,
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        border: "1px solid #86EFAC",
+                                                    }}>
+                                                        <CheckIcon size={11} color="#15803D" />
+                                                        <span>Payment Turned Over (₱{Number(job.payment_turnover?.net_collected_amount || 0).toLocaleString()} {job.payment_turnover?.payment_method}) · Awaiting Manager Completion</span>
+                                                    </span>
+                                                )}
                                                 {job.assigned_team_name && (
                                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid #BFDBFE" }}>
                                                         <UsersIcon size={12} color="#1D4ED8" />
@@ -347,18 +434,42 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
 
                                         {/* Action buttons */}
                                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                            {isAssigned && (Boolean(job.lead_technician_id) || Boolean(job.assigned_tech_id) || Boolean(job.assigned_team_id)) && (
+                                            {isAssigned && !isJobStartedByTech && (
                                                 <button
-                                                    className="btn-secondary"
+                                                    className="btn-primary"
+                                                    disabled={hasAnotherStartedJob}
+                                                    title={
+                                                        hasAnotherStartedJob
+                                                            ? `You already have an active job (#${job.active_started_booking_id}) started. You can only start another job once the current booking is completed.`
+                                                            : "Start this job to unlock tools & materials checklist creation"
+                                                    }
                                                     style={{
                                                         display: "flex",
                                                         alignItems: "center",
                                                         gap: 6,
                                                         fontSize: 12,
                                                         padding: "8px 14px",
-                                                        borderColor: "#3F7DFF",
-                                                        color: "#2563EB",
-                                                        background: "#EFF6FF",
+                                                        opacity: hasAnotherStartedJob ? 0.55 : 1,
+                                                        cursor: hasAnotherStartedJob ? "not-allowed" : "pointer",
+                                                    }}
+                                                    onClick={() => !hasAnotherStartedJob && setStartModal(job)}
+                                                >
+                                                    <Icon d={ic.play} size={14} />
+                                                    {hasAnotherStartedJob
+                                                        ? `Locked (Finish Job #${job.active_started_booking_id} First)`
+                                                        : "Start Job"}
+                                                </button>
+                                            )}
+                                            {isAssigned && isJobStartedByTech && (
+                                                <button
+                                                    className="btn-primary"
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 6,
+                                                        fontSize: 12,
+                                                        padding: "8px 14px",
+                                                        background: "#2563EB",
                                                         fontWeight: 600,
                                                     }}
                                                     onClick={() => {
@@ -374,43 +485,43 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                         if (onNavigate) {
                                                             onNavigate("tools");
                                                         }
-                                                        addToast(`Task #${job.booking_id} selected. Opening tool checklist.`);
+                                                        addToast(`Opening My Tools & Materials Checklist for Booking #${job.booking_id}.`);
                                                     }}
                                                 >
-                                                    <Icon d={ic.tools} size={14} /> Choose Task & Prepare Checklist
+                                                    <Icon d={ic.tools} size={14} /> Request Tools & Materials Checklist
                                                 </button>
                                             )}
-                                            {isAssigned && (
-                                                <button
-                                                    className="btn-primary"
-                                                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px" }}
-                                                    onClick={() => setStartModal(job)}
-                                                >
-                                                    <Icon d={ic.play} size={14} /> Start Job
-                                                </button>
-                                            )}
-                                            {isInProgress && (
+                                            {isInProgress && !hasPaymentTurnedOver && (
                                                 <>
                                                     <button
                                                         className="btn-secondary"
-                                                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", borderColor: "#F58A07", color: "#D97706" }}
+                                                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", borderColor: "#2563EB", color: "#1D4ED8" }}
                                                         onClick={() => {
-                                                            setMaterialModal(job);
-                                                            setMaterialForm({ item_id: materialsList[0]?.item_id || "", quantity_used: 1 });
+                                                            if (onNavigate) {
+                                                                onNavigate("tools");
+                                                            }
                                                         }}
                                                     >
-                                                        <Icon d={ic.tools} size={14} /> Log Materials
+                                                        <Icon d={ic.tools} size={14} /> Return Tools to Tools Man
                                                     </button>
                                                     <button
                                                         className="btn-primary"
                                                         style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", background: "#16A34A" }}
-                                                        onClick={() => setCompleteModal(job)}
+                                                        onClick={() => {
+                                                            setCompleteModal(job);
+                                                            setReportForm((prev) => ({
+                                                                ...prev,
+                                                                total_service_price: String(job.total_price || job.base_price || 1500),
+                                                                payment_method: "Cash",
+                                                                reference_number: "",
+                                                            }));
+                                                        }}
                                                     >
-                                                        <Icon d={ic.check} size={14} /> Complete & Report
+                                                        <Icon d={ic.check} size={14} /> Collect Payment & Turn Over to Manager
                                                     </button>
                                                 </>
                                             )}
-                                            {isCompleted && job.service_report && (
+                                            {(isCompleted || hasPaymentTurnedOver) && job.service_report && (
                                                 <button
                                                     className="btn-secondary"
                                                     style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px" }}
@@ -595,22 +706,22 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
             <Modal
                 open={!!startModal}
                 title={`Start Job #${startModal?.booking_id}?`}
-                message={`You are about to start the ${startModal?.service} job for ${startModal?.client_name}. This will update the status to In-Progress.`}
-                confirmLabel={starting ? "Starting..." : "Yes, Start Job"}
+                message={`You are about to start the ${startModal?.service} job for ${startModal?.client_name}. After starting the job, it will appear in your My Tools & Materials Checklist tab so you can request your tools and materials from the Tools Man (who will approve the checklist to change the booking status to In-Progress).`}
+                confirmLabel={starting ? "Starting..." : "Yes, Start Job & Prepare Checklist"}
                 cancelLabel="Cancel"
                 variant="primary"
                 onConfirm={handleStartJob}
                 onCancel={() => setStartModal(null)}
             />
 
-            {/* Modal: Complete Job & Submit Service Report */}
+            {/* Modal: Collect Payment, Submit Service Report & Turn Over to Manager */}
             {completeModal && (
                 <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-                    <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 580, maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)" }}>
+                    <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 600, maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, borderBottom: "1px solid #F0F2F5", paddingBottom: 12 }}>
                             <div>
                                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#1E2F5F" }}>
-                                    Submit Service Report & Complete Job
+                                    Collect Customer Payment & Turn Over to Manager
                                 </h3>
                                 <p style={{ margin: "2px 0 0", fontSize: 12, color: "#6B7280" }}>
                                     Booking #{completeModal.booking_id} · {completeModal.service} for {completeModal.client_name}
@@ -620,13 +731,80 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                         </div>
 
                         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                            {/* Customer Payment Collection & ₱300 Reservation Down Payment Deduction */}
+                            <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                                    1. Post-Service Customer Payment Collection & Turnover
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                    <div>
+                                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
+                                            Total Service Fee (₱) *
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="300"
+                                            step="0.01"
+                                            className="input-field"
+                                            value={reportForm.total_service_price}
+                                            onChange={(e) => setReportForm({ ...reportForm, total_service_price: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
+                                            Payment Method *
+                                        </label>
+                                        <select
+                                            className="input-field"
+                                            value={reportForm.payment_method}
+                                            onChange={(e) => setReportForm({ ...reportForm, payment_method: e.target.value })}
+                                        >
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {reportForm.payment_method === "GCash" && (
+                                    <div>
+                                        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
+                                            GCash Reference Number (Max 13 Digits) *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={13}
+                                            className="input-field"
+                                            placeholder="Enter 13-digit GCash reference number"
+                                            value={reportForm.reference_number}
+                                            onChange={(e) => setReportForm({ ...reportForm, reference_number: e.target.value.replace(/\D/g, "").slice(0, 13) })}
+                                        />
+                                    </div>
+                                )}
+
+                                <div style={{ background: "#FFFFFF", border: "1px solid #DCFCE7", borderRadius: 8, padding: "10px 12px", fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", color: "#4B5563" }}>
+                                        <span>Total Service Price:</span>
+                                        <strong>₱{Number(reportForm.total_service_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
+                                        <span>Less Reservation Fee (Down Payment Paid):</span>
+                                        <strong>- ₱300.00</strong>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
+                                        <span>Net Balance Collected to Turn Over to Manager:</span>
+                                        <span>₱{Math.max(0, Number(reportForm.total_service_price || 0) - 300).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})</span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div>
                                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 }}>
                                     Diagnosis & Findings *
                                 </label>
                                 <textarea
                                     className="input-field"
-                                    rows={3}
+                                    rows={2}
                                     placeholder="Describe unit condition, pressure readings, airflow, electrical checks..."
                                     value={reportForm.diagnosis}
                                     onChange={(e) => setReportForm({ ...reportForm, diagnosis: e.target.value })}
@@ -639,7 +817,7 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                 </label>
                                 <textarea
                                     className="input-field"
-                                    rows={3}
+                                    rows={2}
                                     placeholder="Detailed steps taken (e.g. coil pressure washed, drain lines cleared, refrigerant charged)..."
                                     value={reportForm.work_done}
                                     onChange={(e) => setReportForm({ ...reportForm, work_done: e.target.value })}
@@ -707,7 +885,7 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                 Cancel
                             </button>
                             <button className="btn-primary" style={{ background: "#16A34A" }} onClick={handleCompleteJob} disabled={completing}>
-                                {completing ? "Submitting..." : "Submit Report & Complete Job"}
+                                {completing ? "Submitting Turnover..." : "Turn Over Payment & Report to Manager"}
                             </button>
                         </div>
                     </div>

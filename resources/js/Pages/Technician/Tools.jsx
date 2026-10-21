@@ -91,6 +91,8 @@ export default function TechnicianTools({ addToast, onNavigate }) {
     const [selectedItemsMap, setSelectedItemsMap] = useState({});
     const [catalogSearch, setCatalogSearch] = useState("");
     const [catalogTypeFilter, setCatalogTypeFilter] = useState("All");
+    const [activeCategoryTab, setActiveCategoryTab] = useState("materials"); // 'materials' | 'power_tools' | 'hand_tools'
+    const [updatingToolItemId, setUpdatingToolItemId] = useState(null);
 
     // Modal state for viewing checklist details
     const [viewChecklistModal, setViewChecklistModal] = useState(null);
@@ -118,17 +120,18 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         }
     }, []);
 
-    // Fetch technician's assigned bookings to populate the task dropdown
+    // Fetch technician's started bookings to populate the task checklist tab
     const fetchAssignedBookings = useCallback(async () => {
         try {
             const { data } = await window.axios.get(TECHNICIAN_ENDPOINTS.bookings);
             const list = Array.isArray(data?.data) ? data.data : [];
-            // Task Requirement: Bookings assigned to this technician (Lead, Assistant, or legacy) by the manager
-            const activeTasks = list.filter((b) =>
+            // Bookings appear in My Tools & Materials Checklist tab after Start Job is clicked by technician/head technician
+            const startedTasks = list.filter((b) =>
                 (Boolean(b.lead_technician_id) || Boolean(b.assistant_technician_id) || Boolean(b.assigned_tech_id) || Boolean(b.assigned_team_id)) &&
-                ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status),
+                ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status) &&
+                (Boolean(b.job_started_by_tech) || b.booking_status === "In-Progress"),
             );
-            setAssignedBookings(activeTasks);
+            setAssignedBookings(startedTasks);
         } catch {
             // non-blocking
         }
@@ -162,15 +165,47 @@ export default function TechnicianTools({ addToast, onNavigate }) {
     }, []);
 
     const openCreateChecklistModal = (prefillBookingId = "") => {
-        if (assignedBookings.length === 0) {
-            addToast("You cannot create a checklist until the manager assigns a service booking to you.", "error");
+        if (assignedBookings.length === 0 && !prefillBookingId) {
+            addToast("Please click 'Start Job' on your assigned booking in My Assigned Jobs first so it appears here for checklist creation.", "error");
             return;
         }
         setEditingChecklist(null);
         setSelectedBookingId(prefillBookingId || (assignedBookings[0] ? String(assignedBookings[0].booking_id) : ""));
         setChecklistNotes("");
         setSelectedItemsMap({});
+        setActiveCategoryTab("materials");
         setChecklistModalOpen(true);
+    };
+
+    const handleReturnToolStatus = async (checklistId, itemId, newStatus) => {
+        if (updatingToolItemId) return;
+        setUpdatingToolItemId(itemId);
+        try {
+            const { data } = await window.axios.patch(
+                TECHNICIAN_ENDPOINTS.updateChecklistItemStatus(checklistId, itemId),
+                { status: newStatus }
+            );
+            addToast(
+                newStatus === "returned"
+                    ? "Tool marked as returned to Tools Man."
+                    : `Tool marked as ${newStatus} and recorded in Worker's Inventory (Damaged / Lost category).`
+            );
+            await fetchChecklists(false);
+            await fetchCatalog();
+            setViewChecklistModal((prev) => {
+                if (!prev || prev.checklist_id !== checklistId) return prev;
+                return {
+                    ...prev,
+                    items: (prev.items || []).map((it) =>
+                        it.id === itemId ? { ...it, status: data?.data?.status || newStatus } : it
+                    ),
+                };
+            });
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to update tool return status."), "error");
+        } finally {
+            setUpdatingToolItemId(null);
+        }
     };
 
     const openEditChecklistModal = (checklist) => {
@@ -335,17 +370,417 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         return Object.values(selectedItemsMap).filter((item) => item?.selected).length;
     }, [selectedItemsMap]);
 
+    // Categorize worker inventory items into Materials, Power Tools, and Hand Tools
+    const categorizedCatalog = useMemo(() => {
+        const search = catalogSearch.trim().toLowerCase();
+        const matchesQuery = (item) =>
+            !search ||
+            (item.item_name || "").toLowerCase().includes(search) ||
+            (item.sub_category || "").toLowerCase().includes(search) ||
+            (item.serial_number || "").toLowerCase().includes(search);
+
+        const materials = catalog.filter(
+            (item) => (item.item_type || "").toLowerCase() !== "tool" && matchesQuery(item)
+        );
+        const powerTools = catalog.filter(
+            (item) =>
+                (item.item_type || "").toLowerCase() === "tool" &&
+                (item.tool_subtype || "").toLowerCase() === "power" &&
+                matchesQuery(item)
+        );
+        const handTools = catalog.filter(
+            (item) =>
+                (item.item_type || "").toLowerCase() === "tool" &&
+                (item.tool_subtype || "").toLowerCase() !== "power" &&
+                matchesQuery(item)
+        );
+
+        return {
+            materials,
+            power_tools: powerTools,
+            hand_tools: handTools,
+        };
+    }, [catalog, catalogSearch]);
+
+    // Dedicated New Page View (NOT a Modal) for Creating / Editing a Task Checklist
+    if (checklistModalOpen) {
+        const activeCategoryItems = categorizedCatalog[activeCategoryTab] || [];
+        const groupedBySubCategory = activeCategoryItems.reduce((acc, item) => {
+            const subCat =
+                item.sub_category ||
+                (activeCategoryTab === "materials"
+                    ? "General Materials"
+                    : activeCategoryTab === "power_tools"
+                    ? "Power Tools"
+                    : "Hand Tools");
+            if (!acc[subCat]) acc[subCat] = [];
+            acc[subCat].push(item);
+            return acc;
+        }, {});
+
+        const selectedFullItems = Object.keys(selectedItemsMap)
+            .filter((id) => selectedItemsMap[id]?.selected)
+            .map((id) => {
+                const catItem = catalog.find((c) => Number(c.item_id) === Number(id));
+                return {
+                    item_id: Number(id),
+                    item_name: catItem?.item_name || `Item #${id}`,
+                    item_type: catItem?.item_type || "Tool",
+                    tool_subtype: catItem?.tool_subtype || "",
+                    unit: catItem?.unit || "pcs",
+                    quantity: selectedItemsMap[id]?.quantity || 1,
+                };
+            });
+
+        return (
+            <div style={{ animation: "fadeInUp 0.25s ease" }}>
+                <div className="page-header" style={{ marginBottom: 20 }}>
+                    <div>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ marginBottom: 10, padding: "6px 12px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}
+                            onClick={() => !savingChecklist && setChecklistModalOpen(false)}
+                        >
+                            ← Back to My Tools & Materials Checklists
+                        </button>
+                        <h1 className="page-title font-display">
+                            {editingChecklist
+                                ? `Edit Tools & Materials Checklist #${editingChecklist.checklist_id}`
+                                : "Create Tools & Materials Checklist"}
+                        </h1>
+                        <p className="page-subtitle">
+                            Select items from Worker&apos;s Inventory organized by Materials, Power Tools, and Hand Tools, then submit to Tools Man for approval (which updates customer booking status from Approved to In-Progress).
+                        </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={savingChecklist}
+                            onClick={() => setChecklistModalOpen(false)}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            disabled={savingChecklist || !selectedBookingId || selectedItemsCount === 0}
+                            onClick={handleSaveChecklist}
+                        >
+                            {savingChecklist
+                                ? "Submitting..."
+                                : editingChecklist
+                                ? "Update Checklist"
+                                : `Submit Checklist to Tools Man (${selectedItemsCount})`}
+                        </button>
+                    </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 20, alignItems: "start" }}>
+                    {/* Left Column: Booking Selection & Categorized Worker Inventory */}
+                    <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
+                        <div>
+                            <label className="section-label" style={{ marginBottom: 6, display: "block" }}>
+                                1. Started Booking Task (Required)
+                            </label>
+                            {assignedBookings.length === 0 ? (
+                                <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <AlertCircleIcon size={16} color="#DC2626" />
+                                    <span><strong>No Started Job Found:</strong> Click &quot;Start Job&quot; on your assigned booking first so it appears here.</span>
+                                </div>
+                            ) : (
+                                <select
+                                    className="input-field"
+                                    value={selectedBookingId}
+                                    onChange={(e) => setSelectedBookingId(e.target.value)}
+                                    disabled={!!editingChecklist}
+                                >
+                                    <option value="">Select your started booking</option>
+                                    {assignedBookings.map((b) => (
+                                        <option key={b.booking_id} value={b.booking_id}>
+                                            Booking #{b.booking_id} · {b.client_name} — {b.service || b.service_name} ({b.assigned_team_name ? `Team: ${b.assigned_team_name}` : "Assigned Team"}) [{b.booking_status}]
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
+                        {/* Category Tabs: Materials, Power Tools, Hand Tools */}
+                        <div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+                                <label className="section-label" style={{ margin: 0 }}>
+                                    2. Worker&apos;s Inventory Categories
+                                </label>
+                                <input
+                                    type="text"
+                                    placeholder="Search Materials, Power Tools, or Hand Tools..."
+                                    className="input-field"
+                                    style={{ maxWidth: 280, padding: "7px 12px", fontSize: 12 }}
+                                    value={catalogSearch}
+                                    onChange={(e) => setCatalogSearch(e.target.value)}
+                                />
+                            </div>
+
+                            <div style={{ display: "flex", gap: 8, background: "#F1F5F9", padding: 5, borderRadius: 10, marginBottom: 16, flexWrap: "wrap" }}>
+                                {[
+                                    {
+                                        key: "materials",
+                                        label: "Materials",
+                                        count: categorizedCatalog.materials.length,
+                                        badgeBg: "#FEF3C7",
+                                        badgeColor: "#B45309",
+                                    },
+                                    {
+                                        key: "power_tools",
+                                        label: "Power Tools",
+                                        count: categorizedCatalog.power_tools.length,
+                                        badgeBg: "#EDE9FE",
+                                        badgeColor: "#6D28D9",
+                                    },
+                                    {
+                                        key: "hand_tools",
+                                        label: "Hand Tools",
+                                        count: categorizedCatalog.hand_tools.length,
+                                        badgeBg: "#DBEAFE",
+                                        badgeColor: "#1D4ED8",
+                                    },
+                                ].map((cat) => {
+                                    const isActive = activeCategoryTab === cat.key;
+                                    return (
+                                        <button
+                                            key={cat.key}
+                                            type="button"
+                                            onClick={() => setActiveCategoryTab(cat.key)}
+                                            style={{
+                                                flex: 1,
+                                                minWidth: 140,
+                                                padding: "10px 14px",
+                                                borderRadius: 8,
+                                                border: isActive ? "1px solid #3B82F6" : "1px solid transparent",
+                                                background: isActive ? "#FFFFFF" : "transparent",
+                                                color: isActive ? "#1E2F5F" : "#64748B",
+                                                fontWeight: 700,
+                                                fontSize: 13,
+                                                cursor: "pointer",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                gap: 8,
+                                                boxShadow: isActive ? "0 2px 6px rgba(15,23,42,0.06)" : "none",
+                                            }}
+                                        >
+                                            <span>{cat.label}</span>
+                                            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 9999, background: cat.badgeBg, color: cat.badgeColor }}>
+                                                {cat.count}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Items inside active category grouped by sub-category */}
+                            {Object.keys(groupedBySubCategory).length === 0 ? (
+                                <div style={{ padding: 32, textAlign: "center", background: "#F8FAFC", borderRadius: 10, color: "#94A3B8", fontSize: 13 }}>
+                                    No items found in this category matching your search.
+                                </div>
+                            ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                                    {Object.entries(groupedBySubCategory).map(([subCategoryName, itemsInGroup]) => (
+                                        <div key={subCategoryName} style={{ border: "1px solid #E2E8F0", borderRadius: 12, overflow: "hidden" }}>
+                                            <div style={{ background: "#F8FAFC", padding: "10px 14px", borderBottom: "1px solid #E2E8F0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                <span style={{ fontSize: 12, fontWeight: 700, color: "#1E2F5F", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                                    {subCategoryName}
+                                                </span>
+                                                <span style={{ fontSize: 11, color: "#64748B", fontWeight: 600 }}>
+                                                    {itemsInGroup.length} item(s)
+                                                </span>
+                                            </div>
+                                            <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                                                {itemsInGroup.map((item) => {
+                                                    const entry = selectedItemsMap[item.item_id];
+                                                    const isSelected = !!entry?.selected;
+                                                    const qty = entry?.quantity || 1;
+
+                                                    const statusLower = (item.status || "").toLowerCase();
+                                                    const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+                                                    const isBorrowed = statusLower === "borrowed";
+                                                    const isOutOfStock = Number(item.quantity_on_hand) <= 0;
+                                                    const isUnavailable = !item.is_available || isDamaged || isBorrowed || isOutOfStock;
+
+                                                    return (
+                                                        <div
+                                                            key={item.item_id}
+                                                            style={{
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "space-between",
+                                                                padding: "10px 14px",
+                                                                borderRadius: 10,
+                                                                background: isUnavailable ? "#F8FAFC" : isSelected ? "#EFF6FF" : "#FFFFFF",
+                                                                border: `1px solid ${isUnavailable ? "#E2E8F0" : isSelected ? "#3B82F6" : "#E5E7EB"}`,
+                                                                gap: 12,
+                                                                opacity: isUnavailable ? 0.65 : 1,
+                                                            }}
+                                                        >
+                                                            <div
+                                                                style={{
+                                                                    display: "flex",
+                                                                    alignItems: "center",
+                                                                    gap: 10,
+                                                                    cursor: isUnavailable ? "not-allowed" : "pointer",
+                                                                    flex: 1,
+                                                                }}
+                                                                onClick={() => !isUnavailable && toggleItemSelection(item)}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isSelected && !isUnavailable}
+                                                                    disabled={isUnavailable}
+                                                                    onChange={() => {}}
+                                                                    style={{ cursor: isUnavailable ? "not-allowed" : "pointer", width: 16, height: 16 }}
+                                                                />
+                                                                <div>
+                                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                                        <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 600, color: isUnavailable ? "#64748B" : "#1E2F5F" }}>
+                                                                            {item.item_name}
+                                                                        </span>
+                                                                        {isDamaged && (
+                                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEE2E2", color: "#DC2626" }}>
+                                                                                Damaged / Lost — Unavailable
+                                                                            </span>
+                                                                        )}
+                                                                        {isBorrowed && !isDamaged && (
+                                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#DBEAFE", color: "#1E40AF" }}>
+                                                                                In Use / Borrowed
+                                                                            </span>
+                                                                        )}
+                                                                        {isOutOfStock && !isDamaged && !isBorrowed && (
+                                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEF3C7", color: "#D97706" }}>
+                                                                                Out of Stock
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                                                        {item.serial_number ? `S/N: ${item.serial_number} · ` : ""}
+                                                                        <span style={{ fontWeight: 600, color: item.quantity_on_hand > 0 ? "#059669" : "#DC2626" }}>
+                                                                            Available: {item.quantity_on_hand} {item.unit || "pcs"}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {isSelected && !isUnavailable && (
+                                                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                                                    <span style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>Qty:</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        min={1}
+                                                                        max={item.quantity_on_hand || 99}
+                                                                        value={qty}
+                                                                        className="input-field"
+                                                                        style={{ width: 70, padding: "4px 8px", fontSize: 12, textAlign: "center" }}
+                                                                        onChange={(e) => updateItemQuantity(item.item_id, e.target.value, item.quantity_on_hand)}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Right Column: Selected Checklist Summary & Notes */}
+                    <div className="card" style={{ padding: 20, position: "sticky", top: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div>
+                            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#1E2F5F" }}>
+                                Checklist Summary ({selectedFullItems.length})
+                            </h3>
+                            <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748B" }}>
+                                Review selected Materials, Power Tools, and Hand Tools before submitting to Tools Man.
+                            </p>
+                        </div>
+
+                        {selectedFullItems.length === 0 ? (
+                            <div style={{ padding: "20px 12px", textAlign: "center", background: "#F8FAFC", borderRadius: 8, color: "#94A3B8", fontSize: 12 }}>
+                                No items selected yet. Choose items from the categories on the left.
+                            </div>
+                        ) : (
+                            <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                                {selectedFullItems.map((it) => (
+                                    <div key={it.item_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #E2E8F0", fontSize: 12 }}>
+                                        <div>
+                                            <div style={{ fontWeight: 600, color: "#1E2F5F" }}>{it.item_name}</div>
+                                            <div style={{ fontSize: 10, color: "#64748B" }}>
+                                                {it.item_type === "Tool"
+                                                    ? it.tool_subtype === "power"
+                                                        ? "Power Tool"
+                                                        : "Hand Tool"
+                                                    : "Material"}{" "}
+                                                · Qty: {it.quantity} {it.unit}
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleItemSelection(it.item_id)}
+                                            style={{ background: "none", border: "none", color: "#DC2626", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="section-label" style={{ marginBottom: 4, display: "block" }}>
+                                Checklist Notes / Additional Request (Optional)
+                            </label>
+                            <textarea
+                                className="input-field"
+                                rows={3}
+                                placeholder="Any special tool or material notes for the Tools Man..."
+                                value={checklistNotes}
+                                onChange={(e) => setChecklistNotes(e.target.value)}
+                            />
+                        </div>
+
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ width: "100%", justifyContent: "center", padding: "10px 14px" }}
+                            disabled={savingChecklist || !selectedBookingId || selectedItemsCount === 0}
+                            onClick={handleSaveChecklist}
+                        >
+                            {savingChecklist
+                                ? "Submitting to Tools Man..."
+                                : editingChecklist
+                                ? "Save Checklist Changes"
+                                : "Submit Checklist to Tools Man"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
             <div className="page-header">
                 <div>
-                    <h1 className="page-title font-display">My Tools & Checklists</h1>
+                    <h1 className="page-title font-display">My Tools & Materials Checklist</h1>
                     <p className="page-subtitle">
-                        Create multi-item task checklists, track custody, and browse the inventory catalog
+                        Create categorized checklists for started jobs, submit to Tools Man, and return tools after service
                     </p>
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <button className="btn-secondary" onClick={() => { fetchChecklists(); fetchCatalog(); }}>
+                    <button className="btn-secondary" onClick={() => { fetchChecklists(); fetchCatalog(); fetchAssignedBookings(); }}>
                         Refresh
                     </button>
                     <button
@@ -363,7 +798,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     className={`tab-item ${viewTab === "checklists" ? "active" : ""}`}
                     onClick={() => setViewTab("checklists")}
                 >
-                    Task Checklists
+                    My Tools & Materials Checklists
                     <span style={{ marginLeft: 6, fontSize: 10, color: viewTab === "checklists" ? "#3F7DFF" : "#9CA3AF" }}>
                         {checklists.length}
                     </span>
@@ -382,13 +817,74 @@ export default function TechnicianTools({ addToast, onNavigate }) {
             {/* View 1: Task Checklists */}
             {viewTab === "checklists" && (
                 <div className="card" style={{ padding: 20 }}>
+                    {/* Started Bookings Ready for Checklist Creation */}
+                    {assignedBookings.length > 0 && (
+                        <div style={{ marginBottom: 20, padding: 16, background: "#F8FAFF", border: "1px solid #BFDBFE", borderRadius: 12 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#1E3A8A", marginBottom: 10 }}>
+                                Started Bookings Ready in My Tools & Materials Checklist
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                {assignedBookings.map((b) => {
+                                    const existingCl = checklists.find((c) => Number(c.booking_id) === Number(b.booking_id));
+                                    return (
+                                        <div
+                                            key={b.booking_id}
+                                            style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "center",
+                                                flexWrap: "wrap",
+                                                gap: 10,
+                                                padding: "10px 14px",
+                                                background: "#FFFFFF",
+                                                borderRadius: 10,
+                                                border: "1px solid #DBEAFE",
+                                            }}
+                                        >
+                                            <div>
+                                                <div style={{ fontSize: 13, fontWeight: 700, color: "#1E2F5F", display: "flex", alignItems: "center", gap: 8 }}>
+                                                    <span>Booking #{b.booking_id} · {b.client_name}</span>
+                                                    <StatusBadge status={b.booking_status} />
+                                                </div>
+                                                <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                                                    {b.service} · Scheduled {formatDateTime(b.scheduled_date)}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                {existingCl ? (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-secondary"
+                                                        style={{ fontSize: 12, padding: "6px 12px" }}
+                                                        onClick={() => setViewChecklistModal(existingCl)}
+                                                    >
+                                                        Checklist #{existingCl.checklist_id} ({existingCl.status}) — View / Return Tools
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-primary"
+                                                        style={{ fontSize: 12, padding: "7px 14px" }}
+                                                        onClick={() => openCreateChecklistModal(String(b.booking_id))}
+                                                    >
+                                                        + Create Checklist (New Page)
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
                         <div>
                             <p className="section-label" style={{ margin: 0 }}>
-                                Checklists Created for Assigned Tasks
+                                Checklists Created for Started Bookings
                             </p>
                             <span style={{ fontSize: 12, color: "#64748B" }}>
-                                Tools Man reviews and issues tools. While Pending, you may edit items. Once Approved, only Tools Man can add/modify items.
+                                Tools Man reviews and approves your checklist to set the customer booking status from Approved to In-Progress. After service, mark all tools as Returned, Damaged, or Lost.
                             </span>
                         </div>
                     </div>
@@ -398,7 +894,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                         <div style={{ padding: "12px 16px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#1E40AF" }}>
                             <InfoIcon size={18} color="#1E40AF" />
                             <div>
-                                <strong>Manager Assignment Required:</strong> Technicians can create a tool checklist once a task is assigned to them by the manager. Once a booking is assigned to you, it will appear here for checklist preparation.
+                                <strong>Start Job Required First:</strong> Click <strong>Start Job</strong> on your recommended booking in <em>My Assigned Jobs</em> first. Once started, the booking will appear here so you can create your Tools &amp; Materials Checklist.
                             </div>
                         </div>
                     )}
@@ -737,205 +1233,13 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                 </div>
             )}
 
-            {/* Create / Edit Checklist Modal */}
-            <Modal
-                open={checklistModalOpen}
-                title={editingChecklist ? `Edit Checklist #${editingChecklist.checklist_id}` : "Create New Task Checklist"}
-                message="Select an assigned task, multi-select required tools and materials with quantities, and submit for Tools Man approval."
-                confirmLabel={savingChecklist ? "Submitting..." : editingChecklist ? "Update Checklist" : "Submit Checklist"}
-                confirmDisabled={savingChecklist || !selectedBookingId || selectedItemsCount === 0}
-                maxWidth={720}
-                onConfirm={handleSaveChecklist}
-                onCancel={() => !savingChecklist && setChecklistModalOpen(false)}
-            >
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                    {/* Step 1: Select Task Booking */}
-                    <div>
-                        <label className="section-label" style={{ marginBottom: 4, display: "block" }}>
-                            Assigned Task / Booking (Required)
-                        </label>
-                        {assignedBookings.length === 0 ? (
-                            <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
-                                <AlertCircleIcon size={16} color="#DC2626" />
-                                <span><strong>No Assigned Tasks:</strong> You can create a checklist once a service booking is assigned to you by the manager.</span>
-                            </div>
-                        ) : (
-                            <select
-                                className="input-field"
-                                value={selectedBookingId}
-                                onChange={(e) => setSelectedBookingId(e.target.value)}
-                                disabled={!!editingChecklist}
-                            >
-                                <option value="">Select an assigned service task</option>
-                                {assignedBookings.map((b) => (
-                                    <option key={b.booking_id} value={b.booking_id}>
-                                        Booking #{b.booking_id} · {b.client_name} — {b.service || b.service_name} ({b.assigned_team_name ? `Team: ${b.assigned_team_name}` : "Assigned Team"}) [{b.booking_status}]
-                                    </option>
-                                ))}
-                            </select>
-                        )}
-                    </div>
-
-                    {/* Step 2: Multi-Item Selection Table */}
-                    <div>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-                            <label className="section-label" style={{ margin: 0 }}>
-                                Select Tools & Materials ({selectedItemsCount} selected)
-                            </label>
-                            <input
-                                type="text"
-                                placeholder="Search items..."
-                                className="input-field"
-                                style={{ maxWidth: 200, padding: "5px 10px", fontSize: 12 }}
-                                value={catalogSearch}
-                                onChange={(e) => setCatalogSearch(e.target.value)}
-                            />
-                        </div>
-
-                        <div
-                            style={{
-                                maxHeight: 260,
-                                overflowY: "auto",
-                                border: "1px solid #E5E7EB",
-                                borderRadius: 10,
-                                background: "#F9FAFB",
-                                padding: 8,
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 6,
-                            }}
-                        >
-                            {filteredCatalog.length === 0 ? (
-                                <p style={{ fontSize: 12, color: "#9CA3AF", textAlign: "center", margin: "16px 0" }}>
-                                    No available tools or materials found.
-                                </p>
-                            ) : (
-                                filteredCatalog.map((item) => {
-                                    const entry = selectedItemsMap[item.item_id];
-                                    const isSelected = !!entry?.selected;
-                                    const qty = entry?.quantity || 1;
-
-                                    const statusLower = (item.status || "").toLowerCase();
-                                    const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
-                                    const isBorrowed = statusLower === "borrowed";
-                                    const isOutOfStock = Number(item.quantity_on_hand) <= 0;
-                                    const isUnavailable = !item.is_available || isDamaged || isBorrowed || isOutOfStock;
-
-                                    return (
-                                        <div
-                                            key={item.item_id}
-                                            style={{
-                                                display: "flex",
-                                                alignItems: "center",
-                                                justifyContent: "space-between",
-                                                padding: "8px 12px",
-                                                borderRadius: 8,
-                                                background: isUnavailable ? "#F8FAFC" : isSelected ? "#EFF6FF" : "#FFFFFF",
-                                                border: `1px solid ${isUnavailable ? "#E2E8F0" : isSelected ? "#93C5FD" : "#E5E7EB"}`,
-                                                gap: 12,
-                                                opacity: isUnavailable ? 0.68 : 1,
-                                                cursor: isUnavailable ? "not-allowed" : "default",
-                                                transition: "all 0.15s ease",
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: 10,
-                                                    cursor: isUnavailable ? "not-allowed" : "pointer",
-                                                    flex: 1,
-                                                }}
-                                                onClick={() => !isUnavailable && toggleItemSelection(item)}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isSelected && !isUnavailable}
-                                                    disabled={isUnavailable}
-                                                    onChange={() => {}} // handled by parent onClick
-                                                    style={{ cursor: isUnavailable ? "not-allowed" : "pointer", width: 16, height: 16 }}
-                                                />
-                                                <div style={{ flex: 1 }}>
-                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                                        <span style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500, color: isUnavailable ? "#64748B" : "#1E2F5F" }}>
-                                                            {item.item_name}
-                                                        </span>
-                                                        {isDamaged && (
-                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEE2E2", color: "#DC2626", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                                                                <AlertCircleIcon size={10} color="#DC2626" />
-                                                                <span>Damaged / Broken — Unavailable</span>
-                                                            </span>
-                                                        )}
-                                                        {isBorrowed && !isDamaged && (
-                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#DBEAFE", color: "#1E40AF" }}>
-                                                                In Use / Borrowed
-                                                            </span>
-                                                        )}
-                                                        {isOutOfStock && !isDamaged && !isBorrowed && (
-                                                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "#FEF3C7", color: "#D97706", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                                                                <AlertCircleIcon size={10} color="#D97706" />
-                                                                <span>Out of Stock — Unavailable</span>
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
-                                                        <span style={{ fontWeight: 600, color: item.item_type === "Tool" ? "#2563EB" : "#D97706" }}>
-                                                            {item.item_type}
-                                                        </span>
-                                                        {item.tool_subtype ? ` · ${item.tool_subtype}` : ""}
-                                                        {item.serial_number ? ` · S/N: ${item.serial_number}` : ""}
-                                                        <span style={{ marginLeft: 6, fontWeight: 600, color: item.quantity_on_hand > 0 ? "#059669" : "#DC2626" }}>
-                                                            · Available: {item.quantity_on_hand} / Total: {item.initial_stock || item.quantity_on_hand} {item.unit || "pcs"}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {isSelected && !isUnavailable && (
-                                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                                    <span style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>Qty:</span>
-                                                    <input
-                                                        type="number"
-                                                        min={1}
-                                                        max={item.quantity_on_hand || 99}
-                                                        value={qty}
-                                                        className="input-field"
-                                                        style={{ width: 68, padding: "4px 8px", fontSize: 12, textAlign: "center" }}
-                                                        onChange={(e) => updateItemQuantity(item.item_id, e.target.value, item.quantity_on_hand)}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Step 3: Notes / Reason */}
-                    <div>
-                        <label className="section-label" style={{ marginBottom: 4, display: "block" }}>
-                            Checklist Notes / Instructions (Optional)
-                        </label>
-                        <textarea
-                            className="input-field"
-                            rows={2}
-                            placeholder="e.g. Special tools required for rooftop chiller fan blade overhaul."
-                            value={checklistNotes}
-                            onChange={(e) => setChecklistNotes(e.target.value)}
-                        />
-                    </div>
-                </div>
-            </Modal>
-
-            {/* View Checklist Details Modal */}
+            {/* View Checklist Details & Tool Return Modal */}
             <Modal
                 open={!!viewChecklistModal}
-                title={`Checklist #${viewChecklistModal?.checklist_id} Items`}
-                message={`Items requested for Booking #${viewChecklistModal?.booking_id} (${viewChecklistModal?.client_name})`}
+                title={`Checklist #${viewChecklistModal?.checklist_id} Items & Tool Return`}
+                message={`Items requested for Booking #${viewChecklistModal?.booking_id} (${viewChecklistModal?.client_name}). After service, return all tools to the Tools Man by marking each tool as Returned, Damaged, or Lost.`}
                 confirmLabel="Close"
-                maxWidth={620}
+                maxWidth={720}
                 onConfirm={() => setViewChecklistModal(null)}
                 onCancel={() => setViewChecklistModal(null)}
             >
@@ -974,7 +1278,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                 <thead>
                                     <tr style={{ background: "#F1F5F9" }}>
-                                        {["Item Name", "Type", "Requested", "Approved", "Item Status"].map((h) => (
+                                        {["Item Name", "Type", "Requested", "Approved", "Tool Return Status (Returned / Damaged / Lost)"].map((h) => (
                                             <th
                                                 key={h}
                                                 style={{
@@ -1020,25 +1324,56 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                 </td>
                                                 <td style={{ padding: "10px" }}>
                                                     {(item.item_type || "").toLowerCase() === "tool" ? (
-                                                        <span style={{
-                                                            fontSize: 11,
-                                                            fontWeight: 600,
-                                                            padding: "2px 8px",
-                                                            borderRadius: 6,
-                                                            textTransform: "capitalize",
-                                                            background:
-                                                                item.status === "assigned" ? "#DBEAFE" :
-                                                                item.status === "returned" ? "#D1FAE5" :
-                                                                item.status === "damaged" ? "#FEE2E2" :
-                                                                item.status === "lost" ? "#4B5563" : "#F3F4F6",
-                                                            color:
-                                                                item.status === "assigned" ? "#1E40AF" :
-                                                                item.status === "returned" ? "#065F46" :
-                                                                item.status === "damaged" ? "#991B1B" :
-                                                                item.status === "lost" ? "#FFFFFF" : "#374151",
-                                                        }}>
-                                                            {item.status}
-                                                        </span>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                                            <span style={{
+                                                                fontSize: 11,
+                                                                fontWeight: 600,
+                                                                padding: "2px 8px",
+                                                                borderRadius: 6,
+                                                                textTransform: "capitalize",
+                                                                background:
+                                                                    item.status === "assigned" ? "#DBEAFE" :
+                                                                    item.status === "returned" ? "#D1FAE5" :
+                                                                    item.status === "damaged" ? "#FEE2E2" :
+                                                                    item.status === "lost" ? "#4B5563" : "#F3F4F6",
+                                                                color:
+                                                                    item.status === "assigned" ? "#1E40AF" :
+                                                                    item.status === "returned" ? "#065F46" :
+                                                                    item.status === "damaged" ? "#991B1B" :
+                                                                    item.status === "lost" ? "#FFFFFF" : "#374151",
+                                                            }}>
+                                                                {item.status}
+                                                            </span>
+                                                            {viewChecklistModal.status === "Approved" && (
+                                                                <div style={{ display: "inline-flex", gap: 4 }}>
+                                                                    {[
+                                                                        { key: "returned", label: "Returned", bg: "#DCFCE7", color: "#166534", border: "#86EFAC" },
+                                                                        { key: "damaged", label: "Damaged", bg: "#FEE2E2", color: "#991B1B", border: "#FCA5A5" },
+                                                                        { key: "lost", label: "Lost", bg: "#F3F4F6", color: "#1F2937", border: "#D1D5DB" },
+                                                                    ].map((opt) => (
+                                                                        <button
+                                                                            key={opt.key}
+                                                                            type="button"
+                                                                            disabled={updatingToolItemId === item.id || item.status === opt.key}
+                                                                            onClick={() => handleReturnToolStatus(viewChecklistModal.checklist_id, item.id, opt.key)}
+                                                                            style={{
+                                                                                fontSize: 10,
+                                                                                fontWeight: 700,
+                                                                                padding: "3px 7px",
+                                                                                borderRadius: 5,
+                                                                                border: `1px solid ${opt.border}`,
+                                                                                background: item.status === opt.key ? opt.color : opt.bg,
+                                                                                color: item.status === opt.key ? "#FFFFFF" : opt.color,
+                                                                                cursor: updatingToolItemId === item.id || item.status === opt.key ? "default" : "pointer",
+                                                                                opacity: updatingToolItemId === item.id ? 0.6 : 1,
+                                                                            }}
+                                                                        >
+                                                                            {opt.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     ) : (
                                                         <span style={{ fontSize: 11, color: "#64748B", background: "#F1F5F9", padding: "2px 8px", borderRadius: 4, fontWeight: 500 }}>
                                                             — (Consumable)

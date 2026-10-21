@@ -1,9 +1,9 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import React, { useState } from "react";
-import { ArrowRight, Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Mail, Lock, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import logo from "../../../imports/cooling_tower_airconditioning_services_logo-1.jpg";
 
-export default function Login({ onToggleView }) {
+export default function Login({ onToggleView, status }) {
   const [showPassword, setShowPassword] = useState(false);
   const { data, setData, post, processing, errors } = useForm({
     email: '',
@@ -111,6 +111,13 @@ export default function Login({ onToggleView }) {
               Enter your credentials to access your account.
             </p>
           </div>
+
+          {status && (
+            <div className="mb-5 rounded-xl bg-emerald-50 border border-emerald-200/80 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-start gap-2.5">
+              <ShieldCheck className="size-4 shrink-0 mt-0.5 text-emerald-600" />
+              <span>{status}</span>
+            </div>
+          )}
 
           <form className="space-y-5" onSubmit={submit}>
             <div className="space-y-2">

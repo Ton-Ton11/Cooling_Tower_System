@@ -484,10 +484,10 @@ class ToolChecklistController extends Controller
                     'status' => 'consumed',
                 ]);
 
-            // Automatically dispatch the booking!
-            if ($checklist->booking && in_array($checklist->booking->booking_status, ['Approved', 'Pending'], true)) {
+            // Automatically transition customer's booking status from Approved to In-Progress!
+            if ($checklist->booking && in_array($checklist->booking->booking_status, ['Approved', 'Dispatched', 'Pending'], true)) {
                 $checklist->booking->update([
-                    'booking_status' => 'Dispatched',
+                    'booking_status' => 'In-Progress',
                 ]);
             }
 
@@ -547,13 +547,13 @@ class ToolChecklistController extends Controller
         DB::table('activity_logs')->insert([
             'user_id' => $userId,
             'action_type' => 'APPROVE_CHECKLIST',
-            'description' => sprintf('Approved Checklist #%d for Booking #%d and dispatched technician team.', $checklist->checklist_id, $checklist->booking_id),
+            'description' => sprintf('Approved Checklist #%d for Booking #%d and updated customer booking status from Approved to In-Progress.', $checklist->checklist_id, $checklist->booking_id),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
         return response()->json([
-            'message' => 'Checklist approved! Tools marked as assigned and booking dispatched.',
+            'message' => 'Checklist approved! Tools marked as assigned and customer booking status updated to In-Progress.',
             'data' => $this->formatChecklist($checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy'])),
         ]);
     }
@@ -727,7 +727,7 @@ class ToolChecklistController extends Controller
     public function updateToolStatus(Request $request, int $checklistId, int $itemId): JsonResponse
     {
         $user = $request->user();
-        if (! $user || ! in_array((int) $user->role_id, [1, 2, 4], true)) {
+        if (! $user || ! in_array((int) $user->role_id, [1, 2, 4, 5, 7], true)) {
             abort(403, 'Unauthorized.');
         }
 
@@ -802,36 +802,80 @@ class ToolChecklistController extends Controller
                     ->where('booking_id', $item->checklist->booking_id)
                     ->where('item_id', $item->item_id)
                     ->update([
-                        'status' => 'Lost/Damaged',
+                        'status' => 'Damaged',
                         'return_date' => now(),
                         'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
-                // Mark power tool as Lost/Damaged in inventory so it cannot be used again
-                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') === 'power') {
-                    DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                        'status' => 'Lost/Damaged',
-                        'last_updated' => now(),
-                    ]);
+                // Record damaged tool in inventory and place in Damaged / Lost category
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
+                    if (($invItem->tool_subtype ?? '') === 'power' || (int) $invItem->quantity_on_hand <= 0) {
+                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                            'status' => 'Damaged',
+                            'sub_category' => 'Damaged / Lost',
+                            'last_updated' => now(),
+                        ]);
+                    } else {
+                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                            'initial_stock' => max((int) $invItem->quantity_on_hand, (int) $invItem->initial_stock - $itemQty),
+                            'last_updated' => now(),
+                        ]);
+                        DB::table('inventory_items')->insert([
+                            'item_name' => $invItem->item_name . ' (Damaged)',
+                            'item_type' => 'Tool',
+                            'tool_subtype' => $invItem->tool_subtype ?? 'hand',
+                            'inventory_mode' => 'worker',
+                            'sub_category' => 'Damaged / Lost',
+                            'unit' => $invItem->unit ?? 'pc',
+                            'initial_stock' => $itemQty,
+                            'quantity_on_hand' => $itemQty,
+                            'reorder_level' => 0,
+                            'status' => 'Damaged',
+                            'managed_by' => $invItem->managed_by ?? 'Tools Man',
+                            'last_updated' => now(),
+                        ]);
+                    }
                 }
             } elseif ($newStatus === 'lost' && $previousStatus !== 'lost') {
                 DB::table('tool_checkouts')
                     ->where('booking_id', $item->checklist->booking_id)
                     ->where('item_id', $item->item_id)
                     ->update([
-                        'status' => 'Lost/Damaged',
+                        'status' => 'Lost',
                         'return_date' => now(),
                         'notes' => $description,
                         'updated_at' => now(),
                     ]);
 
-                // Mark power tool as Lost/Damaged in inventory
-                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') === 'power') {
-                    DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                        'status' => 'Lost/Damaged',
-                        'last_updated' => now(),
-                    ]);
+                // Record lost tool in inventory and place in Damaged / Lost category
+                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
+                    if (($invItem->tool_subtype ?? '') === 'power' || (int) $invItem->quantity_on_hand <= 0) {
+                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                            'status' => 'Lost',
+                            'sub_category' => 'Damaged / Lost',
+                            'last_updated' => now(),
+                        ]);
+                    } else {
+                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                            'initial_stock' => max((int) $invItem->quantity_on_hand, (int) $invItem->initial_stock - $itemQty),
+                            'last_updated' => now(),
+                        ]);
+                        DB::table('inventory_items')->insert([
+                            'item_name' => $invItem->item_name . ' (Lost)',
+                            'item_type' => 'Tool',
+                            'tool_subtype' => $invItem->tool_subtype ?? 'hand',
+                            'inventory_mode' => 'worker',
+                            'sub_category' => 'Damaged / Lost',
+                            'unit' => $invItem->unit ?? 'pc',
+                            'initial_stock' => $itemQty,
+                            'quantity_on_hand' => $itemQty,
+                            'reorder_level' => 0,
+                            'status' => 'Lost',
+                            'managed_by' => $invItem->managed_by ?? 'Tools Man',
+                            'last_updated' => now(),
+                        ]);
+                    }
                 }
             } elseif ($newStatus === 'assigned' && $previousStatus !== 'assigned') {
                 // Reversible: If reverted back to assigned

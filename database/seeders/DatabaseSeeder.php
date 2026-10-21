@@ -12,7 +12,6 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RolesAndAccountsSeeder::class,
             ExampleDataSeeder::class,
-            TechnicianTeamsAndChecklistsSeeder::class,
         ]);
     }
 }

@@ -61,7 +61,7 @@ class TopbarWidgetController extends Controller
 
         $userId = (int) $user->user_id;
         $roleId = (int) $user->role_id;
-        $isHeadTech = $roleId === 7 || (bool) $user->is_head_technician || (method_exists($user, 'isHeadTechnician') && $user->isHeadTechnician());
+        $isHeadTech = $roleId === 7;
         $effectiveRoleId = $isHeadTech ? 7 : $roleId;
         $isCustomer = ! $isHeadTech && $roleId === 6;
 
@@ -108,7 +108,6 @@ class TopbarWidgetController extends Controller
                 'staff_messages.is_read',
                 'staff_messages.created_at',
                 'senders.role_id as sender_role_id',
-                'senders.is_head_technician as sender_is_head_tech',
                 'sender_roles.role_name as sender_role',
                 DB::raw("TRIM(CONCAT_WS(' ', senders.given_name, senders.last_name)) as sender_name"),
                 DB::raw("TRIM(CONCAT_WS(' ', recipients.given_name, recipients.last_name)) as recipient_name"),
@@ -119,7 +118,7 @@ class TopbarWidgetController extends Controller
             ->map(function ($m) use ($userId) {
                 $createdAt = Carbon::parse($m->created_at);
                 $isUnread = ! $m->is_read && (int) $m->sender_id !== $userId;
-                $senderRoleLabel = ((int) $m->sender_role_id === 7 || (bool) $m->sender_is_head_tech)
+                $senderRoleLabel = ((int) $m->sender_role_id === 7)
                     ? 'Head Technician'
                     : ($m->sender_role ?: 'Staff');
 
@@ -150,7 +149,6 @@ class TopbarWidgetController extends Controller
             ->select([
                 'users.user_id',
                 'users.role_id',
-                'users.is_head_technician',
                 'users.given_name',
                 'users.last_name',
                 'roles.role_name',
@@ -159,7 +157,7 @@ class TopbarWidgetController extends Controller
             ->limit(40)
             ->get()
             ->map(function ($u) {
-                $rLabel = ((int) $u->role_id === 7 || (bool) $u->is_head_technician)
+                $rLabel = ((int) $u->role_id === 7)
                     ? 'Head Technician'
                     : ($u->role_name ?: 'Staff');
 
@@ -195,7 +193,7 @@ class TopbarWidgetController extends Controller
     public function sendMessage(Request $request): JsonResponse
     {
         $user = $request->user();
-        $isHeadTech = $user && ((int) $user->role_id === 7 || (bool) $user->is_head_technician);
+        $isHeadTech = $user && ((int) $user->role_id === 7);
         if (! $user || (! $isHeadTech && (int) $user->role_id === 6)) {
             abort(403, 'Employee access required.');
         }
@@ -279,16 +277,17 @@ class TopbarWidgetController extends Controller
 
         if (! $isHeadTech && $roleId === 6) {
             // CUSTOMER NOTIFICATIONS:
-            // 1. Predictive Maintenance Forecasts
+            // 1. Predictive Maintenance Forecasts (notify customer especially when close / Due Soon / Overdue)
             $forecasts = $this->forecastingService->getCustomerForecasts($userId);
-            foreach (array_slice($forecasts, 0, 3) as $f) {
+            foreach (array_slice($forecasts, 0, 4) as $f) {
                 $createdAt = now()->subHours(2);
+                $isClose = in_array($f['urgency_level'], ['Overdue', 'Due Soon'], true);
                 $items[] = [
                     'id'          => 'cust_forecast_' . ($f['forecast_id'] ?? 0),
                     'type'        => 'forecast',
-                    'badge'       => $f['urgency_level'],
-                    'badge_color' => $f['urgency_level'] === 'Overdue' ? 'rose' : 'indigo',
-                    'title'       => 'Predictive Maintenance: ' . $f['recommended_service_name'],
+                    'badge'       => $isClose ? 'PM Reminder • ' . $f['urgency_level'] : $f['urgency_level'],
+                    'badge_color' => $f['urgency_level'] === 'Overdue' ? 'rose' : ($f['urgency_level'] === 'Due Soon' ? 'amber' : 'indigo'),
+                    'title'       => ($isClose ? 'Preventive Maintenance Due Soon: ' : 'Predictive Maintenance: ') . $f['recommended_service_name'],
                     'message'     => "Suggested by {$f['predicted_due_date']} for {$f['unit_summary']} following your {$f['source_service_name']}.",
                     'time_ago'    => 'Automated Forecast',
                     'target_page' => 'book',
@@ -296,7 +295,7 @@ class TopbarWidgetController extends Controller
                 ];
             }
 
-            // 2. Customer Booking Updates
+            // 2. Customer Booking Updates (including Payment Incomplete 10-min timer & Reschedule Notice)
             $bookings = Booking::with('service')
                 ->where('client_id', $userId)
                 ->orderByDesc('updated_at')
@@ -306,15 +305,32 @@ class TopbarWidgetController extends Controller
             foreach ($bookings as $b) {
                 $updated = $b->updated_at ? Carbon::parse($b->updated_at) : now()->subDay();
                 $srvName = $b->service?->service_name ?? 'Aircon Service';
+                $status = (string) $b->booking_status;
+
+                $badgeColor = match ($status) {
+                    'Completed' => 'emerald',
+                    'Payment Incomplete', 'Cancelled' => 'rose',
+                    'Reschedule Notice', 'Pending' => 'amber',
+                    default => 'blue',
+                };
+
+                if ($status === 'Payment Incomplete') {
+                    $msg = 'Action required: Complete your GCash reservation payment within 10 minutes or the booking will be automatically cancelled and your payment returned.';
+                } elseif ($status === 'Reschedule Notice') {
+                    $msg = 'Your preferred schedule slot is unavailable. Please select a new available date and time at no extra cost (₱0.00).';
+                } elseif ($b->quotation_status === 'Quotation Issued') {
+                    $msg = 'Your official quotation is ready for review and acceptance.';
+                } else {
+                    $msg = 'Scheduled for ' . ($b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD');
+                }
+
                 $items[] = [
                     'id'          => 'cust_booking_' . $b->booking_id,
                     'type'        => 'booking',
-                    'badge'       => $b->booking_status,
-                    'badge_color' => $b->booking_status === 'Completed' ? 'emerald' : ($b->booking_status === 'Pending' ? 'amber' : 'blue'),
-                    'title'       => "Booking #{$b->booking_id} ({$srvName}) is {$b->booking_status}",
-                    'message'     => $b->quotation_status === 'Quotation Issued'
-                        ? 'Your official quotation is ready for review and acceptance.'
-                        : 'Scheduled for ' . ($b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD'),
+                    'badge'       => $status,
+                    'badge_color' => $badgeColor,
+                    'title'       => "Booking #{$b->booking_id} ({$srvName}) is {$status}",
+                    'message'     => $msg,
                     'time_ago'    => $updated->diffForHumans(),
                     'target_page' => 'bookings',
                     'unread'      => ! $lastReadAt || $updated->gt($lastReadAt),
@@ -328,19 +344,19 @@ class TopbarWidgetController extends Controller
                 $this->forecastingService->getTechnicianCertifications((int) $tUser->user_id);
             }
 
-            // 1. Personal Certifications of the Head Technician
+            // 1. Personal Certifications of the Head Technician (1-week forecasting reminder)
             $myCerts = $this->forecastingService->getTechnicianCertifications($userId);
             foreach ($myCerts as $mc) {
-                if (in_array($mc['status'], ['Expired', 'Critical', 'Expiring Soon'], true)) {
+                if (($mc['days_until_expiry'] ?? 99) <= 7 || $mc['status'] === 'Renewal Submitted') {
                     $items[] = [
                         'id'          => 'head_own_cert_' . $mc['certification_id'],
                         'type'        => 'certification',
                         'badge'       => 'My License • ' . $mc['status'],
-                        'badge_color' => $mc['status'] === 'Expiring Soon' ? 'amber' : 'rose',
-                        'title'       => 'Your Certification Renewal: ' . $mc['certification_name'],
+                        'badge_color' => $mc['status'] === 'Renewal Submitted' ? 'blue' : ($mc['status'] === 'Expiring Soon' ? 'amber' : 'rose'),
+                        'title'       => '1-Week Certificate Forecast: ' . $mc['certification_name'],
                         'message'     => $mc['action_notice'],
                         'time_ago'    => 'Expiry: ' . $mc['expiry_date'],
-                        'target_page' => 'dashboard',
+                        'target_page' => 'certificates',
                         'unread'      => ! $lastReadAt || now()->subMinutes(30)->gt($lastReadAt),
                     ];
                 }
@@ -357,19 +373,21 @@ class TopbarWidgetController extends Controller
                 $techName = $cc->technician?->name ?? 'Technician #' . $cc->user_id;
                 $exp = Carbon::parse($cc->expiry_date)->startOfDay();
                 $daysLeft = (int) now()->startOfDay()->diffInDays($exp, false);
-                $isUrgent = $daysLeft <= $cc->renewal_lead_days;
+                $isUrgent = $daysLeft <= 7;
 
                 $items[] = [
                     'id'          => 'head_crew_cert_' . $cc->certification_id,
                     'type'        => 'certification',
-                    'badge'       => $isUrgent ? 'Crew Renewal Due' : 'Crew Compliance',
-                    'badge_color' => $daysLeft <= 14 ? 'rose' : ($isUrgent ? 'amber' : 'indigo'),
+                    'badge'       => $cc->status === 'Renewal Submitted' ? 'Submitted (1/1)' : ($isUrgent ? '1-Wk Reminder' : 'Crew Compliance'),
+                    'badge_color' => $cc->status === 'Renewal Submitted' ? 'blue' : ($daysLeft <= 3 ? 'rose' : ($isUrgent ? 'amber' : 'indigo')),
                     'title'       => "Tech Crew License ({$techName}): {$cc->certification_name}",
-                    'message'     => $isUrgent
-                        ? "Expires on {$exp->format('M d, Y')} ({$daysLeft} days left). Remind {$techName} to renew before field dispatch."
-                        : "Valid through {$exp->format('M d, Y')} ({$daysLeft} days remaining). Verified for squad assignment.",
+                    'message'     => $cc->status === 'Renewal Submitted'
+                        ? "{$techName} submitted a renewed certificate. Awaiting Manager verification and new expiration date."
+                        : ($isUrgent
+                            ? "Expires within 1 week on {$exp->format('M d, Y')} ({$daysLeft} days left). {$techName} must submit renewed certificate."
+                            : "Valid through {$exp->format('M d, Y')} ({$daysLeft} days remaining)."),
                     'time_ago'    => 'Due ' . $exp->format('M d, Y'),
-                    'target_page' => 'dashboard',
+                    'target_page' => 'certificates',
                     'unread'      => ! $lastReadAt || now()->subHours(1)->gt($lastReadAt),
                 ];
             }
@@ -433,39 +451,43 @@ class TopbarWidgetController extends Controller
             if ($roleId === 5) {
                 $certs = $this->forecastingService->getTechnicianCertifications($userId);
                 foreach ($certs as $c) {
-                    $isUrgent = in_array($c['status'], ['Expired', 'Critical', 'Expiring Soon'], true);
+                    $isUrgent = ($c['days_until_expiry'] ?? 99) <= 7;
                     $items[] = [
                         'id'          => 'tech_cert_' . $c['certification_id'],
                         'type'        => 'certification',
                         'badge'       => $c['status'],
-                        'badge_color' => $c['status'] === 'Active' ? 'emerald' : ($c['status'] === 'Expiring Soon' ? 'amber' : 'rose'),
-                        'title'       => ($isUrgent ? 'License Renewal Reminder: ' : 'License Tracked: ') . $c['certification_name'],
+                        'badge_color' => $c['status'] === 'Active' ? 'emerald' : ($c['status'] === 'Renewal Submitted' ? 'blue' : ($c['status'] === 'Expiring Soon' ? 'amber' : 'rose')),
+                        'title'       => ($isUrgent ? '1-Week Certificate Reminder: ' : 'Certificate Tracked: ') . $c['certification_name'],
                         'message'     => $c['action_notice'],
                         'time_ago'    => 'Expiry: ' . $c['expiry_date'],
-                        'target_page' => 'dashboard',
+                        'target_page' => 'certificates',
                         'unread'      => ! $lastReadAt || now()->subHours(1)->gt($lastReadAt),
                     ];
                 }
             } else {
                 // Managers / Super Admin / Admin Assistant / Tools Man
                 $expiringCerts = TechnicianCertification::with('technician')
+                    ->orderByRaw("CASE WHEN status = 'Renewal Submitted' THEN 0 ELSE 1 END")
                     ->orderBy('expiry_date')
-                    ->limit(3)
+                    ->limit(4)
                     ->get();
 
                 foreach ($expiringCerts as $ec) {
                     $techName = $ec->technician?->name ?? 'Technician';
                     $exp = Carbon::parse($ec->expiry_date);
                     $daysLeft = (int) now()->startOfDay()->diffInDays($exp->copy()->startOfDay(), false);
+                    $isSubmitted = $ec->status === 'Renewal Submitted';
                     $items[] = [
                         'id'          => 'mgr_cert_' . $ec->certification_id,
                         'type'        => 'certification',
-                        'badge'       => $daysLeft <= 45 ? 'Renewal Due' : 'Compliance',
-                        'badge_color' => $daysLeft <= 45 ? 'amber' : 'indigo',
+                        'badge'       => $isSubmitted ? 'Verify Renewal' : ($daysLeft <= 7 ? '1-Wk Expiry' : 'Compliance'),
+                        'badge_color' => $isSubmitted ? 'blue' : ($daysLeft <= 7 ? 'amber' : 'indigo'),
                         'title'       => "{$techName}: {$ec->certification_name}",
-                        'message'     => "Certification expires on {$exp->format('M d, Y')} ({$daysLeft} days left).",
+                        'message'     => $isSubmitted
+                            ? "Technician submitted renewed certificate (Cert #{$ec->certificate_number}). Verify and enter new expiration date."
+                            : "Certification expires on {$exp->format('M d, Y')} ({$daysLeft} days left).",
                         'time_ago'    => $exp->diffForHumans(),
-                        'target_page' => 'dashboard',
+                        'target_page' => 'certificates',
                         'unread'      => ! $lastReadAt || now()->subHours(1)->gt($lastReadAt),
                     ];
                 }
@@ -651,7 +673,6 @@ class TopbarWidgetController extends Controller
 
         $headTech = DB::table('users')
             ->where('role_id', 7)
-            ->orWhere('is_head_technician', 1)
             ->first();
         $headTechId = $headTech ? (int) $headTech->user_id : $senderId;
 

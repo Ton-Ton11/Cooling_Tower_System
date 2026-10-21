@@ -1,6 +1,7 @@
 import { useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import { formatCurrency, formatDateTime } from "../../utils/superAdmin";
+import { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
 
 const icons = {
     check: "M5 13l4 4L19 7",
@@ -34,6 +35,23 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
     const [activeTab, setActiveTab] = useState("services"); // "services" | "requests"
     const [carouselIndex, setCarouselIndex] = useState(0);
     const [copiedKey, setCopiedKey] = useState(null);
+    const [outsideZamboangaAlertOpen, setOutsideZamboangaAlertOpen] = useState(false);
+
+    const handleAttemptBookService = (serviceId = null) => {
+        if (serviceId && onSelectServiceToBook) {
+            onSelectServiceToBook(serviceId);
+        }
+        const currentAddr = (dashboardData?.user?.address || "").trim();
+        const isWithin = dashboardData?.user?.is_within_zamboanga_city !== undefined
+            ? Boolean(dashboardData.user.is_within_zamboanga_city)
+            : evaluateZamboangaGeospatial(currentAddr).is_within_zamboanga_city;
+
+        if (currentAddr.length > 2 && !isWithin) {
+            setOutsideZamboangaAlertOpen(true);
+            return;
+        }
+        onNavigate("book");
+    };
 
     const handleCopy = (text, key) => {
         if (navigator?.clipboard?.writeText) {
@@ -193,7 +211,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             {/* Quick CTA Actions */}
                             <div className="flex flex-col gap-2.5 shrink-0 self-start md:self-auto">
                                 <button
-                                    onClick={() => onNavigate("book")}
+                                    onClick={() => handleAttemptBookService(null)}
                                     className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-extrabold shadow-lg shadow-blue-900/40 transition transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -345,12 +363,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                 </div>
 
                                 <button
-                                    onClick={() => {
-                                        if (onSelectServiceToBook && primaryForecast.recommended_service_id) {
-                                            onSelectServiceToBook(primaryForecast.recommended_service_id);
-                                        }
-                                        onNavigate("book");
-                                    }}
+                                    onClick={() => handleAttemptBookService(primaryForecast.recommended_service_id)}
                                     className="px-5 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold shadow-md shadow-indigo-500/20 transition flex items-center justify-center gap-2 shrink-0"
                                 >
                                     <span>Book Recommended Service</span>
@@ -458,10 +471,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                                 </div>
 
                                                 <button
-                                                    onClick={() => {
-                                                        if (onSelectServiceToBook) onSelectServiceToBook(srv.service_id);
-                                                        onNavigate("book");
-                                                    }}
+                                                    onClick={() => handleAttemptBookService(srv.service_id)}
                                                     className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1"
                                                 >
                                                     <span>Request</span>
@@ -814,6 +824,51 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
                 </div>
             </div>
+
+            {outsideZamboangaAlertOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-rose-200 p-6 sm:p-7 space-y-5 animate-in fade-in zoom-in-95 duration-200 text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-rose-100 text-rose-600 mx-auto flex items-center justify-center border border-rose-200">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <div className="space-y-2">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-extrabold uppercase tracking-wider">
+                                Geospatial Boundary Alert
+                            </span>
+                            <h3 className="text-xl font-extrabold text-slate-900">
+                                This Booking Is Available Within Zamboanga City Only
+                            </h3>
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                                Our automated forward-geocoding service detected that your registered address (<strong>{user?.address || "Outside Location"}</strong>) is <strong>not within Zamboanga City</strong>.
+                            </p>
+                            <p className="text-xs text-rose-800 bg-rose-50/80 border border-rose-200/80 rounded-xl p-3 font-semibold">
+                                Cooling Tower Airconditioning Services exclusively serves customers within Zamboanga City (7000). You can update your profile address or specify a Zamboanga City service location inside the booking form.
+                            </p>
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-1">
+                            <button
+                                type="button"
+                                onClick={() => setOutsideZamboangaAlertOpen(false)}
+                                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition"
+                            >
+                                Close Alert
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setOutsideZamboangaAlertOpen(false);
+                                    onNavigate("book");
+                                }}
+                                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#0E1A33] hover:bg-blue-900 text-white text-xs font-extrabold shadow-md transition"
+                            >
+                                Enter a Zamboanga City Service Address &rarr;
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
     );

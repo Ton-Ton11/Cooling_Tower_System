@@ -16,6 +16,7 @@ import {
     Sparkles,
 } from "lucide-react";
 import { getInitials } from "../../utils/superAdmin";
+import GeospatialAddressAutocomplete from "../../Components/GeospatialAddressAutocomplete";
 import logo from "../../../imports/cooling_tower_airconditioning_services_logo-1.jpg";
 
 export default function UserProfileSettings({ addToast, initialPayload = null }) {
@@ -54,6 +55,7 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
             badge_tone: "blue",
         },
         highlights: initialPayload?.highlights || [],
+        certifications: initialPayload?.certifications || [],
     }));
 
     const [form, setForm] = useState({
@@ -93,6 +95,7 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
             user: payload.user,
             role_meta: payload.role_meta || profileData.role_meta,
             highlights: payload.highlights || [],
+            certifications: payload.certifications || [],
         });
         setForm({
             given_name: payload.user.given_name || "",
@@ -678,22 +681,16 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
 
                             <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-slate-700" htmlFor="prof_address">
-                                    Address
+                                    Address & Geospatial Location Verification
                                 </label>
-                                <div className="relative">
-                                    <MapPin className="absolute left-3.5 top-3 size-4 text-slate-400 pointer-events-none" />
-                                    <textarea
-                                        id="prof_address"
-                                        rows={2}
-                                        value={form.address}
-                                        onChange={(e) => setForm({ ...form, address: e.target.value })}
-                                        placeholder="Enter your complete address"
-                                        className={`${iconInputClass} resize-none`}
-                                    />
-                                </div>
-                                {formErrors.address && (
-                                    <p className="text-xs text-red-600">{formErrors.address[0]}</p>
-                                )}
+                                <GeospatialAddressAutocomplete
+                                    id="prof_address"
+                                    value={form.address}
+                                    allowOutsideSave={true}
+                                    placeholder="Search street, barangay, or city (e.g., Brgy. Canelar, Zamboanga City)..."
+                                    onChange={(val) => setForm({ ...form, address: val })}
+                                    error={formErrors.address ? formErrors.address[0] : ""}
+                                />
                             </div>
 
                             <div className="pt-3 flex items-center justify-end gap-3">
@@ -707,6 +704,100 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
                             </div>
                         </form>
                     </div>
+
+                    {/* CARD 1B: TECHNICIAN FORECASTING CERTIFICATE STATUS (TECHNICIANS & HEAD TECHNICIANS) */}
+                    {(Number(displayUser.role_id) === 5 ||
+                        Number(displayUser.role_id) === 7) && (
+                        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xl shadow-[#14224A]/5 space-y-5">
+                            <div className="pb-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                    <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-3 py-1 rounded-full mb-2">
+                                        <ShieldCheck className="size-3.5 text-indigo-600" />
+                                        <span>Forecasting Certificate Status (1-Week Alert Window)</span>
+                                    </div>
+                                    <h3 className="text-xl font-extrabold font-display text-[#14224A]">
+                                        My HVAC & Safety Certifications
+                                    </h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                        Forecasting triggers a reminder <strong>1 week (7 days) before expiration</strong>. Once triggered, submit your renewed certificate <strong>once (1/1)</strong> in the <strong>Certificate Monitoring</strong> tab for Manager verification and expiration countdown reset.
+                                    </p>
+                                </div>
+                                <span className="px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-bold self-start sm:self-center">
+                                    1-Week Alert • 1x Submission • Manager Verifies
+                                </span>
+                            </div>
+
+                            {(!profileData.certifications || profileData.certifications.length === 0) ? (
+                                <div className="py-8 text-center rounded-2xl bg-slate-50 border border-dashed border-slate-200 text-xs text-slate-500">
+                                    No certification records found yet. Your Manager will register and renew your trade licenses here.
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {profileData.certifications.map((cert) => {
+                                        const isUrgent = ["Expired", "Critical", "Expiring Soon"].includes(cert.status);
+                                        return (
+                                            <div
+                                                key={cert.certification_id}
+                                                className={`p-4 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                                    isUrgent
+                                                        ? "bg-amber-50/50 border-amber-200"
+                                                        : "bg-slate-50/70 border-slate-200/80"
+                                                }`}
+                                            >
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <h4 className="text-sm font-extrabold text-[#14224A]">
+                                                            {cert.certification_name}
+                                                        </h4>
+                                                        <span
+                                                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                                                cert.status === "Expired" || cert.status === "Critical"
+                                                                    ? "bg-rose-100 text-rose-800 border border-rose-200"
+                                                                    : cert.status === "Expiring Soon"
+                                                                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                                                    : cert.status === "Renewal Submitted"
+                                                                    ? "bg-blue-100 text-blue-800 border border-blue-200"
+                                                                    : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                                            }`}
+                                                        >
+                                                            {cert.status}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-600">
+                                                        Issuer: <strong>{cert.issuing_body}</strong> &bull; Cert #:{" "}
+                                                        <strong>{cert.certificate_number || "On File"}</strong> &bull; Valid:{" "}
+                                                        {cert.issued_date} to <strong>{cert.expiry_date}</strong>
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-700 bg-white px-3 py-1.5 rounded-xl border border-slate-200/70">
+                                                        {cert.action_notice}
+                                                    </p>
+                                                </div>
+
+                                                <div className="text-left sm:text-right shrink-0">
+                                                    <span className="text-xs font-black text-slate-900 block">
+                                                        Expires: {cert.expiry_date}
+                                                    </span>
+                                                    <span
+                                                        className={`text-[11px] font-bold block ${
+                                                            cert.days_until_expiry < 0
+                                                                ? "text-rose-600"
+                                                                : isUrgent
+                                                                ? "text-amber-700"
+                                                                : "text-emerald-700"
+                                                        }`}
+                                                    >
+                                                        {cert.days_until_expiry < 0
+                                                            ? `${Math.abs(cert.days_until_expiry)} days expired`
+                                                            : `${cert.days_until_expiry} days remaining`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {/* CARD 2: PASSWORD & ACCOUNT SECURITY */}
                     <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xl shadow-[#14224A]/5">

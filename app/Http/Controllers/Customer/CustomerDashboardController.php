@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Customer;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Shared\LocationAutocompleteController;
 use App\Models\Booking;
 use App\Models\Complaint;
 use App\Models\CustomerUnitDetail;
@@ -235,16 +236,21 @@ class CustomerDashboardController extends Controller
             'brands' => $brands,
             'announcements' => $announcements,
             'unit_detail' => $unitDetail,
-            'user' => [
-                'user_id' => $user->user_id,
-                'given_name' => $user->given_name,
-                'middle_name' => $user->middle_name,
-                'last_name' => $user->last_name,
-                'full_name' => $user->name,
-                'email' => $user->email,
-                'contact_number' => $user->contact_number,
-                'address' => $user->address,
-            ],
+            'user' => (function () use ($user) {
+                $geo = LocationAutocompleteController::evaluateGeospatialLocation($user->address);
+                return [
+                    'user_id' => $user->user_id,
+                    'given_name' => $user->given_name,
+                    'middle_name' => $user->middle_name,
+                    'last_name' => $user->last_name,
+                    'full_name' => $user->name,
+                    'email' => $user->email,
+                    'contact_number' => $user->contact_number,
+                    'address' => $user->address,
+                    'is_within_zamboanga_city' => $geo['is_within_zamboanga_city'],
+                    'location_verification' => $geo,
+                ];
+            })(),
         ]);
     }
 

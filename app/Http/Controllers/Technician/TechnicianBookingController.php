@@ -21,9 +21,8 @@ class TechnicianBookingController extends TechnicianBaseController
             ->pluck('team_id')
             ->all();
 
-        // Query bookings assigned to this technician or their teams
+        // Query bookings assigned to this technician or their teams (service_reports is already left-joined in bookingsBaseQuery)
         $query = $this->bookingsBaseQuery()
-            ->leftJoin('service_reports', 'service_reports.booking_id', '=', 'bookings.booking_id')
             ->leftJoin('customer_feedback_and_ratings as feedback', 'feedback.booking_id', '=', 'bookings.booking_id')
             ->addSelect([
                 'service_reports.report_id',
@@ -93,38 +92,69 @@ class TechnicianBookingController extends TechnicianBaseController
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
                 : (! empty($row->tech_user_id) ? $this->formatName($row->tech_given_name, $row->tech_middle_name, $row->tech_last_name) : null);
 
-                $assistantId = $row->assistant_technician_id ?? null;
-                $assistantName = ! empty($row->assistant_tech_user_id)
-                    ? $this->formatName($row->assistant_tech_given_name, $row->assistant_tech_middle_name, $row->assistant_tech_last_name)
-                    : null;
+            $assistantId = $row->assistant_technician_id ?? null;
+            $assistantName = ! empty($row->assistant_tech_user_id)
+                ? $this->formatName($row->assistant_tech_given_name, $row->assistant_tech_middle_name, $row->assistant_tech_last_name)
+                : null;
 
-                $teamName = ($leadName && $assistantName)
-                    ? "{$leadName} & {$assistantName}"
-                    : ($row->assigned_team_name ?? ($leadName ? "{$leadName} (Lead)" : null));
+            $teamName = ($leadName && $assistantName)
+                ? "{$leadName} & {$assistantName}"
+                : ($row->assigned_team_name ?? ($leadName ? "{$leadName} (Lead)" : null));
 
-                $booking = [
-                    'booking_id' => (int) $row->booking_id,
-                    'client_id' => (int) $row->client_id,
-                    'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
-                    'client_address' => $row->client_address,
-                    'client_contact_number' => $row->client_contact_number,
-                    'client_email' => $row->client_email,
-                    'service_id' => (int) $row->service_id,
-                    'service' => $row->service_name,
-                    'service_name' => $row->service_name,
-                    'service_base_price' => (float) $row->base_price,
-                    'lead_technician_id' => $leadId ? (int) $leadId : null,
-                    'lead_technician_name' => $leadName,
-                    'assistant_technician_id' => $assistantId ? (int) $assistantId : null,
-                    'assistant_technician_name' => $assistantName,
-                    'assigned_tech_id' => $leadId ? (int) $leadId : null,
-                    'assigned_tech_name' => $leadName,
-                    'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
-                    'assigned_team_name' => $teamName,
+            $serviceDetails = [];
+            if (! empty($row->service_details)) {
+                $serviceDetails = is_string($row->service_details)
+                    ? (json_decode($row->service_details, true) ?: [])
+                    : (is_array($row->service_details) ? $row->service_details : []);
+            }
+
+            $unitsData = [];
+            if (! empty($row->units_data)) {
+                $unitsData = is_string($row->units_data)
+                    ? (json_decode($row->units_data, true) ?: [])
+                    : (is_array($row->units_data) ? $row->units_data : []);
+            }
+
+            $quotationData = null;
+            if (! empty($row->quotation_data)) {
+                $quotationData = is_string($row->quotation_data)
+                    ? json_decode($row->quotation_data, true)
+                    : $row->quotation_data;
+            }
+
+            $isJobStarted = ! empty($row->job_started_at)
+                || ! empty($serviceDetails['job_started_by_tech'])
+                || in_array($row->booking_status, ['Dispatched', 'In-Progress'], true);
+
+            return [
+                'booking_id' => (int) $row->booking_id,
+                'client_id' => (int) $row->client_id,
+                'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
+                'client_address' => $row->client_address,
+                'client_contact_number' => $row->client_contact_number,
+                'client_email' => $row->client_email,
+                'service_id' => (int) $row->service_id,
+                'service' => $row->service_name,
+                'service_name' => $row->service_name,
+                'service_base_price' => (float) $row->base_price,
+                'lead_technician_id' => $leadId ? (int) $leadId : null,
+                'lead_technician_name' => $leadName,
+                'assistant_technician_id' => $assistantId ? (int) $assistantId : null,
+                'assistant_technician_name' => $assistantName,
+                'assigned_tech_id' => $leadId ? (int) $leadId : null,
+                'assigned_tech_name' => $leadName,
+                'assigned_team_id' => $row->assigned_team_id ? (int) $row->assigned_team_id : null,
+                'assigned_team_name' => $teamName,
                 'assigned_by' => $row->assigned_by ? (int) $row->assigned_by : null,
                 'assigned_by_name' => isset($row->assigner_given_name) ? $this->formatName($row->assigner_given_name, $row->assigner_middle_name, $row->assigner_last_name) : null,
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
+                'service_payment_method' => $row->service_payment_method ?? 'Cash',
+                'service_details' => $serviceDetails,
+                'units_data' => $unitsData,
+                'quotation_data' => $quotationData,
+                'payment_turnover' => $serviceDetails['payment_turnover'] ?? null,
+                'job_started_by_tech' => $isJobStarted,
                 'created_at' => $row->created_at,
                 'payment_status' => $row->payment_status ?? 'Pending',
                 'payment_method' => $row->payment_method,
@@ -156,12 +186,37 @@ class TechnicianBookingController extends TechnicianBaseController
                     'logged_at' => $m->logged_at,
                 ])->values(),
             ];
-
-            return $booking;
         });
 
+        // Identify closest upcoming schedule among active jobs and whether any job is currently started
+        $nowTs = now()->timestamp;
+        $activeUncompleted = $mapped->filter(fn ($b) => in_array($b['booking_status'], ['Approved', 'Dispatched', 'In-Progress'], true));
+        $currentlyStartedBooking = $activeUncompleted->first(fn ($b) => ! empty($b['job_started_by_tech']));
+
+        $closestBookingId = null;
+        if ($activeUncompleted->isNotEmpty()) {
+            $closest = $activeUncompleted->sortBy(function ($b) use ($nowTs) {
+                $ts = $b['scheduled_date'] ? strtotime((string) $b['scheduled_date']) : $nowTs;
+                return abs($ts - $nowTs);
+            })->first();
+            $closestBookingId = $closest['booking_id'] ?? null;
+        }
+
+        $finalMapped = $mapped->map(function ($b) use ($closestBookingId, $currentlyStartedBooking) {
+            $b['is_recommended_closest'] = ($closestBookingId !== null && $b['booking_id'] === $closestBookingId);
+            $b['active_started_booking_id'] = $currentlyStartedBooking['booking_id'] ?? null;
+            return $b;
+        })->sortBy(function ($b) use ($nowTs) {
+            // Put active jobs sorted by closest schedule first, then completed/cancelled
+            $isActive = in_array($b['booking_status'], ['Approved', 'Dispatched', 'In-Progress'], true);
+            $ts = $b['scheduled_date'] ? strtotime((string) $b['scheduled_date']) : $nowTs;
+            return $isActive ? (0 + abs($ts - $nowTs)) : (1000000000 + $ts);
+        })->values();
+
         return response()->json([
-            'data' => $mapped->values(),
+            'data' => $finalMapped,
+            'active_started_booking_id' => $currentlyStartedBooking['booking_id'] ?? null,
+            'recommended_booking_id' => $closestBookingId,
         ]);
     }
 
@@ -183,6 +238,8 @@ class TechnicianBookingController extends TechnicianBaseController
             ->all();
 
         $isAssigned = ((int) $booking->assigned_tech_id === $userId)
+            || ((int) $booking->lead_technician_id === $userId)
+            || ((int) $booking->assistant_technician_id === $userId)
             || ($booking->assigned_team_id && in_array((int) $booking->assigned_team_id, $myTeamIds, true));
 
         if (in_array((int) $request->user()->role_id, [5, 7], true) && ! $isAssigned && ! $request->user()->isHeadTechnician()) {
@@ -191,12 +248,57 @@ class TechnicianBookingController extends TechnicianBaseController
 
         if (! in_array($booking->booking_status, ['Approved', 'Dispatched', 'In-Progress'], true)) {
             throw ValidationException::withMessages([
-                'booking_status' => ['Only approved or dispatched bookings can be started.'],
+                'booking_status' => ['Only approved bookings can be started.'],
             ]);
         }
 
+        // Enforce single active started job lock: technician can only start job once, and can only start again if the last booking was Completed
+        $otherActiveBookings = DB::table('bookings')
+            ->leftJoin('service_reports', 'service_reports.booking_id', '=', 'bookings.booking_id')
+            ->where('bookings.booking_id', '!=', $bookingId)
+            ->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress'])
+            ->where(function ($q) use ($userId, $myTeamIds) {
+                $q->where('bookings.lead_technician_id', $userId)
+                    ->orWhere('bookings.assistant_technician_id', $userId)
+                    ->orWhere('bookings.assigned_tech_id', $userId);
+                if (! empty($myTeamIds)) {
+                    $q->orWhereIn('bookings.assigned_team_id', $myTeamIds);
+                }
+            })
+            ->get(['bookings.booking_id', 'bookings.booking_status', 'bookings.service_details', 'service_reports.job_started_at']);
+
+        foreach ($otherActiveBookings as $other) {
+            $otherDetails = ! empty($other->service_details)
+                ? (is_string($other->service_details) ? (json_decode($other->service_details, true) ?: []) : [])
+                : [];
+            $otherStarted = ! empty($other->job_started_at)
+                || ! empty($otherDetails['job_started_by_tech'])
+                || in_array($other->booking_status, ['Dispatched', 'In-Progress'], true);
+
+            if ($otherStarted) {
+                throw ValidationException::withMessages([
+                    'booking_id' => ["You already have an active started job (Booking #{$other->booking_id}). You can only start another job once the current booking is declared Completed by the Manager."],
+                ]);
+            }
+        }
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : [])
+            : [];
+
+        if (! empty($serviceDetails['job_started_by_tech'])) {
+            throw ValidationException::withMessages([
+                'booking_id' => ['This job has already been started. Proceed to the My Tools & Materials Checklist tab to submit your checklist.'],
+            ]);
+        }
+
+        $serviceDetails['job_started_by_tech'] = true;
+        $serviceDetails['job_started_at'] = now()->toISOString();
+
+        // Keep booking_status as 'Approved' until the Tools Man approves the checklist (which transitions it to 'In-Progress')
         DB::table('bookings')->where('booking_id', $bookingId)->update([
-            'booking_status' => 'In-Progress',
+            'service_details' => json_encode($serviceDetails),
+            'updated_at' => now(),
         ]);
 
         DB::table('service_reports')->updateOrInsert(
@@ -204,7 +306,7 @@ class TechnicianBookingController extends TechnicianBaseController
             [
                 'technician_id' => $userId,
                 'job_started_at' => now(),
-                'status' => 'In-Progress',
+                'status' => 'Started — Awaiting Checklist',
                 'updated_at' => now(),
                 'created_at' => now(),
             ]
@@ -213,12 +315,13 @@ class TechnicianBookingController extends TechnicianBaseController
         $this->logActivity(
             $userId,
             'JOB_START',
-            sprintf('Technician started job for Booking #%d.', $bookingId)
+            sprintf('Technician started job for Booking #%d. Booking added to My Tools & Materials Checklist tab.', $bookingId)
         );
 
         return response()->json([
-            'message' => 'Job marked as In-Progress.',
-            'booking_status' => 'In-Progress',
+            'message' => 'Job started! Booking #' . $bookingId . ' is now available in your My Tools & Materials Checklist tab. Once the Tools Man approves your checklist, the customer booking status will automatically update to In-Progress.',
+            'booking_status' => $booking->booking_status,
+            'job_started_by_tech' => true,
         ]);
     }
 
@@ -243,6 +346,8 @@ class TechnicianBookingController extends TechnicianBaseController
             ->all();
 
         $isAssigned = ((int) $booking->assigned_tech_id === $userId)
+            || ((int) $booking->lead_technician_id === $userId)
+            || ((int) $booking->assistant_technician_id === $userId)
             || ($booking->assigned_team_id && in_array((int) $booking->assigned_team_id, $myTeamIds, true));
 
         if (in_array((int) $request->user()->role_id, [5, 7], true) && ! $isAssigned && ! $request->user()->isHeadTechnician()) {
@@ -257,41 +362,103 @@ class TechnicianBookingController extends TechnicianBaseController
             'ac_brand' => ['nullable', 'string', 'max:100'],
             'ac_type' => ['nullable', 'string', 'max:100'],
             'unit_serial_number' => ['nullable', 'string', 'max:100'],
+            'total_service_price' => ['required', 'numeric', 'min:300'],
+            'payment_method' => ['required', 'string', 'in:Cash,GCash'],
+            'reference_number' => ['nullable', 'string', 'max:13'],
         ]);
 
-        DB::table('bookings')->where('booking_id', $bookingId)->update([
-            'booking_status' => 'Completed',
-        ]);
+        if ($validated['payment_method'] === 'GCash' && empty(trim((string) ($validated['reference_number'] ?? '')))) {
+            throw ValidationException::withMessages([
+                'reference_number' => ['Please enter the customer\'s GCash reference number (maximum 13 digits).'],
+            ]);
+        }
 
-        DB::table('service_reports')->updateOrInsert(
-            ['booking_id' => $bookingId],
-            [
-                'technician_id' => $userId,
-                'service_name' => $booking->service_name,
-                'diagnosis' => $validated['diagnosis'],
-                'work_done' => $validated['work_done'],
-                'parts_replaced' => $validated['parts_replaced'] ?? null,
-                'recommendations' => $validated['recommendations'] ?? null,
-                'ac_brand' => $validated['ac_brand'] ?? null,
-                'ac_type' => $validated['ac_type'] ?? null,
-                'unit_serial_number' => $validated['unit_serial_number'] ?? null,
-                'job_completed_at' => now(),
-                'status' => 'Completed',
+        $totalServicePrice = (float) $validated['total_service_price'];
+        $downPayment = 300.00;
+        $netCollected = max(0.0, $totalServicePrice - $downPayment);
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : [])
+            : [];
+
+        $serviceDetails['payment_turnover'] = [
+            'total_service_price' => $totalServicePrice,
+            'reservation_down_payment' => $downPayment,
+            'net_collected' => $netCollected,
+            'payment_method' => $validated['payment_method'],
+            'reference_number' => $validated['reference_number'] ?? null,
+            'collected_by_tech_id' => $userId,
+            'turned_over_at' => now()->toISOString(),
+            'status' => 'Turned Over to Manager — Awaiting Verification',
+        ];
+
+        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected) {
+            // Keep booking in In-Progress until Manager verifies payment turnover and declares Complete
+            DB::table('bookings')->where('booking_id', $bookingId)->update([
+                'service_payment_method' => $validated['payment_method'],
+                'service_details' => json_encode($serviceDetails),
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
+                    '[Technician Payment Turnover]: Total Service ₱%.2f less ₱300.00 down payment = ₱%.2f collected via %s%s. Handed over to Manager for completion.',
+                    $totalServicePrice,
+                    $netCollected,
+                    $validated['payment_method'],
+                    ! empty($validated['reference_number']) ? " (Ref: {$validated['reference_number']})" : ''
+                )),
                 'updated_at' => now(),
-            ]
-        );
+            ]);
 
-        $this->logActivity(
-            $userId,
-            'JOB_COMPLETE',
-            sprintf('Technician completed service report for Booking #%d.', $bookingId)
-        );
+            if ($netCollected > 0) {
+                DB::table('payment')->insert([
+                    'booking_id' => $bookingId,
+                    'booking_price' => $totalServicePrice,
+                    'unit_price' => 0.00,
+                    'spare_parts_price' => 0.00,
+                    'amount_paid' => $netCollected,
+                    'payment_status' => 'Paid',
+                    'payment_method' => $validated['payment_method'],
+                    'payment_type' => 'Service Balance Payment (₱300 Reservation Deducted)',
+                    'reference_number' => $validated['reference_number'] ?? null,
+                    'notes' => 'Collected by technician after service and turned over to Manager.',
+                    'payment_date' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
-        app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
+            DB::table('service_reports')->updateOrInsert(
+                ['booking_id' => $bookingId],
+                [
+                    'technician_id' => $userId,
+                    'service_name' => $booking->service_name,
+                    'diagnosis' => $validated['diagnosis'],
+                    'work_done' => $validated['work_done'],
+                    'parts_replaced' => $validated['parts_replaced'] ?? null,
+                    'recommendations' => $validated['recommendations'] ?? null,
+                    'ac_brand' => $validated['ac_brand'] ?? null,
+                    'ac_type' => $validated['ac_type'] ?? null,
+                    'unit_serial_number' => $validated['unit_serial_number'] ?? null,
+                    'job_completed_at' => now(),
+                    'status' => 'Payment Turned Over — Awaiting Manager Completion',
+                    'updated_at' => now(),
+                ]
+            );
+
+            $this->logActivity(
+                $userId,
+                'JOB_REPORT_AND_PAYMENT_TURNOVER',
+                sprintf(
+                    'Technician submitted service report and turned over ₱%.2f (%s, after ₱300 down payment deduction) to Manager for Booking #%d.',
+                    $netCollected,
+                    $validated['payment_method'],
+                    $bookingId
+                )
+            );
+        });
 
         return response()->json([
-            'message' => 'Job marked as Completed, service report submitted, and next maintenance forecast generated.',
-            'booking_status' => 'Completed',
+            'message' => 'Service report submitted and customer payment turned over to Manager! Once the Manager verifies the payment turnover, the booking will be declared Completed.',
+            'booking_status' => $booking->booking_status,
+            'payment_turnover' => $serviceDetails['payment_turnover'],
         ]);
     }
 

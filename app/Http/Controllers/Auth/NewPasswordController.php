@@ -49,6 +49,7 @@ class NewPasswordController extends Controller
                 $user->forceFill([
                     'password' => Hash::make($request->password),
                     'remember_token' => Str::random(60),
+                    'email_verified_at' => $user->email_verified_at ?? now(),
                 ])->save();
 
                 event(new PasswordReset($user));
@@ -59,7 +60,7 @@ class NewPasswordController extends Controller
         // the application's home authenticated view. If there is an error we can
         // redirect them back to where they came from with their error message.
         if ($status == Password::PASSWORD_RESET) {
-            return redirect()->route('login')->with('status', __($status));
+            return redirect()->route('login')->with('status', 'Your password has been verified and reset via Gmail. You may now log in with your new password.');
         }
 
         throw ValidationException::withMessages([

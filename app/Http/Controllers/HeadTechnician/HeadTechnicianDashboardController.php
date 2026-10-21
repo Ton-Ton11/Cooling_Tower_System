@@ -23,8 +23,7 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
         }
 
         $isAuthorized = (int) $user->role_id === 1
-            || (int) $user->role_id === 7
-            || ((int) $user->role_id === 5 && (bool) $user->is_head_technician);
+            || (int) $user->role_id === 7;
         abort_unless($isAuthorized, 403, 'Head Technician access required.');
     }
 
@@ -83,7 +82,6 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
 
         // Ensure all technicians (including Head Technician) have their certifications initialized
         $allTechUsers = User::whereIn('role_id', [5, 7])
-            ->orWhere('is_head_technician', true)
             ->orderBy('role_id', 'desc')
             ->orderBy('given_name')
             ->get();
@@ -102,41 +100,49 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
             ->map(function (TechnicianCertification $cert) use ($forecastingService, $userId) {
                 $expiry = Carbon::parse($cert->expiry_date)->startOfDay();
                 $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
+                $leadDays = 7;
 
                 if ($cert->status === 'Renewal Submitted') {
                     $computedStatus = 'Renewal Submitted';
                 } elseif ($daysLeft < 0) {
                     $computedStatus = 'Expired';
-                } elseif ($daysLeft <= 14) {
+                } elseif ($daysLeft <= 3) {
                     $computedStatus = 'Critical';
-                } elseif ($daysLeft <= $cert->renewal_lead_days) {
+                } elseif ($daysLeft <= $leadDays) {
                     $computedStatus = 'Expiring Soon';
                 } else {
                     $computedStatus = 'Active';
                 }
 
                 $tech = $cert->technician;
-                $techRole = ($tech && ((int) $tech->role_id === 7 || (bool) $tech->is_head_technician))
+                $techRole = ($tech && (int) $tech->role_id === 7)
                     ? 'Head Technician'
                     : 'Technician';
 
                 return [
-                    'certification_id'   => $cert->certification_id,
-                    'user_id'            => $cert->user_id,
-                    'is_self'            => (int) $cert->user_id === $userId,
-                    'technician_name'    => $tech?->name ?? ('Technician #' . $cert->user_id),
-                    'technician_role'    => $techRole,
-                    'certification_name' => $cert->certification_name,
-                    'issuing_body'       => $cert->issuing_body,
-                    'certificate_number' => $cert->certificate_number,
-                    'issued_date'        => Carbon::parse($cert->issued_date)->format('M d, Y'),
-                    'expiry_date'        => $expiry->format('M d, Y'),
-                    'days_until_expiry'  => $daysLeft,
-                    'renewal_lead_days'  => $cert->renewal_lead_days,
-                    'status'             => $computedStatus,
-                    'action_notice'      => $daysLeft <= $cert->renewal_lead_days
-                        ? "Expires in {$daysLeft} days ({$expiry->format('M d, Y')}). Remind {$tech?->name} to file renewal with {$cert->issuing_body}."
-                        : "Compliant & valid for {$daysLeft} more days.",
+                    'certification_id'      => $cert->certification_id,
+                    'user_id'               => $cert->user_id,
+                    'is_self'               => (int) $cert->user_id === $userId,
+                    'technician_name'       => $tech?->name ?? ('Technician #' . $cert->user_id),
+                    'technician_role'       => $techRole,
+                    'certification_name'    => $cert->certification_name,
+                    'issuing_body'          => $cert->issuing_body,
+                    'certificate_number'    => $cert->certificate_number,
+                    'issued_date'           => Carbon::parse($cert->issued_date)->format('M d, Y'),
+                    'expiry_date'           => $expiry->format('M d, Y'),
+                    'expiry_date_raw'       => $expiry->toDateString(),
+                    'days_until_expiry'     => $daysLeft,
+                    'renewal_lead_days'     => $leadDays,
+                    'status'                => $computedStatus,
+                    'is_reminder_triggered' => ($daysLeft <= $leadDays) || $computedStatus === 'Renewal Submitted',
+                    'has_submitted_once'    => $computedStatus === 'Renewal Submitted',
+                    'can_technician_submit' => ($daysLeft <= $leadDays) && $computedStatus !== 'Renewal Submitted',
+                    'notes'                 => $cert->notes,
+                    'action_notice'         => $computedStatus === 'Renewal Submitted'
+                        ? "Renewed certificate submitted by {$tech?->name} (1/1 limit). Awaiting Manager verification and new expiration date."
+                        : ($daysLeft <= $leadDays
+                            ? "1-Week Forecasting Reminder Triggered: Expires in {$daysLeft} days ({$expiry->format('M d, Y')}). Technician should submit renewed certificate."
+                            : "Forecasting Validated: Compliant & valid for {$daysLeft} more days."),
                 ];
             })
             ->sortBy('days_until_expiry')
@@ -146,7 +152,7 @@ class HeadTechnicianDashboardController extends TechnicianBaseController
         $technicianList = $allTechUsers->map(fn (User $u) => [
             'user_id' => (int) $u->user_id,
             'name'    => $u->name,
-            'role'    => ((int) $u->role_id === 7 || (bool) $u->is_head_technician) ? 'Head Technician' : 'Technician',
+            'role'    => ((int) $u->role_id === 7) ? 'Head Technician' : 'Technician',
         ])->values()->all();
 
         $announcements = $this->mapAnnouncements(

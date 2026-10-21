@@ -23,7 +23,11 @@ abstract class SuperAdminBaseController extends Controller
 
     protected const STAFF_ROLE_IDS = [2, 3, 4, 5, 7];
 
-    protected const BOOKING_ASSIGNABLE_STATUSES = ['Approved', 'Dispatched'];
+    protected const BOOKING_ASSIGNABLE_STATUSES = [
+        'Approved',
+        'Payment Incomplete',
+        'Reschedule Notice',
+    ];
 
     protected const INVENTORY_ITEM_TYPES = ['Tool', 'Material', 'Spare Part'];
 
@@ -168,8 +172,11 @@ abstract class SuperAdminBaseController extends Controller
                 'p1.payment_id',
                 'p1.payment_status',
                 'p1.payment_method',
+                'p1.reference_number',
                 'p1.payment_date',
-                DB::raw('(SELECT COALESCE(SUM(p2.amount_paid), 0) FROM payment as p2 WHERE p2.booking_id = p1.booking_id) as amount_paid'),
+                DB::raw('(SELECT COALESCE(MAX(p2.booking_price), 0) FROM payment as p2 WHERE p2.booking_id = p1.booking_id) as booking_price'),
+                DB::raw('(SELECT COALESCE(MAX(p2.spare_parts_price), 0) FROM payment as p2 WHERE p2.booking_id = p1.booking_id) as spare_parts_price'),
+                DB::raw('(SELECT COALESCE(SUM(p2.amount_paid), 0) FROM payment as p2 WHERE p2.booking_id = p1.booking_id AND p2.payment_status != "Returned") as amount_paid'),
             ])
             ->whereRaw('p1.payment_id = (SELECT MAX(p3.payment_id) FROM payment as p3 WHERE p3.booking_id = p1.booking_id)');
     }
@@ -191,6 +198,7 @@ abstract class SuperAdminBaseController extends Controller
             ->leftJoin('users as assistant_tech', 'assistant_tech.user_id', '=', 'bookings.assistant_technician_id')
             ->leftJoin('technician_teams', 'technician_teams.team_id', '=', 'bookings.assigned_team_id')
             ->leftJoin('users as assigners', 'assigners.user_id', '=', 'bookings.assigned_by')
+            ->leftJoin('service_reports', 'service_reports.booking_id', '=', 'bookings.booking_id')
             ->leftJoinSub($this->latestPaymentSubquery(), 'payment', function ($join) {
                 $join->on('payment.booking_id', '=', 'bookings.booking_id');
             })
@@ -205,14 +213,28 @@ abstract class SuperAdminBaseController extends Controller
                 'bookings.assigned_at',
                 'bookings.scheduled_date',
                 'bookings.booking_status',
+                'bookings.service_payment_method',
+                'bookings.service_details',
+                'bookings.units_data',
+                'bookings.quotation_data',
+                'bookings.notes',
+                'bookings.cancellation_reason',
                 'bookings.created_at',
                 'services.service_id',
                 'services.service_name',
                 'services.base_price',
                 'payment.payment_status',
                 'payment.payment_method',
+                'payment.reference_number as payment_reference_number',
                 'payment.amount_paid',
                 'payment.payment_date',
+                'service_reports.report_id as service_report_id',
+                'service_reports.status as service_report_status',
+                'service_reports.diagnosis as service_report_diagnosis',
+                'service_reports.work_done as service_report_work_done',
+                'service_reports.recommendations as service_report_remarks',
+                'service_reports.job_started_at',
+                'service_reports.job_completed_at',
                 'clients.given_name as client_given_name',
                 'clients.middle_name as client_middle_name',
                 'clients.last_name as client_last_name',
@@ -243,6 +265,7 @@ abstract class SuperAdminBaseController extends Controller
         return DB::table('bookings')
             ->join('users as clients', 'clients.user_id', '=', 'bookings.client_id')
             ->join('services', 'services.service_id', '=', 'bookings.service_id')
+            ->leftJoin('users as assigners', 'assigners.user_id', '=', 'bookings.assigned_by')
             ->leftJoinSub($this->latestPaymentSubquery(), 'payment', function ($join) {
                 $join->on('payment.booking_id', '=', 'bookings.booking_id');
             })
@@ -252,14 +275,18 @@ abstract class SuperAdminBaseController extends Controller
             ->select([
                 'bookings.booking_id',
                 'bookings.client_id',
+                'bookings.assigned_by',
                 'bookings.scheduled_date',
                 'bookings.booking_status',
+                'bookings.service_details',
                 'bookings.notes as booking_notes',
                 'bookings.created_at',
                 'services.service_name',
                 'services.category as service_category',
                 'services.base_price',
                 'payment.amount_paid',
+                'payment.booking_price',
+                'payment.spare_parts_price',
                 'payment.payment_method',
                 'payment.payment_status',
                 'payment.payment_date',
@@ -270,6 +297,10 @@ abstract class SuperAdminBaseController extends Controller
                 'clients.last_name as client_last_name',
                 'clients.contact_number as client_contact_number',
                 'clients.address as client_address',
+                'assigners.given_name as assigner_given_name',
+                'assigners.middle_name as assigner_middle_name',
+                'assigners.last_name as assigner_last_name',
+                'assigners.role_id as assigner_role_id',
             ]);
     }
 
@@ -469,6 +500,27 @@ abstract class SuperAdminBaseController extends Controller
                 $teamName = $row->assigned_team_name;
             }
 
+            $serviceDetails = [];
+            if (! empty($row->service_details)) {
+                $serviceDetails = is_string($row->service_details)
+                    ? (json_decode($row->service_details, true) ?: [])
+                    : (is_array($row->service_details) ? $row->service_details : []);
+            }
+
+            $unitsData = [];
+            if (! empty($row->units_data)) {
+                $unitsData = is_string($row->units_data)
+                    ? (json_decode($row->units_data, true) ?: [])
+                    : (is_array($row->units_data) ? $row->units_data : []);
+            }
+
+            $quotationData = null;
+            if (! empty($row->quotation_data)) {
+                $quotationData = is_string($row->quotation_data)
+                    ? json_decode($row->quotation_data, true)
+                    : $row->quotation_data;
+            }
+
             return [
                 'booking_id' => (int) $row->booking_id,
                 'client_id' => (int) $row->client_id,
@@ -505,11 +557,28 @@ abstract class SuperAdminBaseController extends Controller
                 'assigned_at' => $row->assigned_at ?? null,
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
+                'service_payment_method' => $row->service_payment_method ?? 'Cash',
+                'service_details' => $serviceDetails,
+                'units_data' => $unitsData,
+                'quotation_data' => $quotationData,
+                'notes' => $row->notes ?? null,
+                'cancellation_reason' => $row->cancellation_reason ?? null,
                 'created_at' => $row->created_at,
                 'payment_status' => $row->payment_status ?? 'Pending',
                 'payment_method' => $row->payment_method,
+                'reference_number' => $row->payment_reference_number ?? null,
                 'amount_paid' => $row->amount_paid !== null ? (float) $row->amount_paid : null,
                 'payment_date' => $row->payment_date,
+                'service_report' => $row->service_report_id ? [
+                    'report_id' => (int) $row->service_report_id,
+                    'status' => $row->service_report_status,
+                    'work_done' => $row->service_report_work_done,
+                    'remarks' => $row->service_report_remarks,
+                    'job_started_at' => $row->job_started_at,
+                    'job_completed_at' => $row->job_completed_at,
+                ] : null,
+                'payment_turnover' => $serviceDetails['payment_turnover'] ?? null,
+                'requested_by_name' => $serviceDetails['requested_by_name'] ?? null,
             ];
         })->values();
     }
@@ -524,7 +593,72 @@ abstract class SuperAdminBaseController extends Controller
                 ->keyBy('booking_id');
         }
 
-        return $rows->map(function ($row) use ($salesByBookingId) {
+        $bookingIds = $rows->pluck('booking_id')->filter()->unique();
+        $paymentsByBooking = collect();
+        if ($bookingIds->isNotEmpty() && \Illuminate\Support\Facades\Schema::hasTable('payment')) {
+            $paymentsByBooking = DB::table('payment')
+                ->whereIn('booking_id', $bookingIds)
+                ->orderBy('payment_id')
+                ->get()
+                ->groupBy('booking_id');
+        }
+
+        $consumedMaterialsByBooking = collect();
+        if ($bookingIds->isNotEmpty() && \Illuminate\Support\Facades\Schema::hasTable('booking_materials')) {
+            $consumedMaterialsByBooking = DB::table('booking_materials')
+                ->join('inventory_items', 'inventory_items.item_id', '=', 'booking_materials.item_id')
+                ->whereIn('booking_materials.booking_id', $bookingIds)
+                ->select([
+                    'booking_materials.booking_id',
+                    'booking_materials.quantity_used',
+                    'inventory_items.item_id',
+                    'inventory_items.item_name',
+                    'inventory_items.item_type',
+                    'inventory_items.sub_category',
+                    'inventory_items.selling_price',
+                    'inventory_items.capital',
+                ])
+                ->get()
+                ->groupBy('booking_id');
+        }
+
+        $serviceReportsByBooking = collect();
+        if ($bookingIds->isNotEmpty() && \Illuminate\Support\Facades\Schema::hasTable('service_reports')) {
+            $serviceReportsByBooking = DB::table('service_reports')
+                ->whereIn('booking_id', $bookingIds)
+                ->get(['booking_id', 'parts_replaced', 'diagnosis', 'work_done', 'technician_id'])
+                ->keyBy('booking_id');
+        }
+
+        $userIdsToFetch = collect();
+        foreach ($rows as $r) {
+            if (! empty($r->assigned_by)) {
+                $userIdsToFetch->push((int) $r->assigned_by);
+            }
+            $sDetails = ! empty($r->service_details)
+                ? (is_string($r->service_details) ? (json_decode($r->service_details, true) ?: []) : (array) $r->service_details)
+                : [];
+            if (! empty($sDetails['payment_turnover']['verified_by_user_id'])) {
+                $userIdsToFetch->push((int) $sDetails['payment_turnover']['verified_by_user_id']);
+            }
+        }
+
+        $staffUsers = DB::table('users')
+            ->whereIn('role_id', [1, 2])
+            ->orWhereIn('user_id', $userIdsToFetch->filter()->unique())
+            ->get(['user_id', 'given_name', 'middle_name', 'last_name', 'role_id'])
+            ->keyBy('user_id');
+
+        $defaultManager = $staffUsers->firstWhere('role_id', 2) ?? $staffUsers->firstWhere('role_id', 1);
+
+        return $rows->map(function ($row) use (
+            $salesByBookingId,
+            $paymentsByBooking,
+            $consumedMaterialsByBooking,
+            $serviceReportsByBooking,
+            $staffUsers,
+            $defaultManager
+        ) {
             $invSale = $salesByBookingId->get($row->booking_id);
             $serviceName = (string) ($row->service_name ?? '');
 
@@ -548,31 +682,163 @@ abstract class SuperAdminBaseController extends Controller
             } elseif (str_starts_with($serviceName, 'Spare Part Sale:')) {
                 $saleCategory = 'Spare Part';
                 $saleType = 'spare_part';
+            } else {
+                $saleCategory = $row->service_category ?: 'HVAC Service';
             }
 
+            $serviceDetails = ! empty($row->service_details)
+                ? (is_string($row->service_details) ? (json_decode($row->service_details, true) ?: []) : (array) $row->service_details)
+                : [];
+            $turnover = $serviceDetails['payment_turnover'] ?? [];
+            $amountTurnedOver = isset($turnover['amount_turned_over'])
+                ? (float) $turnover['amount_turned_over']
+                : (isset($turnover['net_collected']) ? (float) $turnover['net_collected'] : 0.0);
+            $downPaymentCredited = (float) ($turnover['reservation_down_payment'] ?? 0.0);
+            $turnoverVerified = ! empty($turnover['verified_by_manager']);
+
+            $isRepair = str_contains(strtolower($serviceName), 'repair')
+                || strtolower($row->service_category ?? '') === 'repair';
+
+            // Consumed materials and spare parts
+            $consumedRows = $consumedMaterialsByBooking->get($row->booking_id) ?? collect();
+            $sparePartsItems = $consumedRows->filter(function ($m) {
+                return $m->item_type === 'Spare Part' || (float) $m->selling_price > 0;
+            });
+            $consumedSparePartsTotal = (float) $sparePartsItems->sum(function ($m) {
+                return (float) ($m->quantity_used * ($m->selling_price ?: 0));
+            });
+            $consumedSparePartsCapital = (float) $sparePartsItems->sum(function ($m) {
+                return (float) ($m->quantity_used * ($m->capital ?: 0));
+            });
+
+            // Spare parts price
+            $paySpareParts = (float) ($row->spare_parts_price ?? 0.0);
+            $turnoverSpareParts = isset($turnover['spare_parts_price']) ? (float) $turnover['spare_parts_price'] : 0.0;
+            $sparePartsPrice = 0.0;
+            if ($isRepair || $paySpareParts > 0 || $turnoverSpareParts > 0 || $consumedSparePartsTotal > 0) {
+                $sparePartsPrice = max($paySpareParts, $turnoverSpareParts, $consumedSparePartsTotal);
+            }
+
+            // Booking Fee
+            $bookingFee = $saleType === 'service' ? ($downPaymentCredited > 0 ? $downPaymentCredited : 300.00) : null;
+
+            // Base Price
+            $rowBookingPrice = (float) ($row->booking_price ?? 0.0);
+            $rowBasePrice = (float) ($row->base_price ?? 0.0);
+            if ($rowBookingPrice > 0) {
+                $basePrice = $rowBookingPrice;
+            } elseif ($rowBasePrice > 0) {
+                $basePrice = $rowBasePrice;
+            } elseif (isset($turnover['total_service_price']) && (float) $turnover['total_service_price'] > 0) {
+                $basePrice = max(0.0, (float) $turnover['total_service_price'] - $sparePartsPrice);
+            } elseif ($row->amount_paid !== null && (float) $row->amount_paid > 0) {
+                $basePrice = max(0.0, (float) $row->amount_paid - $sparePartsPrice);
+            } else {
+                $basePrice = 0.0;
+            }
+
+            // Total Cost / Total Paid
+            $totalCost = $basePrice + $sparePartsPrice;
             $amountPaid = $row->amount_paid !== null
                 ? (float) $row->amount_paid
                 : ($invSale ? (float) $invSale->total_amount : 0.0);
 
+            if ($amountPaid === 0.0 && ($amountTurnedOver > 0 || $row->booking_status === 'Completed')) {
+                $amountPaid = $totalCost > 0 ? $totalCost : ($amountTurnedOver + $downPaymentCredited);
+            } elseif ($amountPaid === 0.0 && $invSale) {
+                $amountPaid = (float) $invSale->total_amount;
+            }
+
+            // Managed by
+            $managedUser = null;
+            $verifierId = $turnover['verified_by_user_id'] ?? null;
+            if ($verifierId && isset($staffUsers[$verifierId])) {
+                $managedUser = $staffUsers[$verifierId];
+            } elseif (! empty($row->assigned_by) && isset($staffUsers[$row->assigned_by])) {
+                $managedUser = $staffUsers[$row->assigned_by];
+            } elseif (! empty($row->assigner_given_name)) {
+                $managedUser = (object) [
+                    'given_name' => $row->assigner_given_name,
+                    'middle_name' => $row->assigner_middle_name,
+                    'last_name' => $row->assigner_last_name,
+                    'role_id' => $row->assigner_role_id ?? 2,
+                ];
+            } elseif ($defaultManager) {
+                $managedUser = $defaultManager;
+            }
+
+            $managedByName = $managedUser
+                ? $this->formatName($managedUser->given_name, $managedUser->middle_name ?? null, $managedUser->last_name)
+                : ($invSale->sold_by_name ?? 'Super Admin');
+            $managedByRole = $managedUser
+                ? (self::ROLE_LABELS[(int) $managedUser->role_id] ?? 'Manager')
+                : 'Manager';
+            $managedByDisplay = "{$managedByName} ({$managedByRole})";
+
+            // Profit calculation
             $costPrice = $invSale ? (float) $invSale->cost_price : 0.0;
             $qty = $invSale ? (int) ($invSale->quantity ?: 1) : 1;
-            $profit = $invSale
-                ? (float) $invSale->profit
-                : ($saleType === 'service' ? $amountPaid : round($amountPaid - ($costPrice * $qty), 2));
+            if ($invSale) {
+                $profit = (float) $invSale->profit;
+            } elseif ($saleType === 'service') {
+                $profit = max(0.0, round($amountPaid - $consumedSparePartsCapital, 2));
+            } else {
+                $profit = round($amountPaid - ($costPrice * $qty), 2);
+            }
 
             $clientName = $invSale && ! empty($invSale->customer_name)
                 ? $invSale->customer_name
                 : $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name);
 
+            $bookingPayments = ($paymentsByBooking->get($row->booking_id) ?? collect())->map(function ($p) {
+                return [
+                    'payment_id' => (int) $p->payment_id,
+                    'payment_type' => $p->payment_type,
+                    'amount_paid' => (float) $p->amount_paid,
+                    'payment_status' => $p->payment_status,
+                    'payment_method' => $p->payment_method,
+                    'reference_number' => $p->reference_number,
+                    'notes' => $p->notes,
+                    'payment_date' => $p->payment_date,
+                ];
+            })->values()->all();
+
+            $serviceReport = $serviceReportsByBooking->get($row->booking_id);
+            $partsReplacedText = $serviceReport ? $serviceReport->parts_replaced : null;
+
+            $consumedPartsList = $sparePartsItems->map(function ($m) {
+                return [
+                    'item_id' => (int) $m->item_id,
+                    'item_name' => $m->item_name,
+                    'item_type' => $m->item_type,
+                    'quantity' => (int) $m->quantity_used,
+                    'price' => (float) ($m->selling_price ?: 0.0),
+                    'capital' => (float) ($m->capital ?: 0.0),
+                    'total_price' => (float) ($m->quantity_used * ($m->selling_price ?: 0.0)),
+                ];
+            })->values()->all();
+
             return [
                 'booking_id' => (int) $row->booking_id,
                 'sale_id' => $invSale ? (int) $invSale->sale_id : null,
                 'sale_type' => $saleType,
+                'record_type' => $saleType === 'tools_materials' ? 'for_sale_item' : $saleType,
                 'sale_category' => $saleCategory,
+                'is_repair' => $isRepair,
+                'booking_fee' => $bookingFee,
+                'base_price' => $basePrice,
+                'spare_parts_price' => $sparePartsPrice,
+                'total_cost' => $totalCost,
+                'consumed_spare_parts' => $consumedPartsList,
+                'parts_replaced' => $partsReplacedText,
+                'managed_by' => $managedByDisplay,
+                'managed_by_name' => $managedByName,
+                'managed_by_role' => $managedByRole,
                 'client_name' => $clientName,
                 'customer_contact' => $invSale->customer_contact ?? ($row->client_contact_number ?? null),
                 'customer_address' => $invSale->customer_address ?? ($row->client_address ?? null),
                 'service' => $serviceName,
+                'service_category' => $row->service_category ?: ($isRepair ? 'Repair' : 'Service'),
                 'item_name' => $invSale->item_name ?? $serviceName,
                 'brand' => $invSale->brand ?? null,
                 'model' => $invSale->model ?? null,
@@ -590,8 +856,16 @@ abstract class SuperAdminBaseController extends Controller
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
                 'amount_paid' => $amountPaid,
-                'payment_method' => $row->payment_method ?: ($invSale->payment_method ?? 'Cash'),
-                'payment_status' => $row->payment_status ?? ($invSale->payment_status ?? 'Pending'),
+                'amount_turned_over' => $amountTurnedOver,
+                'down_payment_credited' => $downPaymentCredited,
+                'turnover_verified' => $turnoverVerified,
+                'turnover_payment_method' => $turnover['payment_method'] ?? null,
+                'turnover_reference_number' => $turnover['reference_number'] ?? null,
+                'turnover_verified_at' => $turnover['verified_at'] ?? null,
+                'requested_by_name' => $serviceDetails['requested_by_name'] ?? null,
+                'payments' => $bookingPayments,
+                'payment_method' => $row->payment_method ?: ($invSale->payment_method ?? ($turnover['payment_method'] ?? 'Cash')),
+                'payment_status' => $row->payment_status ?? ($row->booking_status === 'Completed' ? 'Paid' : ($invSale->payment_status ?? 'Pending')),
                 'payment_date' => $row->payment_date ?? ($invSale->sold_at ?? $row->created_at),
                 'rating' => $row->rating ? (int) $row->rating : null,
                 'feedback' => $row->feedback,
@@ -917,5 +1191,444 @@ abstract class SuperAdminBaseController extends Controller
     protected function formatName(?string $givenName, ?string $middleName, ?string $lastName): string
     {
         return trim(implode(' ', array_filter([$givenName, $middleName, $lastName])));
+    }
+
+    /**
+     * Handle Manager / Super Admin management of Pending or Active bookings:
+     * - Approved: Assigns 2 technicians (or formed team) with max 4 bookings/day per technician pair/individual.
+     * - Payment Incomplete (Return Payment): Gives customer 10 minutes to complete payment, else auto-cancels & returns payment.
+     * - Reschedule Notice: Prompts customer to reschedule to a vacant slot for free, blocking morning/noon or afternoon/evening on the original date.
+     */
+    protected function handleManageBookingAction(Request $request, int $bookingId): array
+    {
+        \App\Http\Controllers\Customer\CustomerBookingController::autoExpireIncompletePayments();
+
+        $booking = DB::table('bookings')->where('booking_id', $bookingId)->first();
+
+        if (! $booking) {
+            abort(404);
+        }
+
+        if (in_array($booking->booking_status, ['Completed', 'Cancelled'], true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'booking_id' => ['Only pending or active bookings can be managed.'],
+            ]);
+        }
+
+        $payload = $this->normalizeBookingAssignmentPayload($request);
+        $targetStatus = $payload['booking_status'] ?? 'Approved';
+
+        if (! in_array($targetStatus, self::BOOKING_ASSIGNABLE_STATUSES, true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'booking_status' => ['Invalid booking management status selected.'],
+            ]);
+        }
+
+        $currentUserId = (int) $request->user()->user_id;
+        $serviceDetails = [];
+        if (! empty($booking->service_details)) {
+            $serviceDetails = is_string($booking->service_details)
+                ? (json_decode($booking->service_details, true) ?: [])
+                : (is_array($booking->service_details) ? $booking->service_details : []);
+        }
+
+        // CASE 1: Payment Incomplete (Return Payment) — 10-minute timer
+        if ($targetStatus === 'Payment Incomplete') {
+            $dueAt = now()->addMinutes(10);
+            $serviceDetails['payment_incomplete_notified_at'] = now()->toISOString();
+            $serviceDetails['payment_due_at'] = $dueAt->toISOString();
+            $serviceDetails['payment_incomplete_note'] = $payload['manager_note'] ?? 'Payment was marked incomplete by Manager. Complete payment within 10 minutes to avoid automatic cancellation and payment return.';
+
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'booking_status' => 'Payment Incomplete',
+                    'service_details' => json_encode($serviceDetails),
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . '[Manager]: Marked as Payment Incomplete. Customer given 10 minutes until ' . $dueAt->format('h:i:s A') . ' to complete payment.'),
+                    'updated_at' => now(),
+                ]);
+
+            DB::table('payment')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'payment_status' => 'Incomplete',
+                    'updated_at' => now(),
+                ]);
+
+            $this->logActivity(
+                $currentUserId,
+                'BOOKING_PAYMENT_INCOMPLETE',
+                sprintf('Marked Booking #%d as Payment Incomplete. Customer notified with 10-minute deadline.', $bookingId)
+            );
+
+            $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+            return [
+                'message' => 'Booking set to Payment Incomplete. The customer has been notified and given 10 minutes to complete the payment, otherwise it will be automatically cancelled and payment returned.',
+                'data' => $this->mapBookings(collect([$updated]))->first(),
+            ];
+        }
+
+        // CASE 2: Reschedule Notice — Free reschedule for customer, half-day blocked on original date
+        if ($targetStatus === 'Reschedule Notice') {
+            $schedCarbon = $booking->scheduled_date ? Carbon::parse($booking->scheduled_date) : now();
+            $originalDateYmd = $schedCarbon->format('Y-m-d');
+            $blockedPeriod = ((int) $schedCarbon->hour < 13) ? 'morning_noon' : 'afternoon_evening';
+            $periodLabel = $blockedPeriod === 'morning_noon' ? 'Morning / Noon' : 'Afternoon / Evening';
+
+            $serviceDetails['reschedule_notice_by_manager'] = true;
+            $serviceDetails['reschedule_notice_at'] = now()->toISOString();
+            $serviceDetails['reschedule_notice_original_date'] = $originalDateYmd;
+            $serviceDetails['reschedule_notice_blocked_period'] = $blockedPeriod;
+            $serviceDetails['reschedule_notice_message'] = $payload['manager_note']
+                ?? "Your preferred {$periodLabel} schedule on {$schedCarbon->format('M d, Y')} is no longer available. Please reschedule to a vacant date/time slot at no cost.";
+
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'booking_status' => 'Reschedule Notice',
+                    'service_details' => json_encode($serviceDetails),
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "[Manager]: Issued Reschedule Notice (Free reschedule; {$periodLabel} blocked on {$originalDateYmd})."),
+                    'updated_at' => now(),
+                ]);
+
+            $this->logActivity(
+                $currentUserId,
+                'BOOKING_RESCHEDULE_NOTICE',
+                sprintf('Issued Reschedule Notice for Booking #%d (%s blocked on %s).', $bookingId, $periodLabel, $originalDateYmd)
+            );
+
+            $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+            return [
+                'message' => "Reschedule Notice sent to customer (no fee; {$periodLabel} slots on {$originalDateYmd} marked unavailable).",
+                'data' => $this->mapBookings(collect([$updated]))->first(),
+            ];
+        }
+
+        // CASE 3: Approved / Dispatched — Assign Technician Pair or Formed Team (Max 4 bookings/day)
+        $techRule = function () {
+            return \Illuminate\Validation\Rule::exists('users', 'user_id')->where(function ($query) {
+                $query->whereIn('role_id', [5, 7])
+                    ->where(function ($inner) {
+                        $inner->whereNull('is_active')->orWhere('is_active', 1);
+                    });
+            });
+        };
+
+        $validated = validator($payload, [
+            'lead_technician_id' => ['nullable', 'integer', $techRule()],
+            'assistant_technician_id' => ['nullable', 'integer', 'different:lead_technician_id', $techRule()],
+            'assigned_tech_id' => ['nullable', 'integer', $techRule()],
+            'assigned_team_id' => [
+                'nullable',
+                'integer',
+                \Illuminate\Validation\Rule::exists('technician_teams', 'team_id')->where('status', 'Active'),
+            ],
+            'booking_status' => ['nullable', \Illuminate\Validation\Rule::in(self::BOOKING_ASSIGNABLE_STATUSES)],
+        ])->validate();
+
+        $leadTechId = $validated['lead_technician_id'] ?? $validated['assigned_tech_id'] ?? null;
+        $assistantTechId = $validated['assistant_technician_id'] ?? null;
+        $teamId = $validated['assigned_team_id'] ?? null;
+
+        if ((empty($leadTechId) || empty($assistantTechId)) && $teamId) {
+            $teamMembers = DB::table('technician_team_members')
+                ->where('team_id', $teamId)
+                ->orderBy('role_in_team', 'desc')
+                ->pluck('technician_id')
+                ->all();
+            $team = DB::table('technician_teams')->where('team_id', $teamId)->first();
+            $leadTechId = $leadTechId ?: ($team->leader_id ?? ($teamMembers[0] ?? null));
+            $assistantTechId = $assistantTechId ?: collect($teamMembers)->first(fn ($id) => (int) $id !== (int) $leadTechId);
+        }
+
+        if (empty($leadTechId) || empty($assistantTechId)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'lead_technician_id' => ['Please assign a two-person technician team (Lead Technician & Assistant Technician) or select an active formed team with at least 2 members.'],
+            ]);
+        }
+
+        if ((int) $leadTechId === (int) $assistantTechId) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'assistant_technician_id' => ['The Lead and Assistant must be two different technicians.'],
+            ]);
+        }
+
+        // Enforce maximum 4 bookings per day for the assigned technicians
+        $targetDateYmd = $booking->scheduled_date
+            ? Carbon::parse($booking->scheduled_date)->format('Y-m-d')
+            : now()->format('Y-m-d');
+
+        foreach ([(int) $leadTechId, (int) $assistantTechId] as $tId) {
+            $dailyCount = DB::table('bookings')
+                ->where('booking_id', '!=', $bookingId)
+                ->whereDate('scheduled_date', $targetDateYmd)
+                ->whereNotIn('booking_status', ['Cancelled', 'Pending', 'Payment Incomplete', 'Reschedule Notice'])
+                ->where(function ($q) use ($tId) {
+                    $q->where('lead_technician_id', $tId)
+                        ->orWhere('assistant_technician_id', $tId)
+                        ->orWhere('assigned_tech_id', $tId);
+                })
+                ->count();
+
+            if ($dailyCount >= 4) {
+                $tUser = DB::table('users')->where('user_id', $tId)->first(['given_name', 'middle_name', 'last_name']);
+                $tName = $tUser ? $this->formatName($tUser->given_name, $tUser->middle_name, $tUser->last_name) : "Technician #{$tId}";
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'lead_technician_id' => ["{$tName} already has 4 bookings assigned on {$targetDateYmd}. A manager can only assign a booking up to 4 times a day to two technicians."],
+                ]);
+            }
+        }
+
+        unset(
+            $serviceDetails['payment_due_at'],
+            $serviceDetails['reschedule_notice_by_manager'],
+            $serviceDetails['reschedule_notice_original_date'],
+            $serviceDetails['reschedule_notice_blocked_period']
+        );
+
+        DB::table('bookings')
+            ->where('booking_id', $bookingId)
+            ->update([
+                'lead_technician_id' => $leadTechId,
+                'assistant_technician_id' => $assistantTechId,
+                'assigned_tech_id' => $leadTechId,
+                'assigned_team_id' => $teamId,
+                'assigned_by' => $currentUserId,
+                'assigned_at' => now(),
+                'booking_status' => $targetStatus,
+                'service_details' => json_encode($serviceDetails),
+                'updated_at' => now(),
+            ]);
+
+        $leadUser = DB::table('users')->where('user_id', $leadTechId)->first(['given_name', 'middle_name', 'last_name']);
+        $assistantUser = DB::table('users')->where('user_id', $assistantTechId)->first(['given_name', 'middle_name', 'last_name']);
+
+        $leadName = $leadUser ? $this->formatName($leadUser->given_name, $leadUser->middle_name, $leadUser->last_name) : 'Lead';
+        $assistantName = $assistantUser ? $this->formatName($assistantUser->given_name, $assistantUser->middle_name, $assistantUser->last_name) : 'Assistant';
+
+        $desc = sprintf(
+            'Approved booking #%d and assigned team: %s (Lead) & %s (Assistant).',
+            $bookingId,
+            $leadName,
+            $assistantName
+        );
+
+        $this->logActivity($currentUserId, 'APPROVE', $desc);
+
+        $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+        return [
+            'message' => 'Booking approved and technicians assigned successfully.',
+            'data' => $this->mapBookings(collect([$updated]))->first(),
+        ];
+    }
+
+    /**
+     * Handle Manager / Super Admin declaration of booking completion after verifying technician payment turnover
+     * and recording who requested the service.
+     */
+    protected function handleCompleteBookingAction(Request $request, int $bookingId): array
+    {
+        $booking = DB::table('bookings')->where('booking_id', $bookingId)->first();
+
+        if (! $booking) {
+            abort(404);
+        }
+
+        $validated = $request->validate([
+            'requested_by_name' => ['required', 'string', 'min:2', 'max:255'],
+            'payment_verified' => ['required', 'accepted'],
+            'amount_turned_over' => ['nullable', 'numeric', 'min:0'],
+            'verification_notes' => ['nullable', 'string', 'max:1000'],
+        ], [
+            'requested_by_name.required' => 'Please input the name of the person who requested this service.',
+            'payment_verified.accepted' => 'Please confirm and verify that the technician has handed over the customer payment.',
+        ]);
+
+        $serviceDetails = [];
+        if (! empty($booking->service_details)) {
+            $serviceDetails = is_string($booking->service_details)
+                ? (json_decode($booking->service_details, true) ?: [])
+                : (is_array($booking->service_details) ? $booking->service_details : []);
+        }
+
+        $turnover = $serviceDetails['payment_turnover'] ?? [];
+        $turnover['verified_by_manager'] = true;
+        $turnover['verified_by_user_id'] = (int) $request->user()->user_id;
+        $turnover['verified_at'] = now()->toISOString();
+        if (isset($validated['amount_turned_over'])) {
+            $turnover['amount_turned_over'] = (float) $validated['amount_turned_over'];
+        }
+        if (! empty($validated['verification_notes'])) {
+            $turnover['verification_notes'] = $validated['verification_notes'];
+        }
+
+        $turnedOverAmount = isset($validated['amount_turned_over']) && $validated['amount_turned_over'] !== null
+            ? (float) $validated['amount_turned_over']
+            : (isset($turnover['net_collected']) ? (float) $turnover['net_collected'] : null);
+
+        $totalServicePrice = (float) ($turnover['total_service_price'] ?? ($booking->base_price ?? 0.0));
+        $downPayment = (float) ($turnover['reservation_down_payment'] ?? 300.00);
+
+        if ($turnedOverAmount === null) {
+            $turnedOverAmount = max(0.0, $totalServicePrice - $downPayment);
+        }
+
+        $turnover['amount_turned_over'] = $turnedOverAmount;
+        $turnover['status'] = 'Turnover Verified & Booking Completed';
+        $turnoverMethod = $turnover['payment_method'] ?? ($booking->service_payment_method ?? 'Cash');
+        $turnoverRef = $turnover['reference_number'] ?? null;
+        if ($totalServicePrice <= 0 && $turnedOverAmount > 0) {
+            $totalServicePrice = $turnedOverAmount + $downPayment;
+            $turnover['total_service_price'] = $totalServicePrice;
+        }
+
+        $serviceDetails['payment_turnover'] = $turnover;
+        $serviceDetails['requested_by_name'] = trim($validated['requested_by_name']);
+        $serviceDetails['completed_by_manager_at'] = now()->toISOString();
+
+        DB::transaction(function () use (
+            $bookingId,
+            $booking,
+            $serviceDetails,
+            $validated,
+            $request,
+            $turnedOverAmount,
+            $totalServicePrice,
+            $turnoverMethod,
+            $turnoverRef
+        ) {
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'booking_status' => 'Completed',
+                    'service_details' => json_encode($serviceDetails),
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
+                        '[Manager Completion]: Payment turnover verified (₱%.2f via %s). Service requested by: %s.',
+                        (float) $turnedOverAmount,
+                        $turnoverMethod,
+                        trim($validated['requested_by_name'])
+                    )),
+                    'updated_at' => now(),
+                ]);
+
+            DB::table('service_reports')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'status' => 'Completed',
+                    'updated_at' => now(),
+                ]);
+
+            $existingPayments = DB::table('payment')
+                ->where('booking_id', $bookingId)
+                ->get();
+
+            $turnoverPayment = $existingPayments->first(function ($p) {
+                $type = strtolower($p->payment_type ?? '');
+                return str_contains($type, 'turnover') || str_contains($type, 'balance');
+            });
+
+            if ($turnoverPayment) {
+                DB::table('payment')
+                    ->where('payment_id', $turnoverPayment->payment_id)
+                    ->update([
+                        'amount_paid' => (float) $turnedOverAmount,
+                        'booking_price' => $totalServicePrice,
+                        'payment_status' => 'Paid',
+                        'payment_method' => $turnoverMethod,
+                        'reference_number' => $turnoverRef ?: $turnoverPayment->reference_number,
+                        'payment_type' => 'Service Balance Turnover Payment',
+                        'notes' => trim(($turnoverPayment->notes ? $turnoverPayment->notes . "\n" : '') . sprintf(
+                            '[Manager Verified Turnover]: Verified and received by Manager %s.',
+                            $request->user()->given_name ?? 'Manager'
+                        )),
+                        'payment_date' => now(),
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                $zeroOrPendingPayment = $existingPayments->first(function ($p) {
+                    return (float) $p->amount_paid <= 0;
+                });
+
+                if ($zeroOrPendingPayment) {
+                    DB::table('payment')
+                        ->where('payment_id', $zeroOrPendingPayment->payment_id)
+                        ->update([
+                            'amount_paid' => (float) $turnedOverAmount,
+                            'booking_price' => $totalServicePrice,
+                            'payment_status' => 'Paid',
+                            'payment_method' => $turnoverMethod,
+                            'reference_number' => $turnoverRef ?: $zeroOrPendingPayment->reference_number,
+                            'payment_type' => 'Service Balance Turnover Payment',
+                            'notes' => 'Post-service payment turnover verified and received by Manager.',
+                            'payment_date' => now(),
+                            'updated_at' => now(),
+                        ]);
+                } elseif ((float) $turnedOverAmount > 0) {
+                    DB::table('payment')->insert([
+                        'booking_id' => $bookingId,
+                        'booking_price' => $totalServicePrice,
+                        'unit_price' => 0.00,
+                        'spare_parts_price' => 0.00,
+                        'amount_paid' => (float) $turnedOverAmount,
+                        'payment_status' => 'Paid',
+                        'payment_method' => $turnoverMethod,
+                        'payment_type' => 'Service Balance Turnover Payment',
+                        'reference_number' => $turnoverRef,
+                        'notes' => 'Post-service payment turnover verified and received by Manager upon completion.',
+                        'payment_date' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                } elseif ($existingPayments->isEmpty()) {
+                    DB::table('payment')->insert([
+                        'booking_id' => $bookingId,
+                        'booking_price' => $totalServicePrice,
+                        'unit_price' => 0.00,
+                        'spare_parts_price' => 0.00,
+                        'amount_paid' => $totalServicePrice,
+                        'payment_status' => 'Paid',
+                        'payment_method' => $turnoverMethod,
+                        'payment_type' => 'Service Payment',
+                        'reference_number' => $turnoverRef,
+                        'notes' => 'Payment recorded upon completion and verified by Manager.',
+                        'payment_date' => now(),
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+
+            DB::table('payment')
+                ->where('booking_id', $bookingId)
+                ->where('payment_status', '!=', 'Returned')
+                ->update([
+                    'payment_status' => 'Paid',
+                    'updated_at' => now(),
+                ]);
+
+            $this->logActivity(
+                (int) $request->user()->user_id,
+                'COMPLETE_BOOKING',
+                sprintf(
+                    'Verified payment turnover (₱%.2f via %s) and declared Booking #%d as Completed (Requested by: %s).',
+                    (float) $turnedOverAmount,
+                    $turnoverMethod,
+                    $bookingId,
+                    trim($validated['requested_by_name'])
+                )
+            );
+        });
+
+        app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
+
+        $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+        return [
+            'message' => 'Payment turnover verified, booking declared Completed, and post-service forecasting activated.',
+            'data' => $this->mapBookings(collect([$updated]))->first(),
+        ];
     }
 }

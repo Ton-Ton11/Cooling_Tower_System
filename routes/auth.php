@@ -28,6 +28,10 @@ Route::middleware('guest')->group(function () {
     Route::post('forgot-password', [PasswordResetLinkController::class, 'store'])
         ->name('password.email');
 
+    Route::post('forgot-password/verify-otp', [PasswordResetLinkController::class, 'verifyResetOtp'])
+        ->middleware('throttle:10,1')
+        ->name('password.verify-otp');
+
     Route::get('reset-password/{token}', [NewPasswordController::class, 'create'])
         ->name('password.reset');
 
@@ -42,6 +46,13 @@ Route::middleware('auth')->group(function () {
     Route::get('verify-email/{id}/{hash}', VerifyEmailController::class)
         ->middleware(['signed', 'throttle:6,1'])
         ->name('verification.verify');
+
+    Route::post('verify-email/quick', [VerifyEmailController::class, 'quickVerify'])
+        ->name('verification.quick');
+
+    Route::post('verify-email/otp', [VerifyEmailController::class, 'verifyOtp'])
+        ->middleware('throttle:10,1')
+        ->name('verification.verify-otp');
 
     Route::post('email/verification-notification', [EmailVerificationNotificationController::class, 'store'])
         ->middleware('throttle:6,1')

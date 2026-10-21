@@ -1,5 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatDateTime } from "../../utils/superAdmin";
+
+const TIME_SLOTS = [
+    { value: "08:00", label: "08:00 AM (Morning)", hour: 8 },
+    { value: "09:00", label: "09:00 AM (Morning)", hour: 9 },
+    { value: "10:00", label: "10:00 AM (Morning)", hour: 10 },
+    { value: "11:00", label: "11:00 AM (Late Morning)", hour: 11 },
+    { value: "12:00", label: "12:00 PM (Noon)", hour: 12 },
+    { value: "13:00", label: "01:00 PM (Afternoon)", hour: 13 },
+    { value: "14:00", label: "02:00 PM (Afternoon)", hour: 14 },
+    { value: "15:00", label: "03:00 PM (Afternoon)", hour: 15 },
+    { value: "16:00", label: "04:00 PM (Late Afternoon)", hour: 16 },
+    { value: "17:00", label: "05:00 PM (Early Evening)", hour: 17 },
+];
 
 export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, addToast }) {
     const [newDate, setNewDate] = useState("");
@@ -12,11 +25,57 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
     const [submitting, setSubmitting] = useState(false);
     const [copied, setCopied] = useState(false);
 
+    const details = booking?.service_details || {};
+    const isManagerNotice = booking?.booking_status === "Reschedule Notice" || Boolean(details.reschedule_notice_by_manager);
+
+    const originalDateYmd = useMemo(() => {
+        if (details.reschedule_notice_original_date) return details.reschedule_notice_original_date;
+        if (!booking?.scheduled_date) return null;
+        try {
+            const d = new Date(booking.scheduled_date);
+            if (!isNaN(d.getTime())) {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, "0");
+                const dd = String(d.getDate()).padStart(2, "0");
+                return `${yyyy}-${mm}-${dd}`;
+            }
+        } catch {}
+        return null;
+    }, [booking, details]);
+
+    const blockedPeriodOnOriginalDate = useMemo(() => {
+        if (!isManagerNotice) return null;
+        if (details.reschedule_notice_blocked_period) return details.reschedule_notice_blocked_period;
+        if (booking?.scheduled_date) {
+            const d = new Date(booking.scheduled_date);
+            if (!isNaN(d.getTime())) {
+                return d.getHours() < 13 ? "morning_noon" : "afternoon_evening";
+            }
+        }
+        return null;
+    }, [isManagerNotice, details, booking]);
+
+    const isSlotBlocked = (slotHour, targetDate) => {
+        if (!isManagerNotice || !originalDateYmd || targetDate !== originalDateYmd) return false;
+        if (blockedPeriodOnOriginalDate === "morning_noon" && slotHour < 13) return true;
+        if (blockedPeriodOnOriginalDate === "afternoon_evening" && slotHour >= 13) return true;
+        return false;
+    };
+
+    useEffect(() => {
+        if (!newDate) return;
+        const currentObj = TIME_SLOTS.find(s => s.value === timeSlot);
+        if (currentObj && isSlotBlocked(currentObj.hour, newDate)) {
+            const firstAvailable = TIME_SLOTS.find(s => !isSlotBlocked(s.hour, newDate));
+            if (firstAvailable) setTimeSlot(firstAvailable.value);
+        }
+    }, [newDate, isManagerNotice, originalDateYmd, blockedPeriodOnOriginalDate]);
+
     if (!isOpen || !booking) return null;
 
     const gcashAccount = "0917 877 7670";
     const gcashName = "Cooling Tower Airconditioning Services";
-    const rescheduleFee = 150.00;
+    const rescheduleFee = isManagerNotice ? 0.00 : 150.00;
 
     const handleCopy = () => {
         navigator.clipboard.writeText("09178777670");
@@ -37,8 +96,14 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
             return;
         }
 
-        if (!refNumber.trim() || refNumber.trim().length < 5) {
-            addToast("Please enter a valid GCash reference number.", "error");
+        const chosenSlot = TIME_SLOTS.find(s => s.value === timeSlot);
+        if (chosenSlot && isSlotBlocked(chosenSlot.hour, newDate)) {
+            addToast("That time period is unavailable on this date per the reschedule notice. Please choose another time slot or date.", "error");
+            return;
+        }
+
+        if (!isManagerNotice && (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13)) {
+            addToast("Please enter a valid GCash reference number (maximum 13 digits).", "error");
             return;
         }
 
@@ -48,7 +113,7 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
         const formData = new FormData();
         formData.append("new_scheduled_date", combinedDateTime);
         formData.append("reschedule_fee", rescheduleFee);
-        formData.append("reference_number", refNumber.trim());
+        if (refNumber.trim()) formData.append("reference_number", refNumber.trim());
         if (senderName.trim()) formData.append("sender_name", senderName.trim());
         if (senderNumber.trim()) formData.append("sender_number", senderNumber.trim());
         if (reason.trim()) formData.append("reschedule_reason", reason.trim());
@@ -128,17 +193,22 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
                                     onChange={(e) => setTimeSlot(e.target.value)}
                                     className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                                 >
-                                    <option value="08:00">08:00 AM (Morning)</option>
-                                    <option value="09:00">09:00 AM (Morning)</option>
-                                    <option value="10:00">10:00 AM (Morning)</option>
-                                    <option value="11:00">11:00 AM (Late Morning)</option>
-                                    <option value="13:00">01:00 PM (Afternoon)</option>
-                                    <option value="14:00">02:00 PM (Afternoon)</option>
-                                    <option value="15:00">03:00 PM (Afternoon)</option>
-                                    <option value="16:00">04:00 PM (Late Afternoon)</option>
+                                    {TIME_SLOTS.map((slot) => {
+                                        const blocked = isSlotBlocked(slot.hour, newDate);
+                                        return (
+                                            <option key={slot.value} value={slot.value} disabled={blocked}>
+                                                {slot.label}{blocked ? " — Unavailable Today" : ""}
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             </div>
                         </div>
+                        {isManagerNotice && newDate === originalDateYmd && (
+                            <p className="text-[11px] font-semibold text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                                Note: Because your original schedule on {originalDateYmd} was in the {blockedPeriodOnOriginalDate === "morning_noon" ? "morning/noon" : "afternoon/evening"}, {blockedPeriodOnOriginalDate === "morning_noon" ? "morning and noon" : "afternoon and evening"} slots are unavailable for this date only.
+                            </p>
+                        )}
                     </div>
 
                     {/* Reschedule Reason */}
@@ -155,87 +225,107 @@ export default function RescheduleModal({ booking, isOpen, onClose, onSuccess, a
                         />
                     </div>
 
-                    {/* GCash Rescheduling Fee Notice */}
-                    <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 border border-amber-200/80 rounded-xl p-4">
-                        <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                                <span className="flex h-2 w-2 rounded-full bg-amber-500 ring-4 ring-amber-200" />
-                                <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                                    Rescheduling Fee: ₱{rescheduleFee.toFixed(2)}
-                                </h4>
+                    {isManagerNotice ? (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-emerald-900 uppercase tracking-wider">
+                                    Reschedule Notice by Manager — Free of Charge (₱0.00)
+                                </span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
+                                    No Fee
+                                </span>
                             </div>
-                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200/60 text-amber-800">
-                                GCash P2P
-                            </span>
+                            <p className="text-xs text-emerald-800 mt-1.5 leading-relaxed">
+                                Your previous preferred schedule was unavailable. Rescheduling due to a Manager Reschedule Notice has no cost to you.
+                            </p>
                         </div>
-                        <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
-                            To adjust technician dispatch and schedule locks, please send the ₱150.00 rescheduling fee via GCash Express Send.
-                        </p>
+                    ) : (
+                        <>
+                            {/* GCash Rescheduling Fee Notice */}
+                            <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 border border-amber-200/80 rounded-xl p-4">
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="flex h-2 w-2 rounded-full bg-amber-500 ring-4 ring-amber-200" />
+                                        <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
+                                            Rescheduling Fee: ₱{rescheduleFee.toFixed(2)}
+                                        </h4>
+                                    </div>
+                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200/60 text-amber-800">
+                                        GCash P2P
+                                    </span>
+                                </div>
+                                <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
+                                    To adjust technician dispatch and schedule locks, please send the ₱150.00 rescheduling fee via GCash Express Send.
+                                </p>
 
-                        <div className="mt-3 bg-white/90 rounded-lg p-2.5 border border-amber-200/60 flex items-center justify-between">
-                            <div>
-                                <p className="text-[11px] text-gray-500 font-medium">GCash Account Name: <span className="font-bold text-gray-800">{gcashName}</span></p>
-                                <p className="text-xs font-bold text-blue-600 font-mono tracking-wide mt-0.5">{gcashAccount}</p>
+                                <div className="mt-3 bg-white/90 rounded-lg p-2.5 border border-amber-200/60 flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[11px] text-gray-500 font-medium">GCash Account Name: <span className="font-bold text-gray-800">{gcashName}</span></p>
+                                        <p className="text-xs font-bold text-blue-600 font-mono tracking-wide mt-0.5">{gcashAccount}</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleCopy}
+                                        className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition shrink-0"
+                                    >
+                                        {copied ? "Copied!" : "Copy No."}
+                                    </button>
+                                </div>
                             </div>
-                            <button
-                                type="button"
-                                onClick={handleCopy}
-                                className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition shrink-0"
-                            >
-                                {copied ? "Copied!" : "Copy No."}
-                            </button>
-                        </div>
-                    </div>
 
-                    {/* Payment Validation Inputs */}
-                    <div className="space-y-3">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                                GCash Reference Number <span className="text-red-500">*</span>
-                            </label>
-                            <input
-                                type="text"
-                                placeholder="e.g. 1002345678901 (13 digits)"
-                                value={refNumber}
-                                onChange={(e) => setRefNumber(e.target.value)}
-                                required
-                                className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-                            />
-                        </div>
+                            {/* Payment Validation Inputs */}
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                        GCash Reference Number (Max 13 digits) <span className="text-red-500">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        maxLength={13}
+                                        placeholder="e.g. 1002345678901 (Max 13 digits)"
+                                        value={refNumber}
+                                        onChange={(e) => setRefNumber(e.target.value.replace(/[^0-9A-Za-z]/g, "").slice(0, 13))}
+                                        required
+                                        className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                                    />
+                                    <p className="text-[11px] text-gray-400 mt-1">{refNumber.length}/13 characters</p>
+                                </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                                <label className="block text-xs text-gray-600 mb-1">Sender Account Name</label>
-                                <input
-                                    type="text"
-                                    placeholder="GCash account name"
-                                    value={senderName}
-                                    onChange={(e) => setSenderName(e.target.value)}
-                                    className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-                                />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Sender Account Name</label>
+                                        <input
+                                            type="text"
+                                            placeholder="GCash account name"
+                                            value={senderName}
+                                            onChange={(e) => setSenderName(e.target.value)}
+                                            className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-600 mb-1">Sender Contact No.</label>
+                                        <input
+                                            type="text"
+                                            placeholder="09XX XXX XXXX"
+                                            value={senderNumber}
+                                            onChange={(e) => setSenderNumber(e.target.value)}
+                                            className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs text-gray-600 mb-1">Upload GCash Receipt Proof (Optional)</label>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => setReceiptFile(e.target.files[0] || null)}
+                                        className="w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                                    />
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-xs text-gray-600 mb-1">Sender Contact No.</label>
-                                <input
-                                    type="text"
-                                    placeholder="09XX XXX XXXX"
-                                    value={senderNumber}
-                                    onChange={(e) => setSenderNumber(e.target.value)}
-                                    className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-xs text-gray-600 mb-1">Upload GCash Receipt (Optional)</label>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => setReceiptFile(e.target.files[0] || null)}
-                                className="w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
-                            />
-                        </div>
-                    </div>
+                        </>
+                    )}
 
                     {/* Actions */}
                     <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-2.5">

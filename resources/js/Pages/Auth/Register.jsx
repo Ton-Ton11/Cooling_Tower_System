@@ -1,10 +1,14 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import React, { useState } from "react";
-import { ArrowRight, ShieldCheck, Mail, Lock, Calendar, MapPin, Phone, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, ShieldCheck, Mail, Lock, Calendar, Phone, Eye, EyeOff } from "lucide-react";
 import logo from "../../../imports/cooling_tower_airconditioning_services_logo-1.jpg";
+import GeospatialAddressAutocomplete, { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
 
 export default function Register({ onToggleView }) {
   const [showPassword, setShowPassword] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const [gmailError, setGmailError] = useState('');
+  const [geocodeStatus, setGeocodeStatus] = useState(null);
   const { data, setData, post, processing, errors } = useForm({
     given_name: '',
     last_name: '',
@@ -18,8 +22,22 @@ export default function Register({ onToggleView }) {
     password_confirmation: '',
   });
 
+  function isValidGmail(email) {
+    return /^[a-zA-Z0-9._%+-]+@(gmail\.com|googlemail\.com)$/i.test(String(email || '').trim());
+  }
+
   function submit(e) {
     e.preventDefault();
+    if (!data.address.trim()) {
+      setLocationError('Please enter your complete address or choose a real-time geospatial suggestion.');
+      return;
+    }
+    setLocationError('');
+    if (!isValidGmail(data.email)) {
+      setGmailError('Please enter a valid Gmail address (@gmail.com) so we can send your account verification code.');
+      return;
+    }
+    setGmailError('');
     post('/register');
   }
 
@@ -216,37 +234,54 @@ export default function Register({ onToggleView }) {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="address">Address</label>
-              <div className="relative">
-                <MapPin className="absolute left-3.5 top-3 size-5 text-slate-400 pointer-events-none" />
-                <textarea 
-                  id="address" 
-                  rows={2}
-                  placeholder="Enter your full service address"
-                  value={data.address}
-                  onChange={(e) => setData('address', e.target.value)}
-                  className={`${iconInputClass} resize-none`}
-                ></textarea>
-              </div>
-              {errors.address && <div className="text-xs font-medium text-red-600">{errors.address}</div>}
+              <label className="text-sm font-semibold text-slate-700" htmlFor="address">
+                Address & Geospatial Location Verification
+              </label>
+              <GeospatialAddressAutocomplete
+                id="address"
+                value={data.address}
+                allowOutsideSave={true}
+                placeholder="Type street, barangay, or city (e.g., Brgy. Tetuan, Zamboanga City)..."
+                onChange={(val) => {
+                  setData('address', val);
+                  if (locationError) setLocationError('');
+                }}
+                onGeocodeResult={(res) => setGeocodeStatus(res)}
+                error={locationError || errors.address}
+              />
             </div>
 
             <div className="border-t border-slate-100 my-4 pt-3"></div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="reg_email">Email address</label>
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-slate-700" htmlFor="reg_email">
+                  Gmail Address
+                </label>
+                <span className="text-[11px] font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200/70">
+                  Gmail Verification Required
+                </span>
+              </div>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 size-5 text-slate-400 pointer-events-none" />
                 <input 
                   id="reg_email" 
                   type="email" 
-                  placeholder="Create an Email Address"
+                  placeholder="yourname@gmail.com"
                   value={data.email}
-                  onChange={(e) => setData('email', e.target.value)}
+                  onChange={(e) => {
+                    setData('email', e.target.value);
+                    if (gmailError) setGmailError('');
+                  }}
                   className={iconInputClass}
                 />
               </div>
-              {errors.email && <div className="text-xs font-medium text-red-600">{errors.email}</div>}
+              <p className="text-[11px] text-slate-500">
+                A 6-digit verification code and confirmation link will be sent to your Gmail inbox.
+              </p>
+              {(gmailError || errors.email) && (
+                <div className="text-xs font-medium text-red-600">{gmailError || errors.email}</div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -13,7 +13,6 @@ import {
 const tabs = [
     "Pending",
     "Approved",
-    "Dispatched",
     "In-Progress",
     "Completed",
     "Cancelled",
@@ -90,9 +89,18 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const [approveModal, setApproveModal] = useState(null);
     const [completeModal, setCompleteModal] = useState(null);
     const [assignment, setAssignment] = useState({
+        booking_status: "Approved",
+        assign_mode: "individual", // "individual" | "team"
+        assigned_team_id: "",
         lead_technician_id: "",
         assistant_technician_id: "",
-        booking_status: "Approved",
+        manager_note: "",
+    });
+    const [completionForm, setCompletionForm] = useState({
+        requested_by_name: "",
+        payment_verified: false,
+        amount_turned_over: "",
+        verification_notes: "",
     });
     const [clientPanel, setClientPanel] = useState(null);
 
@@ -138,6 +146,12 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
         () =>
             tab === "All"
                 ? bookings
+                : tab === "Pending"
+                ? bookings.filter((booking) =>
+                      ["Pending", "Payment Incomplete", "Reschedule Notice"].includes(
+                          booking.booking_status,
+                      ),
+                  )
                 : bookings.filter((booking) => booking.booking_status === tab),
         [bookings, tab],
     );
@@ -157,16 +171,29 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const openAssignmentModal = (booking) => {
         setApproveModal(booking);
         setAssignment({
+            booking_status: ["Payment Incomplete", "Reschedule Notice"].includes(booking.booking_status)
+                ? booking.booking_status
+                : "Approved",
+            assign_mode: booking.assigned_team_id ? "team" : "individual",
+            assigned_team_id: booking.assigned_team_id ? String(booking.assigned_team_id) : "",
             lead_technician_id: booking.lead_technician_id
                 ? String(booking.lead_technician_id)
                 : (booking.assigned_tech_id ? String(booking.assigned_tech_id) : ""),
             assistant_technician_id: booking.assistant_technician_id
                 ? String(booking.assistant_technician_id)
                 : "",
-            booking_status:
-                booking.booking_status === "Dispatched"
-                    ? "Dispatched"
-                    : "Approved",
+            manager_note: "",
+        });
+    };
+
+    const openCompleteModal = (booking) => {
+        const turnover = booking.payment_turnover || booking.service_details?.payment_turnover || {};
+        setCompleteModal(booking);
+        setCompletionForm({
+            requested_by_name: booking.requested_by_name || booking.service_details?.requested_by_name || booking.client_name || "",
+            payment_verified: false,
+            amount_turned_over: turnover.net_collected !== undefined ? String(turnover.net_collected) : "",
+            verification_notes: "",
         });
     };
 
@@ -183,37 +210,56 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             return;
         }
 
-        if (!assignment.lead_technician_id || !assignment.assistant_technician_id) {
-            addToast("Please select both a Lead Technician and an Assistant Technician.", "error");
-            return;
-        }
-
-        if (assignment.lead_technician_id === assignment.assistant_technician_id) {
-            addToast("The Lead and Assistant must be two different technicians.", "error");
-            return;
+        if (assignment.booking_status === "Approved") {
+            if (assignment.assign_mode === "team") {
+                if (!assignment.assigned_team_id && (!assignment.lead_technician_id || !assignment.assistant_technician_id)) {
+                    addToast("Please select a formed team with at least two technicians.", "error");
+                    return;
+                }
+            } else {
+                if (!assignment.lead_technician_id || !assignment.assistant_technician_id) {
+                    addToast("Please select both a Lead Technician and an Assistant Technician.", "error");
+                    return;
+                }
+                if (assignment.lead_technician_id === assignment.assistant_technician_id) {
+                    addToast("The Lead and Assistant must be two different technicians.", "error");
+                    return;
+                }
+            }
         }
 
         setAssigning(true);
 
         try {
             const payload = {
-                lead_technician_id: Number(assignment.lead_technician_id),
-                assistant_technician_id: Number(assignment.assistant_technician_id),
                 booking_status: assignment.booking_status,
+                manager_note: assignment.manager_note?.trim() || null,
             };
+
+            if (assignment.booking_status === "Approved") {
+                if (assignment.assign_mode === "team" && assignment.assigned_team_id) {
+                    payload.assigned_team_id = Number(assignment.assigned_team_id);
+                }
+                if (assignment.lead_technician_id) {
+                    payload.lead_technician_id = Number(assignment.lead_technician_id);
+                }
+                if (assignment.assistant_technician_id) {
+                    payload.assistant_technician_id = Number(assignment.assistant_technician_id);
+                }
+            }
 
             const { data } = await window.axios.patch(
                 ep.approveBooking(approveModal.booking_id),
                 payload,
             );
 
-            addToast(data?.message || "Technicians assigned successfully.");
+            addToast(data?.message || "Booking updated successfully.");
             setApproveModal(null);
             await fetchBookings(false);
             onDataChanged?.();
         } catch (error) {
             addToast(
-                extractErrorMessage(error, "Unable to update the booking assignment."),
+                extractErrorMessage(error, "Unable to update the booking."),
                 "error",
             );
         } finally {
@@ -223,10 +269,23 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
 
     const handleCompleteBooking = async () => {
         if (completing || !completeModal) return;
+        if (!completionForm.requested_by_name.trim()) {
+            addToast("Please input who requested this service before declaring the booking completed.", "error");
+            return;
+        }
+        if (!completionForm.payment_verified) {
+            addToast("Please verify and confirm the payment turned over by the technician.", "error");
+            return;
+        }
         setCompleting(true);
         try {
             const completeEndpoint = ep.completeBooking ? ep.completeBooking(completeModal.booking_id) : `/api/manager/bookings/${completeModal.booking_id}/complete`;
-            const { data } = await window.axios.patch(completeEndpoint);
+            const { data } = await window.axios.patch(completeEndpoint, {
+                requested_by_name: completionForm.requested_by_name.trim(),
+                payment_verified: completionForm.payment_verified ? 1 : 0,
+                amount_turned_over: completionForm.amount_turned_over !== "" ? Number(completionForm.amount_turned_over) : null,
+                verification_notes: completionForm.verification_notes.trim() || null,
+            });
             addToast(data?.message || `Booking #${completeModal.booking_id} declared completed!`);
             setCompleteModal(null);
             await fetchBookings(false);
@@ -396,12 +455,11 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 {filtered.map((booking) => {
                                     const canAssign = [
                                         "Pending",
+                                        "Payment Incomplete",
+                                        "Reschedule Notice",
                                         "Approved",
-                                        "Dispatched",
                                     ].includes(booking.booking_status);
                                     const canComplete = [
-                                        "Approved",
-                                        "Dispatched",
                                         "In-Progress",
                                     ].includes(booking.booking_status);
 
@@ -543,10 +601,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                                 )
                                                             }
                                                         >
-                                                            {booking.booking_status ===
-                                                                "Pending"
-                                                                ? "Assign Team"
-                                                                : "Reassign"}
+                                                            Manage
                                                         </button>
                                                     )}
                                                     {canComplete && !readOnly && (
@@ -555,14 +610,14 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                             style={{
                                                                 padding: "5px 10px",
                                                                 fontSize: 11,
-                                                                background: "#ECFDF5",
-                                                                color: "#065F46",
-                                                                borderColor: "#A7F3D0",
-                                                                fontWeight: 600,
+                                                                background: booking.payment_turnover ? "#FEF3C7" : "#ECFDF5",
+                                                                color: booking.payment_turnover ? "#92400E" : "#065F46",
+                                                                borderColor: booking.payment_turnover ? "#FCD34D" : "#A7F3D0",
+                                                                fontWeight: 700,
                                                             }}
-                                                            onClick={() => setCompleteModal(booking)}
+                                                            onClick={() => openCompleteModal(booking)}
                                                         >
-                                                            Complete
+                                                            {booking.payment_turnover ? "Verify Turnover & Complete" : "Complete"}
                                                         </button>
                                                     )}
                                                     <button
@@ -588,20 +643,57 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                 )}
             </div>
 
-            {/* Assign Technicians Modal */}
+            {/* Manage Booking Modal (3 Statuses: Approve, Return Payment / Payment Incomplete, Reschedule Notice) */}
             {(() => {
+                const isApproveSelected = assignment.booking_status === "Approved";
                 const selectedLead = technicians.find((t) => String(t.user_id) === String(assignment.lead_technician_id));
                 const selectedAssistant = technicians.find((t) => String(t.user_id) === String(assignment.assistant_technician_id));
                 const isBothSelected = Boolean(selectedLead && selectedAssistant && selectedLead.user_id !== selectedAssistant.user_id);
 
+                // Count daily bookings on the same date as approveModal.scheduled_date
+                const modalDateYmd = approveModal?.scheduled_date
+                    ? new Date(approveModal.scheduled_date).toISOString().split("T")[0]
+                    : null;
+
+                const getTechDailyCount = (techId) => {
+                    if (!modalDateYmd || !techId) return 0;
+                    return bookings.filter((b) => {
+                        if (b.booking_id === approveModal?.booking_id) return false;
+                        if (["Cancelled", "Pending", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status)) return false;
+                        const bYmd = b.scheduled_date ? new Date(b.scheduled_date).toISOString().split("T")[0] : null;
+                        if (bYmd !== modalDateYmd) return false;
+                        return (
+                            Number(b.lead_technician_id) === Number(techId) ||
+                            Number(b.assistant_technician_id) === Number(techId) ||
+                            Number(b.assigned_tech_id) === Number(techId)
+                        );
+                    }).length;
+                };
+
+                const leadDailyCount = selectedLead ? getTechDailyCount(selectedLead.user_id) : 0;
+                const assistantDailyCount = selectedAssistant ? getTechDailyCount(selectedAssistant.user_id) : 0;
+                const exceedsDailyLimit = isApproveSelected && (leadDailyCount >= 4 || assistantDailyCount >= 4);
+
+                const canConfirmManage = isApproveSelected
+                    ? isBothSelected && !exceedsDailyLimit
+                    : true;
+
                 return (
                     <Modal
                         open={!!approveModal}
-                        title="ASSIGN TECHNICIANS"
-                        message="Select the two technicians who will handle this service."
-                        confirmLabel={assigning ? "Confirming..." : "Confirm Assignment"}
-                        confirmDisabled={assigning || !isBothSelected}
-                        maxWidth={620}
+                        title={`MANAGE BOOKING #${approveModal?.booking_id ?? ""}`}
+                        message="Manage the pending booking by choosing one of the 3 statuses below."
+                        confirmLabel={
+                            assigning
+                                ? "Processing..."
+                                : isApproveSelected
+                                ? "Confirm Approve & Assign"
+                                : assignment.booking_status === "Payment Incomplete"
+                                ? "Confirm Payment Incomplete (10m Timer)"
+                                : "Send Free Reschedule Notice"
+                        }
+                        confirmDisabled={assigning || !canConfirmManage}
+                        maxWidth={640}
                         onConfirm={handleAssign}
                         onCancel={() => !assigning && setApproveModal(null)}
                     >
@@ -641,266 +733,477 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                         </div>
                                         <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
                                             <CreditCardIcon size={13} color="#64748B" />
-                                            <span>{approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)})</span>
+                                            <span>{approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)}) {approveModal.reference_number ? `• Ref: ${approveModal.reference_number}` : ""}</span>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            {/* Assigned By Info */}
-                            <div
-                                style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    background: "#F1F5F9",
-                                    padding: "8px 12px",
-                                    borderRadius: 8,
-                                    fontSize: 12,
-                                    color: "#334155",
-                                }}
-                            >
-                                <span>Assigned By:</span>
-                                <strong style={{ color: "#1E2F5F" }}>
-                                    {currentUser?.full_name || currentUser?.name || "Manager / Super Admin"}
-                                </strong>
-                            </div>
-
-                            {/* Technician Selection Controls */}
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                                {/* Lead Technician */}
-                                <div>
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                                        <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
-                                            LEAD TECHNICIAN
-                                        </label>
-                                        <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB", background: "#EFF6FF", padding: "1px 6px", borderRadius: 4 }}>
-                                            Primary Lead
-                                        </span>
-                                    </div>
-                                    <select
-                                        className="input-field"
-                                        value={assignment.lead_technician_id}
-                                        onChange={(event) =>
-                                            setAssignment((prev) => ({
-                                                ...prev,
-                                                lead_technician_id: event.target.value,
-                                            }))
-                                        }
-                                        style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
-                                    >
-                                        <option value="">Select Technician</option>
-                                        {technicians.map((technician) => {
-                                            const isAssistant = String(technician.user_id) === String(assignment.assistant_technician_id);
-                                            return (
-                                                <option
-                                                    key={technician.user_id}
-                                                    value={technician.user_id}
-                                                    disabled={isAssistant}
-                                                >
-                                                    {technician.full_name} {isAssistant ? "(Selected as Assistant)" : ""}
-                                                </option>
-                                            );
-                                        })}
-                                    </select>
-                                </div>
-
-                                {/* Assistant Technician */}
-                                <div>
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                                        <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
-                                            ASSISTANT TECHNICIAN
-                                        </label>
-                                        <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", background: "#F1F5F9", padding: "1px 6px", borderRadius: 4 }}>
-                                            Partner Tech
-                                        </span>
-                                    </div>
-                                    <select
-                                        className="input-field"
-                                        value={assignment.assistant_technician_id}
-                                        onChange={(event) =>
-                                            setAssignment((prev) => ({
-                                                ...prev,
-                                                assistant_technician_id: event.target.value,
-                                            }))
-                                        }
-                                        style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
-                                    >
-                                        <option value="">Select Technician</option>
-                                        {technicians.map((technician) => {
-                                            const isLead = String(technician.user_id) === String(assignment.lead_technician_id);
-                                            return (
-                                                <option
-                                                    key={technician.user_id}
-                                                    value={technician.user_id}
-                                                    disabled={isLead}
-                                                >
-                                                    {technician.full_name} {isLead ? "(Selected as Lead)" : ""}
-                                                </option>
-                                            );
-                                        })}
-                                    </select>
+                            {/* Step 1: Choose 1 of the 3 Pending Management Statuses */}
+                            <div>
+                                <label className="section-label" style={{ marginBottom: 8, display: "block", fontWeight: 700, color: "#1E2F5F" }}>
+                                    SELECT BOOKING STATUS (3 OPTIONS ONLY)
+                                </label>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                                    {[
+                                        {
+                                            value: "Approved",
+                                            title: "Approve",
+                                            subtitle: "Assign technicians or formed team",
+                                            activeBg: "#EFF6FF",
+                                            activeBorder: "#2563EB",
+                                            activeText: "#1E40AF",
+                                        },
+                                        {
+                                            value: "Payment Incomplete",
+                                            title: "Return Payment / Incomplete",
+                                            subtitle: "10-min timer to complete or auto-cancel",
+                                            activeBg: "#FFFBEB",
+                                            activeBorder: "#D97706",
+                                            activeText: "#92400E",
+                                        },
+                                        {
+                                            value: "Reschedule Notice",
+                                            title: "Reschedule Notice",
+                                            subtitle: "Free reschedule (half-day blocked)",
+                                            activeBg: "#EEF2FF",
+                                            activeBorder: "#4F46E5",
+                                            activeText: "#3730A3",
+                                        },
+                                    ].map((opt) => {
+                                        const isSel = assignment.booking_status === opt.value;
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        booking_status: opt.value,
+                                                    }))
+                                                }
+                                                style={{
+                                                    textAlign: "left",
+                                                    padding: "12px",
+                                                    borderRadius: 12,
+                                                    border: `2px solid ${isSel ? opt.activeBorder : "#E2E8F0"}`,
+                                                    background: isSel ? opt.activeBg : "#FFFFFF",
+                                                    cursor: "pointer",
+                                                    transition: "all 0.15s ease",
+                                                }}
+                                            >
+                                                <div style={{ fontSize: 12, fontWeight: 800, color: isSel ? opt.activeText : "#1E2F5F" }}>
+                                                    {opt.title}
+                                                </div>
+                                                <div style={{ fontSize: 10, color: "#64748B", marginTop: 3, lineHeight: 1.35 }}>
+                                                    {opt.subtitle}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
-                            {/* Quick Swap Roles Button */}
-                            {(assignment.lead_technician_id || assignment.assistant_technician_id) && (
-                                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                                    <button
-                                        type="button"
-                                        onClick={handleSwapRoles}
+                            {/* IF STATUS == APPROVED: Show Technician / Formed Team Assignment Fields */}
+                            {isApproveSelected && (
+                                <>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F1F5F9", padding: "8px 12px", borderRadius: 10 }}>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: "#334155" }}>Assignment Method (Max 4 Bookings/Day per 2 Technicians):</span>
+                                        <div style={{ display: "flex", gap: 6 }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssignment(prev => ({ ...prev, assign_mode: "individual", assigned_team_id: "" }))}
+                                                style={{
+                                                    padding: "5px 10px",
+                                                    borderRadius: 8,
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                    background: assignment.assign_mode === "individual" ? "#2563EB" : "#FFFFFF",
+                                                    color: assignment.assign_mode === "individual" ? "#FFFFFF" : "#475569",
+                                                }}
+                                            >
+                                                Individual Pair
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssignment(prev => ({ ...prev, assign_mode: "team" }))}
+                                                style={{
+                                                    padding: "5px 10px",
+                                                    borderRadius: 8,
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                    background: assignment.assign_mode === "team" ? "#2563EB" : "#FFFFFF",
+                                                    color: assignment.assign_mode === "team" ? "#FFFFFF" : "#475569",
+                                                }}
+                                            >
+                                                Formed Teams ({teams.length})
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {assignment.assign_mode === "team" && (
+                                        <div>
+                                            <label className="section-label" style={{ marginBottom: 6, display: "block", fontWeight: 700, color: "#1E2F5F" }}>
+                                                SELECT FORMED TEAM
+                                            </label>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.assigned_team_id}
+                                                onChange={(e) => {
+                                                    const tId = e.target.value;
+                                                    const foundTeam = teams.find(t => String(t.team_id) === String(tId));
+                                                    let leadId = "";
+                                                    let asstId = "";
+                                                    if (foundTeam && Array.isArray(foundTeam.members)) {
+                                                        leadId = foundTeam.leader_id
+                                                            ? String(foundTeam.leader_id)
+                                                            : (foundTeam.members[0] ? String(foundTeam.members[0].user_id) : "");
+                                                        const second = foundTeam.members.find(m => String(m.user_id) !== leadId);
+                                                        asstId = second ? String(second.user_id) : "";
+                                                    }
+                                                    setAssignment(prev => ({
+                                                        ...prev,
+                                                        assigned_team_id: tId,
+                                                        lead_technician_id: leadId || prev.lead_technician_id,
+                                                        assistant_technician_id: asstId || prev.assistant_technician_id,
+                                                    }));
+                                                }}
+                                                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
+                                            >
+                                                <option value="">-- Choose a Formed Technician Team --</option>
+                                                {teams.map((tm) => (
+                                                    <option key={tm.team_id} value={tm.team_id}>
+                                                        {tm.team_name} — Leader: {tm.leader_name} ({tm.members_count} members)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {/* Technician Selection Controls */}
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                                        {/* Lead Technician */}
+                                        <div>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                                <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
+                                                    LEAD TECHNICIAN
+                                                </label>
+                                                <span style={{ fontSize: 10, fontWeight: 700, color: "#2563EB", background: "#EFF6FF", padding: "1px 6px", borderRadius: 4 }}>
+                                                    Primary Lead
+                                                </span>
+                                            </div>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.lead_technician_id}
+                                                onChange={(event) =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        lead_technician_id: event.target.value,
+                                                    }))
+                                                }
+                                                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
+                                            >
+                                                <option value="">Select Technician</option>
+                                                {technicians.map((technician) => {
+                                                    const isAssistant = String(technician.user_id) === String(assignment.assistant_technician_id);
+                                                    const countToday = getTechDailyCount(technician.user_id);
+                                                    const isFull = countToday >= 4;
+                                                    return (
+                                                        <option
+                                                            key={technician.user_id}
+                                                            value={technician.user_id}
+                                                            disabled={isAssistant || isFull}
+                                                        >
+                                                            {technician.full_name} ({countToday}/4 today) {isFull ? "— FULL" : isAssistant ? "(Assistant)" : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+
+                                        {/* Assistant Technician */}
+                                        <div>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                                                <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F" }}>
+                                                    ASSISTANT TECHNICIAN
+                                                </label>
+                                                <span style={{ fontSize: 10, fontWeight: 700, color: "#64748B", background: "#F1F5F9", padding: "1px 6px", borderRadius: 4 }}>
+                                                    Partner Tech
+                                                </span>
+                                            </div>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.assistant_technician_id}
+                                                onChange={(event) =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        assistant_technician_id: event.target.value,
+                                                    }))
+                                                }
+                                                style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
+                                            >
+                                                <option value="">Select Technician</option>
+                                                {technicians.map((technician) => {
+                                                    const isLead = String(technician.user_id) === String(assignment.lead_technician_id);
+                                                    const countToday = getTechDailyCount(technician.user_id);
+                                                    const isFull = countToday >= 4;
+                                                    return (
+                                                        <option
+                                                            key={technician.user_id}
+                                                            value={technician.user_id}
+                                                            disabled={isLead || isFull}
+                                                        >
+                                                            {technician.full_name} ({countToday}/4 today) {isFull ? "— FULL" : isLead ? "(Lead)" : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {(assignment.lead_technician_id || assignment.assistant_technician_id) && (
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                            <span style={{ fontSize: 11, color: exceedsDailyLimit ? "#DC2626" : "#64748B", fontWeight: 600 }}>
+                                                {exceedsDailyLimit
+                                                    ? "⚠ One or more selected technicians already reached the 4 bookings/day limit."
+                                                    : "Each technician pair can be assigned up to 4 bookings per day."}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={handleSwapRoles}
+                                                style={{
+                                                    border: "none",
+                                                    background: "transparent",
+                                                    color: "#2563EB",
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    cursor: "pointer",
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    gap: 4,
+                                                }}
+                                            >
+                                                <span>⇄</span> Swap Roles
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* ASSIGNED TEAM VISUAL CONFIRMATION BOX */}
+                                    <div
                                         style={{
-                                            border: "none",
-                                            background: "transparent",
-                                            color: "#2563EB",
-                                            fontSize: 11,
-                                            fontWeight: 700,
-                                            cursor: "pointer",
-                                            display: "inline-flex",
-                                            alignItems: "center",
-                                            gap: 4,
+                                            background: isBothSelected ? "#F0FDF4" : "#F8FAFC",
+                                            border: `1.5px solid ${isBothSelected ? "#86EFAC" : "#E2E8F0"}`,
+                                            borderRadius: 14,
+                                            padding: "14px 16px",
                                         }}
                                     >
-                                        <span>⇄</span> Swap Roles (Lead & Assistant)
-                                    </button>
+                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                                            <span style={{ fontSize: 11, fontWeight: 800, color: isBothSelected ? "#166534" : "#64748B", textTransform: "uppercase" }}>
+                                                ASSIGNED TWO-TECHNICIAN TEAM
+                                            </span>
+                                            {isBothSelected ? (
+                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A" }}>
+                                                    ✓ Ready for Assignment ({leadDailyCount}/4 & {assistantDailyCount}/4 today)
+                                                </span>
+                                            ) : (
+                                                <span style={{ fontSize: 11, fontWeight: 600, color: "#D97706" }}>
+                                                    Select 2 Technicians
+                                                </span>
+                                            )}
+                                        </div>
+                                        {isBothSelected ? (
+                                            <div style={{ fontSize: 12, fontWeight: 700, color: "#0E1A33" }}>
+                                                {selectedLead?.full_name} (Lead) &amp; {selectedAssistant?.full_name} (Assistant)
+                                            </div>
+                                        ) : (
+                                            <div style={{ fontSize: 12, color: "#94A3B8" }}>
+                                                Please select both a Lead and an Assistant technician above.
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+
+                            {/* IF STATUS == PAYMENT INCOMPLETE */}
+                            {assignment.booking_status === "Payment Incomplete" && (
+                                <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: 12, padding: 14, fontSize: 12, color: "#92400E" }}>
+                                    <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                                        ⚠ Return Payment / Payment Incomplete (10-Minute Customer Timer)
+                                    </div>
+                                    <p style={{ margin: "0 0 10px", lineHeight: 1.5 }}>
+                                        Confirming this status will notify the customer immediately and give them <strong>10 minutes</strong> to complete the reservation payment. If not completed within 10 minutes, the booking will be <strong>automatically cancelled</strong> and the payment marked as <strong>Returned</strong>.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="Optional note to customer (e.g., Reference number invalid or partial amount sent)"
+                                        value={assignment.manager_note}
+                                        onChange={(e) => setAssignment(prev => ({ ...prev, manager_note: e.target.value }))}
+                                        style={{ width: "100%", background: "#FFFFFF" }}
+                                    />
                                 </div>
                             )}
 
-                            {/* ASSIGNED TEAM VISUAL CONFIRMATION BOX */}
-                            <div
-                                style={{
-                                    background: isBothSelected ? "#F0FDF4" : "#F8FAFC",
-                                    border: `1.5px solid ${isBothSelected ? "#86EFAC" : "#E2E8F0"}`,
-                                    borderRadius: 14,
-                                    padding: "16px 18px",
-                                    transition: "all 0.2s ease",
-                                }}
-                            >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 800, color: isBothSelected ? "#166534" : "#64748B", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                                        ASSIGNED TEAM
-                                    </span>
-                                    {isBothSelected ? (
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: "#16A34A", display: "flex", alignItems: "center", gap: 4 }}>
-                                            <CheckIcon size={12} color="#16A34A" /> 2 Technicians Assigned
-                                        </span>
-                                    ) : (
-                                        <span style={{ fontSize: 11, fontWeight: 600, color: "#D97706" }}>
-                                            Exactly 2 Technicians Required
-                                        </span>
-                                    )}
+                            {/* IF STATUS == RESCHEDULE NOTICE */}
+                            {assignment.booking_status === "Reschedule Notice" && (
+                                <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 12, padding: 14, fontSize: 12, color: "#3730A3" }}>
+                                    <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                                        📅 Reschedule Notice (No Cost to Customer — Half-Day Blocked on Selected Day)
+                                    </div>
+                                    <p style={{ margin: "0 0 10px", lineHeight: 1.5 }}>
+                                        The customer will be notified to reschedule to a vacant date and time at <strong>no cost (₱0.00)</strong>. If they originally booked in the morning/noon, morning and noon slots on that day will be unavailable; if they booked in the afternoon/evening, afternoon and evening slots on that day will be unavailable.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="Optional message to customer explaining why the slot is unavailable..."
+                                        value={assignment.manager_note}
+                                        onChange={(e) => setAssignment(prev => ({ ...prev, manager_note: e.target.value }))}
+                                        style={{ width: "100%", background: "#FFFFFF" }}
+                                    />
                                 </div>
-
-                                {isBothSelected ? (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
-                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#EFF6FF", color: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                <UserIcon size={16} color="#2563EB" />
-                                            </div>
-                                            <div style={{ minWidth: 0 }}>
-                                                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
-                                                    {selectedLead?.full_name}
-                                                </p>
-                                                <span style={{ fontSize: 10, fontWeight: 800, color: "#2563EB", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                                    LEAD TECHNICIAN
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF", padding: "10px 14px", borderRadius: 10, border: "1px solid #DCFCE7" }}>
-                                            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#F1F5F9", color: "#475569", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                                <UserIcon size={16} color="#64748B" />
-                                            </div>
-                                            <div style={{ minWidth: 0 }}>
-                                                <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#0E1A33" }}>
-                                                    {selectedAssistant?.full_name}
-                                                </p>
-                                                <span style={{ fontSize: 10, fontWeight: 800, color: "#64748B", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                                                    ASSISTANT TECHNICIAN
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div style={{ padding: "12px", textAlign: "center", color: "#94A3B8", fontSize: 12, background: "#FFFFFF", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
-                                        {assignment.lead_technician_id && !assignment.assistant_technician_id
-                                            ? "Lead selected. Please select an Assistant Technician to complete the pair."
-                                            : !assignment.lead_technician_id && assignment.assistant_technician_id
-                                                ? "Assistant selected. Please select a Lead Technician to complete the pair."
-                                                : "Select both a Lead Technician and an Assistant Technician above."}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Booking Status Dropdown */}
-                            <div>
-                                <label className="section-label" style={{ marginBottom: 6, display: "block", fontWeight: 700, color: "#1E2F5F" }}>
-                                    BOOKING STATUS
-                                </label>
-                                <select
-                                    className="input-field"
-                                    value={assignment.booking_status}
-                                    onChange={(event) =>
-                                        setAssignment((previous) => ({
-                                            ...previous,
-                                            booking_status: event.target.value,
-                                        }))
-                                    }
-                                    style={{ width: "100%", padding: "10px 12px", borderRadius: 10, borderColor: "#CBD5E1" }}
-                                >
-                                    <option value="Approved">Approved</option>
-                                    <option value="Dispatched">Dispatched</option>
-                                </select>
-                            </div>
+                            )}
                         </div>
                     </Modal>
                 );
             })()}
 
-            {/* Declare Completed Modal */}
+            {/* Verify Payment Turnover & Declare Booking Completed Modal */}
             <Modal
                 open={!!completeModal}
-                title={`Declare Booking #${completeModal?.booking_id} Completed`}
-                message="Are you sure the technician team has finished this service job?"
-                confirmLabel={completing ? "Declaring Completed..." : "Confirm Booking Completed"}
-                confirmDisabled={completing}
-                maxWidth={500}
+                title={`Verify Payment Turnover & Complete Booking #${completeModal?.booking_id}`}
+                message="Before declaring this booking completed, verify the payment handed over by the technician and record who requested this service."
+                confirmLabel={completing ? "Declaring Completed..." : "Verify Turnover & Declare Complete"}
+                confirmDisabled={completing || !completionForm.requested_by_name.trim() || !completionForm.payment_verified}
+                maxWidth={540}
                 onConfirm={handleCompleteBooking}
                 onCancel={() => !completing && setCompleteModal(null)}
             >
                 {completeModal && (
-                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 14 }}>
                         <div
                             style={{
                                 background: "#F9FAFB",
                                 border: "1px solid #E5E7EB",
-                                borderRadius: 8,
+                                borderRadius: 10,
                                 padding: 12,
-                                marginBottom: 14,
                             }}
                         >
                             <p style={{ margin: "0 0 4px" }}>
-                                <strong>Customer:</strong> {completeModal.client_name}
+                                <strong>Customer Account:</strong> {completeModal.client_name}
                             </p>
                             <p style={{ margin: "0 0 4px" }}>
                                 <strong>Service:</strong> {completeModal.service}
                             </p>
-                            <p style={{ margin: "0 0 4px" }}>
-                                <strong>Assigned Team:</strong> {completeModal.lead_technician_name ? `${completeModal.lead_technician_name} (Lead) & ${completeModal.assistant_technician_name || "Assistant"}` : (completeModal.assigned_tech_name || "Unassigned")}
+                            <p style={{ margin: "0" }}>
+                                <strong>Assigned Team:</strong>{" "}
+                                {completeModal.lead_technician_name
+                                    ? `${completeModal.lead_technician_name} (Lead) & ${completeModal.assistant_technician_name || "Assistant"}`
+                                    : completeModal.assigned_tech_name || "Unassigned"}
                             </p>
                         </div>
-                        <div
+
+                        {/* Technician Payment Turnover Summary */}
+                        {completeModal.payment_turnover ? (
+                            <div
+                                style={{
+                                    background: "#FFFBEB",
+                                    border: "1px solid #FCD34D",
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    fontSize: 12,
+                                    color: "#92400E",
+                                }}
+                            >
+                                <div style={{ fontWeight: 800, marginBottom: 6, textTransform: "uppercase", fontSize: 11 }}>
+                                    💰 Technician Post-Service Payment Turnover
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                                    <div>Total Service Charge: <strong>{formatCurrency(completeModal.payment_turnover.total_service_price || 0)}</strong></div>
+                                    <div>Down Payment Credited: <strong>- {formatCurrency(completeModal.payment_turnover.reservation_down_payment || 300)}</strong></div>
+                                    <div>Net Collected by Tech: <strong style={{ color: "#065F46" }}>{formatCurrency(completeModal.payment_turnover.net_collected || 0)}</strong></div>
+                                    <div>Payment Method: <strong>{completeModal.payment_turnover.payment_method || completeModal.service_payment_method}</strong></div>
+                                </div>
+                                {completeModal.payment_turnover.reference_number && (
+                                    <div style={{ marginTop: 4 }}>
+                                        GCash Ref No.: <strong>{completeModal.payment_turnover.reference_number}</strong>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div
+                                style={{
+                                    background: "#F8FAFC",
+                                    border: "1px solid #E2E8F0",
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    fontSize: 12,
+                                    color: "#475569",
+                                }}
+                            >
+                                <strong>Reservation Down Payment Paid:</strong> {formatCurrency(completeModal.amount_paid || 300)} ({completeModal.payment_method || "GCash"})
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="section-label" style={{ display: "block", marginBottom: 6, fontWeight: 700, color: "#1E2F5F" }}>
+                                WHO REQUESTED THIS SERVICE? <span style={{ color: "#DC2626" }}>*</span>
+                            </label>
+                            <input
+                                type="text"
+                                className="input-field"
+                                value={completionForm.requested_by_name}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, requested_by_name: e.target.value }))}
+                                placeholder="Enter full name of person who requested the service"
+                                required
+                                style={{ width: "100%" }}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="section-label" style={{ display: "block", marginBottom: 6, fontWeight: 700, color: "#1E2F5F" }}>
+                                AMOUNT TURNED OVER BY TECHNICIAN (₱)
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="input-field"
+                                value={completionForm.amount_turned_over}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, amount_turned_over: e.target.value }))}
+                                placeholder="e.g. 1200.00"
+                                style={{ width: "100%" }}
+                            />
+                        </div>
+
+                        <label
                             style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: 10,
                                 background: "#ECFDF5",
                                 border: "1px solid #A7F3D0",
-                                borderRadius: 8,
+                                borderRadius: 10,
                                 padding: "10px 12px",
                                 fontSize: 12,
                                 color: "#065F46",
+                                cursor: "pointer",
                             }}
                         >
-                            Declaring this booking completed will close the active service cycle and update the status across Super Admin, Manager, Technician, and Customer views immediately.
-                        </div>
+                            <input
+                                type="checkbox"
+                                checked={completionForm.payment_verified}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, payment_verified: e.target.checked }))}
+                                style={{ marginTop: 3 }}
+                            />
+                            <span>
+                                <strong>I carefully confirm and verify</strong> that the technician has handed over the customer's post-service payment and all tools have been accounted for.
+                            </span>
+                        </label>
                     </div>
                 )}
             </Modal>

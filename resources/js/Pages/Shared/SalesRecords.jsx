@@ -70,6 +70,29 @@ const RECORD_TYPE_META = {
     },
 };
 
+const getCategoryBadgeStyle = (category = "") => {
+    const cat = String(category).toLowerCase();
+    if (cat.includes("repair")) {
+        return { bg: "#FEF2F2", color: "#DC2626", border: "#FECACA" };
+    }
+    if (cat.includes("install")) {
+        return { bg: "#EFF6FF", color: "#2563EB", border: "#BFDBFE" };
+    }
+    if (cat.includes("clean") || cat.includes("maint")) {
+        return { bg: "#ECFDF5", color: "#059669", border: "#A7F3D0" };
+    }
+    if (cat.includes("unit") || cat.includes("ac")) {
+        return { bg: "#F0FDF4", color: "#16A34A", border: "#BBF7D0" };
+    }
+    if (cat.includes("part")) {
+        return { bg: "#FAF5FF", color: "#7E22CE", border: "#E9D5FF" };
+    }
+    if (cat.includes("tool") || cat.includes("material")) {
+        return { bg: "#FFFBEB", color: "#D97706", border: "#FDE68A" };
+    }
+    return { bg: "#F1F5F9", color: "#475569", border: "#CBD5E1" };
+};
+
 function SalesRecords({ addToast, endpoints }) {
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
     const [period, setPeriod] = useState("Monthly");
@@ -326,6 +349,12 @@ function SalesRecords({ addToast, endpoints }) {
                     rec.client_name,
                     rec.customer_contact,
                     rec.service,
+                    rec.service_category,
+                    rec.sale_category,
+                    rec.managed_by,
+                    rec.managed_by_name,
+                    rec.managed_by_role,
+                    rec.parts_replaced,
                     rec.item_name,
                     rec.brand,
                     rec.model,
@@ -1233,24 +1262,70 @@ function SalesRecords({ addToast, endpoints }) {
                         >
                             <thead>
                                 <tr style={{ background: "#F5F7FA" }}>
-                                    {[
-                                        "Record ID",
-                                        "Category / Source",
-                                        "Customer / Client",
-                                        activeCategoryTab === "tools_materials"
-                                            ? "Sold Tool / Material Details"
-                                            : activeCategoryTab === "ac_units"
-                                              ? "Sold AC Unit / Spare Part Details"
-                                              : "Item / Service Description",
-                                        "Sub-Category / Brand",
-                                        "Qty",
-                                        "Unit Price / Capital",
-                                        "Total Paid",
-                                        "Est. Profit",
-                                        "Payment",
-                                        "Date",
-                                        "Action",
-                                    ].map((heading) => {
+                                    {(activeCategoryTab === "service"
+                                        ? [
+                                              "Record ID",
+                                              "Category",
+                                              "Customer",
+                                              "Service",
+                                              "Booking Fee",
+                                              "Base Price",
+                                              "Spare Parts",
+                                              "Total Paid",
+                                              "Profit",
+                                              "Payment Method",
+                                              "Managed By",
+                                              "Date",
+                                              "Action",
+                                          ]
+                                        : activeCategoryTab === "tools_materials"
+                                          ? [
+                                                "Record ID",
+                                                "Category",
+                                                "Customer",
+                                                "Sold Tool / Material Details",
+                                                "Sub-Category / Brand",
+                                                "Qty",
+                                                "Unit Price / Capital",
+                                                "Total Paid",
+                                                "Profit",
+                                                "Payment Method",
+                                                "Sold / Managed By",
+                                                "Date",
+                                                "Action",
+                                            ]
+                                          : activeCategoryTab === "ac_units"
+                                            ? [
+                                                  "Record ID",
+                                                  "Category",
+                                                  "Customer",
+                                                  "Sold AC Unit / Spare Part Details",
+                                                  "Sub-Category / Brand",
+                                                  "Qty",
+                                                  "Unit Price / Capital",
+                                                  "Total Paid",
+                                                  "Profit",
+                                                  "Payment Method",
+                                                  "Sold / Managed By",
+                                                  "Date",
+                                                  "Action",
+                                              ]
+                                            : [
+                                                  "Record ID",
+                                                  "Category",
+                                                  "Customer",
+                                                  "Service / Item",
+                                                  "Booking Fee",
+                                                  "Base / Unit Price",
+                                                  "Spare Parts",
+                                                  "Total Paid",
+                                                  "Profit",
+                                                  "Payment Method",
+                                                  "Managed By",
+                                                  "Date",
+                                                  "Action",
+                                              ]
+                                    ).map((heading) => {
                                         const isAction = heading === "Action";
                                         return (
                                             <th
@@ -1286,11 +1361,15 @@ function SalesRecords({ addToast, endpoints }) {
                                 {filteredRecords.map((record) => {
                                     const typeKey =
                                         record.record_type || "service";
+                                    const isService =
+                                        typeKey === "service" ||
+                                        record.sale_type === "service";
                                     const meta =
                                         RECORD_TYPE_META[typeKey] ||
                                         RECORD_TYPE_META.service;
-                                    const isInventorySale =
-                                        typeKey !== "service";
+                                    const isPhysicalTab =
+                                        activeCategoryTab === "tools_materials" ||
+                                        activeCategoryTab === "ac_units";
 
                                     return (
                                         <tr
@@ -1316,206 +1395,261 @@ function SalesRecords({ addToast, endpoints }) {
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                #{record.booking_id}
+                                                #{record.booking_id || record.sale_id}
                                             </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                            >
-                                                <span
-                                                    style={{
-                                                        display: "inline-block",
-                                                        padding: "3px 9px",
-                                                        borderRadius: 999,
-                                                        fontSize: 11,
-                                                        fontWeight: 700,
-                                                        background: meta.bg,
-                                                        color: meta.color,
-                                                        border: `1px solid ${meta.border}`,
-                                                    }}
-                                                >
-                                                    {meta.label}
-                                                </span>
+
+                                            {/* Category */}
+                                            <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                                                {isService ? (
+                                                    <span
+                                                        style={{
+                                                            display: "inline-block",
+                                                            padding: "3px 9px",
+                                                            borderRadius: 999,
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            ...getCategoryBadgeStyle(record.service_category || "Service"),
+                                                            border: `1px solid ${getCategoryBadgeStyle(record.service_category || "Service").border}`,
+                                                        }}
+                                                    >
+                                                        {record.service_category || "Service"}
+                                                    </span>
+                                                ) : (
+                                                    <span
+                                                        style={{
+                                                            display: "inline-block",
+                                                            padding: "3px 9px",
+                                                            borderRadius: 999,
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            background: meta.bg,
+                                                            color: meta.color,
+                                                            border: `1px solid ${meta.border}`,
+                                                        }}
+                                                    >
+                                                        {record.sale_category || meta.label}
+                                                    </span>
+                                                )}
                                             </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    fontSize: 13,
-                                                    color: "#1E2F5F",
-                                                }}
-                                            >
-                                                <div
-                                                    style={{ fontWeight: 600 }}
-                                                >
-                                                    {record.client_name ||
-                                                        "Walk-in Customer"}
+
+                                            {/* Customer */}
+                                            <td style={{ padding: "10px 12px", fontSize: 13, color: "#1E2F5F" }}>
+                                                <div style={{ fontWeight: 600 }}>
+                                                    {record.client_name || "Walk-in Customer"}
                                                 </div>
                                                 {record.customer_contact && (
-                                                    <div
-                                                        style={{
-                                                            fontSize: 11,
-                                                            color: "#64748B",
-                                                        }}
-                                                    >
-                                                        {
-                                                            record.customer_contact
-                                                        }
+                                                    <div style={{ fontSize: 11, color: "#64748B" }}>
+                                                        {record.customer_contact}
                                                     </div>
                                                 )}
                                             </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    fontSize: 12,
-                                                    color: "#334155",
-                                                    maxWidth: 250,
-                                                }}
-                                            >
-                                                <div
-                                                    style={{
-                                                        fontWeight: 600,
-                                                        color: "#0F172A",
-                                                    }}
-                                                >
-                                                    {record.item_name ||
-                                                        record.service}
-                                                </div>
-                                                {record.serial_number && (
-                                                    <div
-                                                        style={{
-                                                            fontSize: 11,
-                                                            color: "#64748B",
-                                                            fontFamily:
-                                                                "monospace",
-                                                        }}
-                                                    >
-                                                        SN:{" "}
-                                                        {record.serial_number}
-                                                    </div>
-                                                )}
-                                                {record.rating && (
-                                                    <div
-                                                        style={{ marginTop: 3 }}
-                                                    >
-                                                        <StarRating
-                                                            rating={
-                                                                record.rating
-                                                            }
-                                                        />
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    fontSize: 12,
-                                                    color: "#475569",
-                                                }}
-                                            >
-                                                <div>
-                                                    {record.sub_category ||
-                                                        (typeKey === "service"
-                                                            ? "HVAC Service"
-                                                            : "General")}
-                                                </div>
-                                                {record.brand && (
-                                                    <div
-                                                        style={{
-                                                            fontSize: 11,
-                                                            color: "#2563EB",
-                                                            fontWeight: 600,
-                                                        }}
-                                                    >
-                                                        {record.brand}
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    fontSize: 12,
-                                                    fontWeight: 700,
-                                                    color: "#0F172A",
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                            >
-                                                {record.quantity || 1}{" "}
-                                                {record.unit || "pc"}
-                                            </td>
-                                            <td
-                                                style={{
-                                                    padding: "10px 12px",
-                                                    fontSize: 12,
-                                                    color: "#475569",
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                            >
-                                                <div>
-                                                    {formatCurrency(
-                                                        record.unit_price ||
-                                                            record.amount_paid ||
-                                                            0,
-                                                    )}
-                                                </div>
-                                                {isInventorySale &&
-                                                    Number(record.capital) >
-                                                        0 && (
-                                                        <div
-                                                            style={{
-                                                                fontSize: 10,
-                                                                color: "#94A3B8",
-                                                            }}
-                                                        >
-                                                            Cap:{" "}
-                                                            {formatCurrency(
-                                                                record.capital,
-                                                            )}
+
+                                            {/* Item/Service Columns depending on Tab & Type */}
+                                            {isPhysicalTab ? (
+                                                /* Dedicated Physical Inventory Columns */
+                                                <>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#334155", maxWidth: 250 }}>
+                                                        <div style={{ fontWeight: 600, color: "#0F172A" }}>
+                                                            {record.item_name || record.service}
                                                         </div>
-                                                    )}
-                                            </td>
+                                                        {record.serial_number && (
+                                                            <div style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
+                                                                SN: {record.serial_number}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#475569" }}>
+                                                        <div>{record.sub_category || "General"}</div>
+                                                        {record.brand && (
+                                                            <div style={{ fontSize: 11, color: "#2563EB", fontWeight: 600 }}>
+                                                                {record.brand}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#0F172A", whiteSpace: "nowrap" }}>
+                                                        {record.quantity || 1} {record.unit || "pc"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#475569", whiteSpace: "nowrap" }}>
+                                                        <div>{formatCurrency(record.unit_price || record.amount_paid || 0)}</div>
+                                                        {Number(record.capital) > 0 && (
+                                                            <div style={{ fontSize: 10, color: "#94A3B8" }}>
+                                                                Cap: {formatCurrency(record.capital)}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </>
+                                            ) : isService ? (
+                                                /* Polished Service Columns */
+                                                <>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#334155", maxWidth: 220 }}>
+                                                        <div style={{ fontWeight: 600, color: "#0F172A" }}>
+                                                            {record.service || record.item_name}
+                                                        </div>
+                                                        {record.rating && (
+                                                            <div style={{ marginTop: 3 }}>
+                                                                <StarRating rating={record.rating} />
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>
+                                                        {record.booking_fee !== null && record.booking_fee !== undefined
+                                                            ? formatCurrency(record.booking_fee)
+                                                            : formatCurrency(300)}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap" }}>
+                                                        {Number(record.base_price) > 0
+                                                            ? formatCurrency(record.base_price)
+                                                            : "—"}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, whiteSpace: "nowrap" }}>
+                                                        {Number(record.spare_parts_price) > 0 ? (
+                                                            <div>
+                                                                <div style={{ fontWeight: 700, color: "#D97706" }}>
+                                                                    {formatCurrency(record.spare_parts_price)}
+                                                                </div>
+                                                                {Array.isArray(record.consumed_spare_parts) && record.consumed_spare_parts.length > 0 ? (
+                                                                    <div
+                                                                        style={{
+                                                                            fontSize: 10,
+                                                                            color: "#92400E",
+                                                                            background: "#FEF3C7",
+                                                                            border: "1px solid #FDE68A",
+                                                                            padding: "1px 6px",
+                                                                            borderRadius: 4,
+                                                                            display: "inline-block",
+                                                                            marginTop: 2,
+                                                                            maxWidth: 160,
+                                                                            overflow: "hidden",
+                                                                            textOverflow: "ellipsis",
+                                                                            whiteSpace: "nowrap",
+                                                                        }}
+                                                                        title={record.consumed_spare_parts.map(p => `${p.item_name} (${p.quantity}x ${formatCurrency(p.price)})`).join(", ")}
+                                                                    >
+                                                                        {record.consumed_spare_parts.length} part{record.consumed_spare_parts.length > 1 ? "s" : ""}: {record.consumed_spare_parts[0].item_name}
+                                                                    </div>
+                                                                ) : record.parts_replaced ? (
+                                                                    <div
+                                                                        style={{
+                                                                            fontSize: 10,
+                                                                            color: "#92400E",
+                                                                            background: "#FEF3C7",
+                                                                            border: "1px solid #FDE68A",
+                                                                            padding: "1px 6px",
+                                                                            borderRadius: 4,
+                                                                            display: "inline-block",
+                                                                            marginTop: 2,
+                                                                            maxWidth: 160,
+                                                                            overflow: "hidden",
+                                                                            textOverflow: "ellipsis",
+                                                                            whiteSpace: "nowrap",
+                                                                        }}
+                                                                        title={record.parts_replaced}
+                                                                    >
+                                                                        {record.parts_replaced}
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : (
+                                                            <span style={{ color: "#94A3B8" }}>—</span>
+                                                        )}
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                /* Inventory Item Row in 'All' Tab */
+                                                <>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#334155", maxWidth: 220 }}>
+                                                        <div style={{ fontWeight: 600, color: "#0F172A" }}>
+                                                            {record.item_name || record.service}
+                                                        </div>
+                                                        {record.serial_number && (
+                                                            <div style={{ fontSize: 11, color: "#64748B", fontFamily: "monospace" }}>
+                                                                SN: {record.serial_number}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#94A3B8", whiteSpace: "nowrap" }}>
+                                                        —
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#475569", whiteSpace: "nowrap" }}>
+                                                        <div>{formatCurrency(record.unit_price || record.amount_paid || 0)}</div>
+                                                        <div style={{ fontSize: 10, color: "#64748B" }}>
+                                                            Qty: {record.quantity || 1} {record.unit || "pcs"}
+                                                        </div>
+                                                    </td>
+                                                    <td style={{ padding: "10px 12px", fontSize: 12, color: "#94A3B8", whiteSpace: "nowrap" }}>
+                                                        —
+                                                    </td>
+                                                </>
+                                            )}
+
+                                            {/* Total Paid */}
                                             <td
                                                 style={{
                                                     padding: "10px 12px",
                                                     fontSize: 13,
                                                     fontWeight: 700,
                                                     color:
-                                                        record.payment_status ===
-                                                        "Paid"
+                                                        record.payment_status === "Paid"
                                                             ? "#16A34A"
                                                             : "#9CA3AF",
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {record.payment_status ===
-                                                "Paid"
-                                                    ? formatCurrency(
-                                                          record.amount_paid ||
-                                                              0,
-                                                      )
-                                                    : "—"}
+                                                {record.payment_status === "Paid" ? (
+                                                    <div>
+                                                        <div>
+                                                            {formatCurrency(
+                                                                record.amount_paid || record.total_cost || 0,
+                                                            )}
+                                                        </div>
+                                                        {Number(record.amount_turned_over) > 0 && (
+                                                            <div
+                                                                style={{
+                                                                    fontSize: 10,
+                                                                    fontWeight: 700,
+                                                                    color: "#065F46",
+                                                                    background: "#ECFDF5",
+                                                                    border: "1px solid #A7F3D0",
+                                                                    padding: "1px 6px",
+                                                                    borderRadius: 4,
+                                                                    display: "inline-flex",
+                                                                    alignItems: "center",
+                                                                    gap: 3,
+                                                                    marginTop: 3,
+                                                                }}
+                                                                title={`Turned over: ${formatCurrency(record.amount_turned_over)}${record.turnover_verified ? " (Verified by Manager)" : ""}`}
+                                                            >
+                                                                <span>Turnover: {formatCurrency(record.amount_turned_over)}</span>
+                                                                {record.turnover_verified && <span style={{ color: "#16A34A" }}>✓</span>}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ color: "#94A3B8" }}>
+                                                        {Number(record.total_cost) > 0 ? formatCurrency(record.total_cost) : "—"}
+                                                    </span>
+                                                )}
                                             </td>
+
+                                            {/* Profit */}
                                             <td
                                                 style={{
                                                     padding: "10px 12px",
                                                     fontSize: 12,
                                                     fontWeight: 700,
                                                     color:
-                                                        Number(record.profit) >
-                                                        0
+                                                        Number(record.profit) > 0
                                                             ? "#0D9488"
                                                             : "#94A3B8",
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {record.payment_status ===
-                                                "Paid"
-                                                    ? formatCurrency(
-                                                          record.profit || 0,
-                                                      )
+                                                {record.payment_status === "Paid"
+                                                    ? formatCurrency(record.profit || 0)
                                                     : "—"}
                                             </td>
+
+                                            {/* Payment Method */}
                                             <td
                                                 style={{
                                                     padding: "10px 12px",
@@ -1530,15 +1664,51 @@ function SalesRecords({ addToast, endpoints }) {
                                                         marginBottom: 2,
                                                     }}
                                                 >
-                                                    {record.payment_method ||
-                                                        "—"}
+                                                    {record.payment_method || "—"}
                                                 </div>
                                                 <StatusBadge
-                                                    status={
-                                                        record.payment_status
-                                                    }
+                                                    status={record.payment_status}
                                                 />
                                             </td>
+
+                                            {/* Managed By */}
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        fontWeight: 600,
+                                                        color: "#1E2F5F",
+                                                    }}
+                                                >
+                                                    {record.managed_by_name || record.managed_by || record.sold_by_name || "Manager"}
+                                                </div>
+                                                <span
+                                                    style={{
+                                                        fontSize: 10,
+                                                        fontWeight: 700,
+                                                        padding: "1px 6px",
+                                                        borderRadius: 4,
+                                                        background: (record.managed_by_role || "").toLowerCase().includes("super")
+                                                            ? "#FEF2F2"
+                                                            : "#EFF6FF",
+                                                        color: (record.managed_by_role || "").toLowerCase().includes("super")
+                                                            ? "#DC2626"
+                                                            : "#2563EB",
+                                                        border: `1px solid ${(record.managed_by_role || "").toLowerCase().includes("super") ? "#FECACA" : "#BFDBFE"}`,
+                                                        display: "inline-block",
+                                                        marginTop: 2,
+                                                    }}
+                                                >
+                                                    {record.managed_by_role || "Manager"}
+                                                </span>
+                                            </td>
+
+                                            {/* Date */}
                                             <td
                                                 style={{
                                                     padding: "10px 12px",
@@ -1548,10 +1718,11 @@ function SalesRecords({ addToast, endpoints }) {
                                                 }}
                                             >
                                                 {formatDateTime(
-                                                    record.payment_date ||
-                                                        record.created_at,
+                                                    record.payment_date || record.created_at,
                                                 )}
                                             </td>
+
+                                            {/* Action */}
                                             <td
                                                 className="sticky-action-col"
                                                 style={{
@@ -1572,9 +1743,7 @@ function SalesRecords({ addToast, endpoints }) {
                                                         fontSize: 11,
                                                     }}
                                                     onClick={() =>
-                                                        setSelectedRecord(
-                                                            record,
-                                                        )
+                                                        setSelectedRecord(record)
                                                     }
                                                 >
                                                     Details
@@ -1610,7 +1779,9 @@ function SalesRecords({ addToast, endpoints }) {
                         style={{
                             background: "#FFFFFF",
                             borderRadius: 16,
-                            maxWidth: 520,
+                            maxWidth: 640,
+                            maxHeight: "90vh",
+                            overflowY: "auto",
                             width: "100%",
                             padding: 24,
                             boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
@@ -1626,37 +1797,52 @@ function SalesRecords({ addToast, endpoints }) {
                             }}
                         >
                             <div>
-                                <span
-                                    style={{
-                                        display: "inline-block",
-                                        padding: "3px 10px",
-                                        borderRadius: 999,
-                                        fontSize: 11,
-                                        fontWeight: 700,
-                                        background: (
-                                            RECORD_TYPE_META[
-                                                selectedRecord.record_type ||
-                                                    "service"
-                                            ] || RECORD_TYPE_META.service
-                                        ).bg,
-                                        color: (
-                                            RECORD_TYPE_META[
-                                                selectedRecord.record_type ||
-                                                    "service"
-                                            ] || RECORD_TYPE_META.service
-                                        ).color,
-                                        marginBottom: 6,
-                                    }}
-                                >
-                                    {
-                                        (
-                                            RECORD_TYPE_META[
-                                                selectedRecord.record_type ||
-                                                    "service"
-                                            ] || RECORD_TYPE_META.service
-                                        ).label
-                                    }
-                                </span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                    <span
+                                        style={{
+                                            display: "inline-block",
+                                            padding: "3px 10px",
+                                            borderRadius: 999,
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            background: (
+                                                RECORD_TYPE_META[
+                                                    selectedRecord.record_type ||
+                                                        "service"
+                                                ] || RECORD_TYPE_META.service
+                                            ).bg,
+                                            color: (
+                                                RECORD_TYPE_META[
+                                                    selectedRecord.record_type ||
+                                                        "service"
+                                                ] || RECORD_TYPE_META.service
+                                            ).color,
+                                        }}
+                                    >
+                                        {
+                                            (
+                                                RECORD_TYPE_META[
+                                                    selectedRecord.record_type ||
+                                                        "service"
+                                                ] || RECORD_TYPE_META.service
+                                            ).label
+                                        }
+                                    </span>
+                                    {selectedRecord.service_category && (
+                                        <span
+                                            style={{
+                                                display: "inline-block",
+                                                padding: "3px 10px",
+                                                borderRadius: 999,
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                                ...getCategoryBadgeStyle(selectedRecord.service_category),
+                                            }}
+                                        >
+                                            {selectedRecord.service_category}
+                                        </span>
+                                    )}
+                                </div>
                                 <h3
                                     style={{
                                         fontSize: 18,
@@ -1665,8 +1851,7 @@ function SalesRecords({ addToast, endpoints }) {
                                         margin: 0,
                                     }}
                                 >
-                                    Transaction Record #
-                                    {selectedRecord.booking_id}
+                                    Transaction Record #{selectedRecord.booking_id}
                                 </h3>
                                 <p
                                     style={{
@@ -1754,11 +1939,107 @@ function SalesRecords({ addToast, endpoints }) {
                                             color: "#64748B",
                                         }}
                                     >
-                                        Recorded by:{" "}
-                                        {selectedRecord.recorded_by}
+                                        Recorded by: {selectedRecord.recorded_by}
                                     </div>
                                 )}
                             </div>
+
+                            {/* Managed By */}
+                            <div>
+                                <div
+                                    style={{
+                                        fontSize: 11,
+                                        color: "#64748B",
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    Managed By
+                                </div>
+                                <div
+                                    style={{
+                                        fontWeight: 700,
+                                        color: "#0F172A",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                        marginTop: 2,
+                                        flexWrap: "wrap",
+                                    }}
+                                >
+                                    <span>
+                                        {selectedRecord.managed_by_name ||
+                                            selectedRecord.managed_by ||
+                                            "Super Admin"}
+                                    </span>
+                                    <span
+                                        style={{
+                                            fontSize: 10,
+                                            fontWeight: 700,
+                                            padding: "1px 6px",
+                                            borderRadius: 999,
+                                            background: (
+                                                selectedRecord.managed_by_role || ""
+                                            )
+                                                .toLowerCase()
+                                                .includes("super")
+                                                ? "#F5F3FF"
+                                                : "#EFF6FF",
+                                            color: (
+                                                selectedRecord.managed_by_role || ""
+                                            )
+                                                .toLowerCase()
+                                                .includes("super")
+                                                ? "#7C3AED"
+                                                : "#2563EB",
+                                            border: `1px solid ${
+                                                (
+                                                    selectedRecord.managed_by_role || ""
+                                                )
+                                                    .toLowerCase()
+                                                    .includes("super")
+                                                    ? "#DDD6FE"
+                                                    : "#BFDBFE"
+                                            }`,
+                                        }}
+                                    >
+                                        {selectedRecord.managed_by_role || "Manager"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Category */}
+                            <div>
+                                <div
+                                    style={{
+                                        fontSize: 11,
+                                        color: "#64748B",
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    Category
+                                </div>
+                                <div style={{ marginTop: 2 }}>
+                                    <span
+                                        style={{
+                                            display: "inline-block",
+                                            padding: "2px 8px",
+                                            borderRadius: 999,
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            ...getCategoryBadgeStyle(
+                                                selectedRecord.service_category ||
+                                                    selectedRecord.category ||
+                                                    "Service",
+                                            ),
+                                        }}
+                                    >
+                                        {selectedRecord.service_category ||
+                                            selectedRecord.category ||
+                                            "Service"}
+                                    </span>
+                                </div>
+                            </div>
+
                             <div style={{ gridColumn: "1 / -1" }}>
                                 <div
                                     style={{
@@ -1767,7 +2048,7 @@ function SalesRecords({ addToast, endpoints }) {
                                         fontWeight: 600,
                                     }}
                                 >
-                                    Item / Service Description
+                                    Service / Item Description
                                 </div>
                                 <div
                                     style={{
@@ -1845,107 +2126,579 @@ function SalesRecords({ addToast, endpoints }) {
                             )}
                         </div>
 
-                        <div
-                            style={{
-                                display: "grid",
-                                gridTemplateColumns: "repeat(3, 1fr)",
-                                gap: 10,
-                                marginBottom: 18,
-                            }}
-                        >
+                        {/* Financial Overview Cards */}
+                        {selectedRecord.record_type === "service" || !selectedRecord.record_type ? (
+                            /* Service Financial Breakdown: Booking Fee, Base Price, Spare Parts, Total Paid, Est. Profit */
                             <div
                                 style={{
-                                    padding: "10px 12px",
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(auto-fit, minmax(105px, 1fr))",
+                                    gap: 8,
+                                    marginBottom: 16,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        padding: "8px 10px",
+                                        borderRadius: 8,
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                    }}
+                                >
+                                    <div style={{ fontSize: 10, color: "#64748B", fontWeight: 600 }}>
+                                        Booking Fee
+                                    </div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#475569", marginTop: 2 }}>
+                                        {formatCurrency(selectedRecord.booking_fee || 0)}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "8px 10px",
+                                        borderRadius: 8,
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                    }}
+                                >
+                                    <div style={{ fontSize: 10, color: "#64748B", fontWeight: 600 }}>
+                                        Base Price
+                                    </div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginTop: 2 }}>
+                                        {formatCurrency(selectedRecord.base_price || 0)}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "8px 10px",
+                                        borderRadius: 8,
+                                        background: Number(selectedRecord.spare_parts_price) > 0 ? "#FFFBEB" : "#F8FAFC",
+                                        border: `1px solid ${Number(selectedRecord.spare_parts_price) > 0 ? "#FDE68A" : "#E2E8F0"}`,
+                                    }}
+                                >
+                                    <div style={{ fontSize: 10, color: Number(selectedRecord.spare_parts_price) > 0 ? "#92400E" : "#64748B", fontWeight: 600 }}>
+                                        Spare Parts {selectedRecord.is_repair ? "(Repair)" : ""}
+                                    </div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: Number(selectedRecord.spare_parts_price) > 0 ? "#D97706" : "#64748B", marginTop: 2 }}>
+                                        {formatCurrency(selectedRecord.spare_parts_price || 0)}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "8px 10px",
+                                        borderRadius: 8,
+                                        background: "#F0FDF4",
+                                        border: "1px solid #BBF7D0",
+                                    }}
+                                >
+                                    <div style={{ fontSize: 10, color: "#15803D", fontWeight: 600 }}>
+                                        Total Paid
+                                    </div>
+                                    <div style={{ fontSize: 15, fontWeight: 800, color: "#16A34A", marginTop: 2 }}>
+                                        {formatCurrency(selectedRecord.amount_paid || 0)}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "8px 10px",
+                                        borderRadius: 8,
+                                        background: "#F0FDFA",
+                                        border: "1px solid #99F6E4",
+                                    }}
+                                >
+                                    <div style={{ fontSize: 10, color: "#0F766E", fontWeight: 600 }}>
+                                        Est. Profit
+                                    </div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#0D9488", marginTop: 2 }}>
+                                        {formatCurrency(selectedRecord.profit || 0)}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            /* Inventory Sales Financial Breakdown */
+                            <div
+                                style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(3, 1fr)",
+                                    gap: 10,
+                                    marginBottom: 18,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        padding: "10px 12px",
+                                        borderRadius: 10,
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#64748B",
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        Quantity & Unit Price
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontSize: 14,
+                                            fontWeight: 700,
+                                            color: "#0F172A",
+                                            marginTop: 2,
+                                        }}
+                                    >
+                                        {selectedRecord.quantity || 1}{" "}
+                                        {selectedRecord.unit || "pc"} ×{" "}
+                                        {formatCurrency(
+                                            selectedRecord.unit_price ||
+                                                selectedRecord.amount_paid ||
+                                                0,
+                                        )}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "10px 12px",
+                                        borderRadius: 10,
+                                        background: "#F0FDF4",
+                                        border: "1px solid #BBF7D0",
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#15803D",
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        Total Amount Paid
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontSize: 16,
+                                            fontWeight: 800,
+                                            color: "#16A34A",
+                                            marginTop: 2,
+                                        }}
+                                    >
+                                        {formatCurrency(
+                                            selectedRecord.amount_paid || 0,
+                                        )}
+                                    </div>
+                                </div>
+                                <div
+                                    style={{
+                                        padding: "10px 12px",
+                                        borderRadius: 10,
+                                        background: "#F0FDFA",
+                                        border: "1px solid #99F6E4",
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#0F766E",
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        Est. Net Profit
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontSize: 15,
+                                            fontWeight: 800,
+                                            color: "#0D9488",
+                                            marginTop: 2,
+                                        }}
+                                    >
+                                        {formatCurrency(selectedRecord.profit || 0)}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Dedicated Consumed Spare Parts Section (for Repair or whenever parts are used) */}
+                        {(selectedRecord.is_repair ||
+                            (Array.isArray(selectedRecord.consumed_spare_parts) &&
+                                selectedRecord.consumed_spare_parts.length > 0) ||
+                            Number(selectedRecord.spare_parts_price) > 0 ||
+                            selectedRecord.parts_replaced) && (
+                            <div
+                                style={{
+                                    background: "#FFFBEB",
+                                    border: "1px solid #FDE68A",
                                     borderRadius: 10,
+                                    padding: "12px 14px",
+                                    marginBottom: 16,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        marginBottom: 8,
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            color: "#92400E",
+                                            textTransform: "uppercase",
+                                            letterSpacing: "0.03em",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: 6,
+                                        }}
+                                    >
+                                        <span>⚙️</span> Consumed Spare Parts Used in Repair
+                                    </span>
+                                    <span
+                                        style={{
+                                            fontSize: 12,
+                                            fontWeight: 800,
+                                            color: "#B45309",
+                                        }}
+                                    >
+                                        Total Added Cost:{" "}
+                                        {formatCurrency(
+                                            selectedRecord.spare_parts_price || 0,
+                                        )}
+                                    </span>
+                                </div>
+
+                                {Array.isArray(selectedRecord.consumed_spare_parts) &&
+                                selectedRecord.consumed_spare_parts.length > 0 ? (
+                                    <div style={{ overflowX: "auto" }}>
+                                        <table
+                                            style={{
+                                                width: "100%",
+                                                fontSize: 12,
+                                                borderCollapse: "collapse",
+                                            }}
+                                        >
+                                            <thead>
+                                                <tr
+                                                    style={{
+                                                        borderBottom: "1px solid #FDE68A",
+                                                        color: "#78350F",
+                                                        textAlign: "left",
+                                                    }}
+                                                >
+                                                    <th style={{ padding: "4px 6px" }}>Part Name / SKU</th>
+                                                    <th style={{ padding: "4px 6px", textAlign: "center" }}>Qty</th>
+                                                    <th style={{ padding: "4px 6px", textAlign: "right" }}>Unit Price</th>
+                                                    <th style={{ padding: "4px 6px", textAlign: "right" }}>Subtotal</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {selectedRecord.consumed_spare_parts.map((part, pIdx) => (
+                                                    <tr
+                                                        key={part.item_id || pIdx}
+                                                        style={{
+                                                            borderBottom: "1px solid #FEF3C7",
+                                                            color: "#1F2937",
+                                                        }}
+                                                    >
+                                                        <td style={{ padding: "6px" }}>
+                                                            <div style={{ fontWeight: 600 }}>{part.item_name}</div>
+                                                            {part.sku && (
+                                                                <div style={{ fontSize: 10, color: "#92400E" }}>
+                                                                    SKU: {part.sku}
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                        <td style={{ padding: "6px", textAlign: "center", fontWeight: 600 }}>
+                                                            {part.quantity_used} {part.unit || "pc"}
+                                                        </td>
+                                                        <td style={{ padding: "6px", textAlign: "right" }}>
+                                                            {formatCurrency(part.unit_price)}
+                                                        </td>
+                                                        <td style={{ padding: "6px", textAlign: "right", fontWeight: 700, color: "#92400E" }}>
+                                                            {formatCurrency(part.total_price)}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: 11, color: "#78350F", fontStyle: "italic" }}>
+                                        Spare parts billed: {formatCurrency(selectedRecord.spare_parts_price || 0)}
+                                    </div>
+                                )}
+
+                                {selectedRecord.parts_replaced && (
+                                    <div
+                                        style={{
+                                            marginTop: 8,
+                                            paddingTop: 8,
+                                            borderTop: "1px dashed #FDE68A",
+                                            fontSize: 11,
+                                            color: "#78350F",
+                                        }}
+                                    >
+                                        <strong>Technician Notes / Parts Replaced:</strong>{" "}
+                                        {selectedRecord.parts_replaced}
+                                    </div>
+                                )}
+
+                                <div
+                                    style={{
+                                        marginTop: 6,
+                                        fontSize: 10,
+                                        color: "#92400E",
+                                        fontStyle: "italic",
+                                    }}
+                                >
+                                    * The cost of consumed spare parts used for this repair is automatically included in the total paid amount.
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Payment & Turnover Breakdown */}
+                        {(Number(selectedRecord.amount_turned_over) > 0 ||
+                            selectedRecord.turnover_verified ||
+                            Number(selectedRecord.down_payment_credited) > 0 ||
+                            (Array.isArray(selectedRecord.payments) &&
+                                selectedRecord.payments.length > 0)) && (
+                            <div
+                                style={{
                                     background: "#F8FAFC",
                                     border: "1px solid #E2E8F0",
+                                    borderRadius: 10,
+                                    padding: "12px 14px",
+                                    marginBottom: 16,
                                 }}
                             >
                                 <div
                                     style={{
-                                        fontSize: 11,
-                                        color: "#64748B",
-                                        fontWeight: 600,
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        marginBottom: 10,
                                     }}
                                 >
-                                    Quantity & Unit Price
-                                </div>
-                                <div
-                                    style={{
-                                        fontSize: 14,
-                                        fontWeight: 700,
-                                        color: "#0F172A",
-                                        marginTop: 2,
-                                    }}
-                                >
-                                    {selectedRecord.quantity || 1}{" "}
-                                    {selectedRecord.unit || "pc"} ×{" "}
-                                    {formatCurrency(
-                                        selectedRecord.unit_price ||
-                                            selectedRecord.amount_paid ||
-                                            0,
+                                    <span
+                                        style={{
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            color: "#1E2F5F",
+                                            textTransform: "uppercase",
+                                            letterSpacing: "0.03em",
+                                        }}
+                                    >
+                                        Payment & Turnover Breakdown
+                                    </span>
+                                    {selectedRecord.turnover_verified && (
+                                        <span
+                                            style={{
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                                color: "#065F46",
+                                                background: "#ECFDF5",
+                                                border: "1px solid #A7F3D0",
+                                                padding: "2px 8px",
+                                                borderRadius: 999,
+                                            }}
+                                        >
+                                            ✓ Turnover Verified by Manager
+                                        </span>
                                     )}
                                 </div>
-                            </div>
-                            <div
-                                style={{
-                                    padding: "10px 12px",
-                                    borderRadius: 10,
-                                    background: "#F0FDF4",
-                                    border: "1px solid #BBF7D0",
-                                }}
-                            >
+
                                 <div
                                     style={{
-                                        fontSize: 11,
-                                        color: "#15803D",
-                                        fontWeight: 600,
+                                        display: "grid",
+                                        gridTemplateColumns:
+                                            "repeat(auto-fit, minmax(130px, 1fr))",
+                                        gap: 8,
+                                        fontSize: 12,
+                                        marginBottom:
+                                            Array.isArray(selectedRecord.payments) &&
+                                            selectedRecord.payments.length > 0
+                                                ? 10
+                                                : 0,
                                     }}
                                 >
-                                    Total Amount Paid
-                                </div>
-                                <div
-                                    style={{
-                                        fontSize: 16,
-                                        fontWeight: 800,
-                                        color: "#16A34A",
-                                        marginTop: 2,
-                                    }}
-                                >
-                                    {formatCurrency(
-                                        selectedRecord.amount_paid || 0,
+                                    {Number(selectedRecord.down_payment_credited) > 0 && (
+                                        <div
+                                            style={{
+                                                padding: "8px 10px",
+                                                background: "#fff",
+                                                borderRadius: 6,
+                                                border: "1px solid #E2E8F0",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    color: "#64748B",
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                }}
+                                            >
+                                                Reservation Down Payment
+                                            </div>
+                                            <div
+                                                style={{
+                                                    fontWeight: 700,
+                                                    color: "#1E293B",
+                                                    marginTop: 2,
+                                                }}
+                                            >
+                                                {formatCurrency(
+                                                    selectedRecord.down_payment_credited,
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {Number(selectedRecord.amount_turned_over) > 0 && (
+                                        <div
+                                            style={{
+                                                padding: "8px 10px",
+                                                background: "#ECFDF5",
+                                                borderRadius: 6,
+                                                border: "1px solid #A7F3D0",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    color: "#065F46",
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                }}
+                                            >
+                                                Turned Over Amount
+                                            </div>
+                                            <div
+                                                style={{
+                                                    fontWeight: 800,
+                                                    color: "#065F46",
+                                                    marginTop: 2,
+                                                }}
+                                            >
+                                                {formatCurrency(
+                                                    selectedRecord.amount_turned_over,
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedRecord.requested_by_name && (
+                                        <div
+                                            style={{
+                                                padding: "8px 10px",
+                                                background: "#fff",
+                                                borderRadius: 6,
+                                                border: "1px solid #E2E8F0",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    color: "#64748B",
+                                                    fontSize: 10,
+                                                    fontWeight: 600,
+                                                }}
+                                            >
+                                                Service Requested By
+                                            </div>
+                                            <div
+                                                style={{
+                                                    fontWeight: 700,
+                                                    color: "#1E293B",
+                                                    marginTop: 2,
+                                                }}
+                                            >
+                                                {selectedRecord.requested_by_name}
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
+
+                                {Array.isArray(selectedRecord.payments) &&
+                                    selectedRecord.payments.length > 0 && (
+                                        <div
+                                            style={{
+                                                borderTop: "1px dashed #CBD5E1",
+                                                paddingTop: 8,
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    color: "#64748B",
+                                                    marginBottom: 6,
+                                                }}
+                                            >
+                                                Recorded Payment Transactions (
+                                                {selectedRecord.payments.length})
+                                            </div>
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    gap: 4,
+                                                }}
+                                            >
+                                                {selectedRecord.payments.map((p, idx) => (
+                                                    <div
+                                                        key={p.payment_id || idx}
+                                                        style={{
+                                                            display: "flex",
+                                                            justifyContent: "space-between",
+                                                            alignItems: "center",
+                                                            fontSize: 12,
+                                                            background: "#fff",
+                                                            padding: "6px 8px",
+                                                            borderRadius: 6,
+                                                            border: "1px solid #F1F5F9",
+                                                        }}
+                                                    >
+                                                        <div>
+                                                            <span
+                                                                style={{
+                                                                    fontWeight: 600,
+                                                                    color: "#334155",
+                                                                }}
+                                                            >
+                                                                {p.payment_type || "Payment"}
+                                                            </span>
+                                                            <span
+                                                                style={{
+                                                                    color: "#64748B",
+                                                                    marginLeft: 6,
+                                                                    fontSize: 11,
+                                                                }}
+                                                            >
+                                                                ({p.payment_method}
+                                                                {p.reference_number
+                                                                    ? ` · Ref: ${p.reference_number}`
+                                                                    : ""}
+                                                                )
+                                                            </span>
+                                                        </div>
+                                                        <div
+                                                            style={{
+                                                                fontWeight: 700,
+                                                                color:
+                                                                    p.payment_status === "Paid"
+                                                                        ? "#16A34A"
+                                                                        : "#64748B",
+                                                            }}
+                                                        >
+                                                            {formatCurrency(p.amount_paid)}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                             </div>
-                            <div
-                                style={{
-                                    padding: "10px 12px",
-                                    borderRadius: 10,
-                                    background: "#F0FDFA",
-                                    border: "1px solid #99F6E4",
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        fontSize: 11,
-                                        color: "#0F766E",
-                                        fontWeight: 600,
-                                    }}
-                                >
-                                    Est. Net Profit
-                                </div>
-                                <div
-                                    style={{
-                                        fontSize: 15,
-                                        fontWeight: 800,
-                                        color: "#0D9488",
-                                        marginTop: 2,
-                                    }}
-                                >
-                                    {formatCurrency(selectedRecord.profit || 0)}
-                                </div>
-                            </div>
-                        </div>
+                        )}
 
                         {selectedRecord.notes && (
                             <div

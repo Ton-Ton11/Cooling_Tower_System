@@ -246,7 +246,7 @@ class ProfileController extends Controller
     {
         $user->loadMissing('role');
         $roleId = (int) $user->role_id;
-        $isHeadTech = $roleId === 7 || ($roleId === 5 && (bool) $user->is_head_technician);
+        $isHeadTech = $roleId === 7;
 
         $roleMeta = match (true) {
             $roleId === 1 => [
@@ -340,6 +340,15 @@ class ProfileController extends Controller
             ];
         }
 
+        $certifications = [];
+        if ($isHeadTech || $roleId === 5) {
+            try {
+                $certifications = app(\App\Services\ForecastingService::class)->getTechnicianCertifications((int) $user->user_id);
+            } catch (\Throwable $e) {
+                $certifications = [];
+            }
+        }
+
         return [
             'user' => [
                 'user_id' => $user->user_id,
@@ -360,6 +369,7 @@ class ProfileController extends Controller
             ],
             'role_meta' => $roleMeta,
             'highlights' => $highlights,
+            'certifications' => $certifications,
         ];
     }
 }

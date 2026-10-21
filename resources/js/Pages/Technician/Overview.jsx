@@ -450,12 +450,10 @@ export default function TechnicianDashboardOverview({ addToast, onNavigate, dash
                                         <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700">
                                             {isHeadTechnician
                                                 ? "Head Technician • Crew & Personal License Compliance Tracker"
-                                                : "Automated License & Certification Tracker"}
+                                                : "Automated License & Certification Tracker (1-Week Forecast Window)"}
                                         </h3>
                                         <p className="text-xs text-slate-600 mt-0.5">
-                                            {isHeadTechnician
-                                                ? "Monitor all technicians' valid certifications, send renewal reminders, and update licenses before expiry."
-                                                : "The system forecasts renewal dates and reminds you 45 days before any HVAC or safety license expires."}
+                                            When your certificate is <strong>about to expire 1 week (7 days) from now</strong>, a forecasting reminder triggers and you must submit your renewed certificate <strong>once (1/1)</strong>. The Manager will verify it and enter the new expiration date to restart the countdown.
                                         </p>
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap shrink-0">
@@ -466,14 +464,15 @@ export default function TechnicianDashboardOverview({ addToast, onNavigate, dash
                                                 onClick={handleTriggerCrewReminderScan}
                                                 className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold transition shadow-sm"
                                             >
-                                                {scanningReminders ? "Scanning..." : "Send Crew Renewal Reminders"}
+                                                {scanningReminders ? "Scanning..." : "Send Crew 1-Week Reminders"}
                                             </button>
                                         )}
                                         <button
-                                            onClick={() => setShowAddCertModal(!showAddCertModal)}
+                                            type="button"
+                                            onClick={() => onNavigate("certificates")}
                                             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shrink-0 transition shadow-sm"
                                         >
-                                            {showAddCertModal ? "Cancel" : "+ Add Certification"}
+                                            Open Certificate Monitoring Tab &rarr;
                                         </button>
                                     </div>
                                 </div>
@@ -505,107 +504,18 @@ export default function TechnicianDashboardOverview({ addToast, onNavigate, dash
                                     </div>
                                 )}
 
-                                {showAddCertModal && (
-                                    <form
-                                        onSubmit={handleAddCertification}
-                                        className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3 text-xs"
-                                    >
-                                        <h4 className="font-extrabold text-indigo-950">Register New HVAC / Safety Certification</h4>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            {isHeadTechnician && technicianList.length > 0 && (
-                                                <div className="sm:col-span-2">
-                                                    <label className="block font-bold text-slate-700 mb-1">
-                                                        Assign to Technician (Crew Member)
-                                                    </label>
-                                                    <select
-                                                        value={certForm.technician_user_id}
-                                                        onChange={(e) =>
-                                                            setCertForm({ ...certForm, technician_user_id: e.target.value })
-                                                        }
-                                                        className="w-full rounded-xl border-slate-300 text-xs px-3 py-2 bg-white"
-                                                    >
-                                                        <option value="">Myself (Head Technician)</option>
-                                                        {technicianList.map((tech) => (
-                                                            <option key={tech.user_id} value={tech.user_id}>
-                                                                {tech.name} ({tech.role_label})
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            )}
-                                            <div>
-                                                <label className="block font-bold text-slate-700 mb-1">Certification Title</label>
-                                                <input
-                                                    type="text"
-                                                    required
-                                                    value={certForm.certification_name}
-                                                    onChange={(e) => setCertForm({ ...certForm, certification_name: e.target.value })}
-                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block font-bold text-slate-700 mb-1">Issuing Body</label>
-                                                <input
-                                                    type="text"
-                                                    required
-                                                    value={certForm.issuing_body}
-                                                    onChange={(e) => setCertForm({ ...certForm, issuing_body: e.target.value })}
-                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block font-bold text-slate-700 mb-1">Certificate Number</label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="e.g. TESDA-NC3-9921"
-                                                    value={certForm.certificate_number}
-                                                    onChange={(e) => setCertForm({ ...certForm, certificate_number: e.target.value })}
-                                                    className="w-full rounded-xl border-slate-300 text-xs px-3 py-2"
-                                                />
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="block font-bold text-slate-700 mb-1">Issued Date</label>
-                                                    <input
-                                                        type="date"
-                                                        required
-                                                        value={certForm.issued_date}
-                                                        onChange={(e) => setCertForm({ ...certForm, issued_date: e.target.value })}
-                                                        className="w-full rounded-xl border-slate-300 text-xs px-2.5 py-2"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block font-bold text-slate-700 mb-1">Expiry Date</label>
-                                                    <input
-                                                        type="date"
-                                                        required
-                                                        value={certForm.expiry_date}
-                                                        onChange={(e) => setCertForm({ ...certForm, expiry_date: e.target.value })}
-                                                        className="w-full rounded-xl border-slate-300 text-xs px-2.5 py-2"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex justify-end gap-2 pt-2">
-                                            <button
-                                                type="submit"
-                                                disabled={submittingCert}
-                                                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm"
-                                            >
-                                                {submittingCert ? "Saving..." : "Save Certification"}
-                                            </button>
-                                        </div>
-                                    </form>
-                                )}
-
                                 <div className="space-y-3">
                                     {displayedCertifications.map((cert) => {
                                         const isUrgent = ["Expired", "Critical", "Expiring Soon"].includes(cert.status);
+                                        const isSubmitted = cert.status === "Renewal Submitted";
+                                        const canSubmit = Number(cert.days_until_expiry ?? 999) <= 7 && !isSubmitted;
                                         return (
                                             <div
                                                 key={cert.certification_id}
                                                 className={`p-4 rounded-2xl border transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                                                    isUrgent
+                                                    isSubmitted
+                                                        ? "bg-blue-50/40 border-blue-200"
+                                                        : isUrgent
                                                         ? "bg-amber-50/40 border-amber-200"
                                                         : "bg-white border-slate-200/80"
                                                 }`}
@@ -634,6 +544,11 @@ export default function TechnicianDashboardOverview({ addToast, onNavigate, dash
                                                         >
                                                             {cert.status}
                                                         </span>
+                                                        {Number(cert.days_until_expiry ?? 999) <= 7 && (
+                                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white">
+                                                                1-Week Reminder Active
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     <p className="text-xs text-slate-500">
                                                         Issuer: <strong>{cert.issuing_body}</strong> • Cert #:{" "}
@@ -645,22 +560,30 @@ export default function TechnicianDashboardOverview({ addToast, onNavigate, dash
                                                     </p>
                                                 </div>
 
-                                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
-                                                    {cert.status !== "Renewal Submitted" && isUrgent && (
+                                                <div className="flex flex-col items-start md:items-end gap-1.5 shrink-0">
+                                                    {isSubmitted ? (
+                                                        <span className="px-3 py-1.5 rounded-xl bg-blue-100 text-blue-900 border border-blue-200 text-[11px] font-extrabold">
+                                                            ✓ Submitted (1/1) — Awaiting Manager Verification
+                                                        </span>
+                                                    ) : canSubmit ? (
                                                         <button
-                                                            disabled={submittingCert}
-                                                            onClick={() => handleRenewCertification(cert.certification_id, "submit_renewal")}
-                                                            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition shadow-xs"
+                                                            type="button"
+                                                            onClick={() => onNavigate("certificates")}
+                                                            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-xs transition"
                                                         >
-                                                            Mark Renewal Filed
+                                                            Submit Renewed Certificate (1/1) &rarr;
                                                         </button>
+                                                    ) : (
+                                                        <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+                                                            Valid • Triggered at ≤ 7 Days Left
+                                                        </span>
                                                     )}
                                                     <button
-                                                        disabled={submittingCert}
-                                                        onClick={() => handleRenewCertification(cert.certification_id, "update_dates")}
-                                                        className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition"
+                                                        type="button"
+                                                        onClick={() => onNavigate("certificates")}
+                                                        className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 underline"
                                                     >
-                                                        Renew (+1 Yr)
+                                                        Open Certificate Monitoring
                                                     </button>
                                                 </div>
                                             </div>

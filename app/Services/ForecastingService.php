@@ -206,9 +206,26 @@ class ForecastingService
             $reason .= ' Interval shortened by ' . round((1 - $wearFactor) * 100) . '% due to ' . implode(' and ', $wearReasons) . '.';
         }
 
+        // Installation Post-Service Forecasting & Warranty Rule:
+        // - If AC unit was NOT bought in the company -> ONLY Preventive Maintenance forecasting activates.
+        // - If AC unit WAS bought in the company -> BOTH Cleaning/Preventive Maintenance reminder AND Warranty Tracking activate.
+        $isInstallation = str_contains(strtolower($sourceServiceName), 'install') || (int) $booking->service_id === 1;
+        $serviceDetails = is_array($booking->service_details) ? $booking->service_details : [];
+        $companySuppliedUnit = ! empty($serviceDetails['company_supplied_unit'])
+            || strtolower((string) ($serviceDetails['unit_available'] ?? '')) === 'no';
+
+        if ($isInstallation) {
+            if ($companySuppliedUnit) {
+                $reason .= ' (AC Unit bought in company: Cleaning/Preventive Maintenance reminder AND 12-Month Warranty Tracking activated.)';
+                $this->activateCompanySuppliedInstallationWarranty($booking, $units, $lastServiceDate);
+            } else {
+                $reason .= ' (AC Unit provided by customer / not bought in company: Preventive Maintenance forecasting activated only.)';
+            }
+        }
+
         $urgency = $this->computeUrgencyLevel($predictedDueDate);
 
-        return ServiceForecast::updateOrCreate(
+        $forecast = ServiceForecast::updateOrCreate(
             [
                 'user_id' => (int) $booking->client_id,
                 'source_booking_id' => (int) $booking->booking_id,
@@ -227,6 +244,94 @@ class ForecastingService
                 'recommendation_reason'    => $reason,
             ]
         );
+
+        return $forecast;
+    }
+
+    /**
+     * Activate 12-month Warranty Tracking when an Installation booking uses an AC unit bought in the company.
+     */
+    protected function activateCompanySuppliedInstallationWarranty(Booking $booking, array $units, Carbon $startDate): void
+    {
+        if (! Schema::hasTable('ac_units_inventory')) {
+            return;
+        }
+
+        $client = User::find($booking->client_id);
+        $customerName = $client ? trim(($client->given_name ?? '') . ' ' . ($client->last_name ?? '')) : 'Valued Customer';
+        $customerContact = $client?->contact_number ?? null;
+        $firstUnit = $units[0] ?? [];
+        $unitType = $firstUnit['ac_type'] ?? $firstUnit['type'] ?? 'Split Type';
+        $brand = $firstUnit['brand'] ?? 'Carrier';
+        $serialNumber = sprintf('CT-INST-%04d-%d', $booking->booking_id, $booking->client_id);
+
+        $existingUnit = DB::table('ac_units_inventory')
+            ->where('serial_number', $serialNumber)
+            ->first();
+
+        $expiryDate = (clone $startDate)->addMonths(12)->startOfDay();
+
+        if (! $existingUnit) {
+            $acUnitId = DB::table('ac_units_inventory')->insertGetId([
+                'unit_name'            => "{$brand} {$unitType}",
+                'brand'                => $brand,
+                'unit_type'            => $unitType,
+                'horsepower'           => $firstUnit['horsepower'] ?? '2.0 HP',
+                'serial_number'        => $serialNumber,
+                'capital_price'        => 22000,
+                'selling_price'        => (float) ($booking->total_price ?: 28500),
+                'profit'               => 6500,
+                'warranty_period'      => 12,
+                'warranty_start_date'  => $startDate->toDateString(),
+                'warranty_expiry_date' => $expiryDate->toDateString(),
+                'warranty_status'      => 'Active',
+                'status'               => 'Sold',
+                'customer_name'        => $customerName,
+                'customer_contact'     => $customerContact,
+                'sold_at'              => now(),
+                'created_at'           => now(),
+                'updated_at'           => now(),
+            ]);
+        } else {
+            $acUnitId = (int) $existingUnit->ac_unit_id;
+        }
+
+        if (Schema::hasTable('inventory_sales')) {
+            $saleExists = DB::table('inventory_sales')
+                ->where('sale_type', 'ac_unit')
+                ->where('ac_unit_id', $acUnitId)
+                ->exists();
+
+            if (! $saleExists) {
+                DB::table('inventory_sales')->insert([
+                    'sale_type'            => 'ac_unit',
+                    'ac_unit_id'           => $acUnitId,
+                    'item_name'            => "{$brand} {$unitType}",
+                    'serial_number'        => $serialNumber,
+                    'quantity'             => 1,
+                    'unit_price'           => (float) ($booking->total_price ?: 28500),
+                    'total_amount'         => (float) ($booking->total_price ?: 28500),
+                    'payment_method'       => $booking->payment_method ?: 'GCash',
+                    'client_id'            => $booking->client_id,
+                    'customer_name'        => $customerName,
+                    'warranty_period'      => 12,
+                    'warranty_start_date'  => $startDate->toDateString(),
+                    'warranty_expiry_date' => $expiryDate->toDateString(),
+                    'warranty_status'      => 'Active',
+                    'sold_at'              => now(),
+                    'created_at'           => now(),
+                    'updated_at'           => now(),
+                ]);
+            }
+        }
+
+        $this->activateAcUnitWarrantyForecast($acUnitId, [
+            'warranty_period'      => 12,
+            'warranty_start_date'  => $startDate->toDateString(),
+            'warranty_expiry_date' => $expiryDate->toDateString(),
+            'customer_name'        => $customerName,
+            'customer_contact'     => $customerContact,
+        ]);
     }
 
     /**
@@ -416,9 +521,9 @@ class ForecastingService
                     'certification_name' => 'TESDA RAC Servicing (DOMRAC / Commercial) NC II',
                     'issuing_body'       => 'TESDA Philippines',
                     'certificate_number' => sprintf('TESDA-RAC-%04d-%d', $userId, rand(1000, 9999)),
-                    'issued_date'        => now()->subMonths(23)->toDateString(),
-                    'expiry_date'        => now()->addDays(18)->toDateString(), // Expiring soon to trigger reminder
-                    'renewal_lead_days'  => 45,
+                    'issued_date'        => now()->subMonths(12)->addDays(5)->toDateString(),
+                    'expiry_date'        => now()->addDays(5)->toDateString(), // Expiring within 1 week (5 days left) to trigger reminder
+                    'renewal_lead_days'  => 7,
                     'status'             => 'Expiring Soon',
                     'notes'              => 'Mandatory national competency certification for commercial air conditioning and split/window servicing.',
                 ],
@@ -429,7 +534,7 @@ class ForecastingService
                     'certificate_number' => sprintf('DENR-REF-%04d', $userId * 17),
                     'issued_date'        => now()->subMonths(10)->toDateString(),
                     'expiry_date'        => now()->addMonths(14)->toDateString(),
-                    'renewal_lead_days'  => 60,
+                    'renewal_lead_days'  => 7,
                     'status'             => 'Active',
                     'notes'              => 'Required for legal recovery, charging, and handling of R410A, R32, and industrial chiller refrigerants.',
                 ],
@@ -438,10 +543,10 @@ class ForecastingService
                     'certification_name' => 'DOLE-OSHC Working at Heights & Industrial Cooling Tower Safety',
                     'issuing_body'       => 'DOLE Occupational Safety & Health Center',
                     'certificate_number' => sprintf('OSHC-CT-%04d', $userId * 23),
-                    'issued_date'        => now()->subMonths(11)->toDateString(),
-                    'expiry_date'        => now()->addDays(38)->toDateString(),
-                    'renewal_lead_days'  => 45,
-                    'status'             => 'Expiring Soon',
+                    'issued_date'        => now()->subMonths(6)->toDateString(),
+                    'expiry_date'        => now()->addMonths(6)->toDateString(),
+                    'renewal_lead_days'  => 7,
+                    'status'             => 'Active',
                     'notes'              => 'Required before dispatching to centralized rooftop cooling towers and confined water basin overhauls.',
                 ],
             ];
@@ -451,19 +556,34 @@ class ForecastingService
             }
 
             $existing = TechnicianCertification::where('user_id', $userId)->get();
+        } else {
+            // Migrate legacy 45/60-day seeded lead days to the 7-day (1 week) forecasting rule
+            foreach ($existing as $certRow) {
+                if ((int) $certRow->renewal_lead_days > 7) {
+                    $expDays = (int) now()->startOfDay()->diffInDays(Carbon::parse($certRow->expiry_date)->startOfDay(), false);
+                    $updateData = ['renewal_lead_days' => 7];
+                    // If this was the demo expiring TESDA cert seeded at ~18 days, bring it inside the 1-week (5 days) window so the reminder triggers immediately
+                    if ($expDays > 7 && $expDays <= 25 && str_contains((string) $certRow->certification_name, 'TESDA') && $certRow->status !== 'Renewal Submitted') {
+                        $updateData['expiry_date'] = now()->addDays(5)->toDateString();
+                    }
+                    $certRow->update($updateData);
+                }
+            }
+            $existing = TechnicianCertification::where('user_id', $userId)->get();
         }
 
         return $existing->map(function (TechnicianCertification $cert) {
             $expiry = Carbon::parse($cert->expiry_date)->startOfDay();
             $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
+            $leadDays = 7; // 1 week forecasting reminder threshold
 
             if ($cert->status === 'Renewal Submitted') {
                 $computedStatus = 'Renewal Submitted';
             } elseif ($daysLeft < 0) {
                 $computedStatus = 'Expired';
-            } elseif ($daysLeft <= 14) {
+            } elseif ($daysLeft <= 3) {
                 $computedStatus = 'Critical';
-            } elseif ($daysLeft <= $cert->renewal_lead_days) {
+            } elseif ($daysLeft <= $leadDays) {
                 $computedStatus = 'Expiring Soon';
             } else {
                 $computedStatus = 'Active';
@@ -473,21 +593,29 @@ class ForecastingService
                 $cert->update(['status' => $computedStatus]);
             }
 
+            $isReminderTriggered = ($daysLeft <= $leadDays) || $computedStatus === 'Renewal Submitted';
+            $hasSubmittedOnce = $computedStatus === 'Renewal Submitted';
+            $canTechnicianSubmit = ($daysLeft <= $leadDays) && ! $hasSubmittedOnce;
+
             return [
-                'certification_id'   => $cert->certification_id,
-                'user_id'            => $cert->user_id,
-                'certification_name' => $cert->certification_name,
-                'issuing_body'       => $cert->issuing_body,
-                'certificate_number' => $cert->certificate_number,
-                'issued_date'        => Carbon::parse($cert->issued_date)->format('M d, Y'),
-                'issued_date_raw'    => Carbon::parse($cert->issued_date)->toDateString(),
-                'expiry_date'        => $expiry->format('M d, Y'),
-                'expiry_date_raw'    => $expiry->toDateString(),
-                'days_until_expiry'  => $daysLeft,
-                'renewal_lead_days'  => $cert->renewal_lead_days,
-                'status'             => $computedStatus,
-                'notes'              => $cert->notes,
-                'action_notice'      => $this->buildCertificationNotice($cert->certification_name, $cert->issuing_body, $daysLeft, $computedStatus),
+                'certification_id'      => $cert->certification_id,
+                'user_id'               => $cert->user_id,
+                'certification_name'    => $cert->certification_name,
+                'issuing_body'          => $cert->issuing_body,
+                'certificate_number'    => $cert->certificate_number,
+                'issued_date'           => Carbon::parse($cert->issued_date)->format('M d, Y'),
+                'issued_date_raw'       => Carbon::parse($cert->issued_date)->toDateString(),
+                'expiry_date'           => $expiry->format('M d, Y'),
+                'expiry_date_raw'       => $expiry->toDateString(),
+                'days_until_expiry'     => $daysLeft,
+                'renewal_lead_days'     => $leadDays,
+                'status'                => $computedStatus,
+                'is_reminder_triggered' => $isReminderTriggered,
+                'has_submitted_once'    => $hasSubmittedOnce,
+                'can_technician_submit' => $canTechnicianSubmit,
+                'last_reminded_at'      => $cert->last_reminded_at ? Carbon::parse($cert->last_reminded_at)->format('M d, Y h:i A') : null,
+                'notes'                 => $cert->notes,
+                'action_notice'         => $this->buildCertificationNotice($cert->certification_name, $cert->issuing_body, $daysLeft, $computedStatus),
             ];
         })->sortBy('days_until_expiry')->values()->all();
     }
@@ -495,20 +623,17 @@ class ForecastingService
     protected function buildCertificationNotice(string $name, string $issuer, int $daysLeft, string $status): string
     {
         if ($status === 'Renewal Submitted') {
-            return "Renewal application logged with {$issuer}. Awaiting updated certificate upload.";
+            return "Renewed certificate submitted by technician (1/1 limit reached). Awaiting Manager verification and new expiration date entry.";
         }
         if ($daysLeft < 0) {
             $ago = abs($daysLeft);
-            return "EXPIRED {$ago} days ago. Immediate renewal with {$issuer} is required to remain eligible for field dispatch.";
+            return "EXPIRED {$ago} days ago. 1-week forecasting reminder triggered — technician must submit the renewed certificate for Manager verification.";
         }
-        if ($daysLeft <= 14) {
-            return "URGENT: Expires in {$daysLeft} days. Submit renewal requirements to {$issuer} immediately to avoid dispatch suspension.";
-        }
-        if ($daysLeft <= 45) {
-            return "Automated Reminder: Expires in {$daysLeft} days. Schedule your assessment or renewal filing with {$issuer} before expiry.";
+        if ($daysLeft <= 7) {
+            return "1-Week Forecasting Reminder Triggered: Expires in {$daysLeft} " . ($daysLeft === 1 ? 'day' : 'days') . ". Please submit your renewed certificate (1 submission allowed) for Manager verification.";
         }
 
-        return "Compliant and valid for {$daysLeft} more days.";
+        return "Forecasting Validated: Certificate is active and compliant ({$daysLeft} days remaining). Reminder will automatically trigger 1 week (7 days) before expiration.";
     }
 
     /**
@@ -565,27 +690,41 @@ class ForecastingService
                 ];
             });
 
-        // 2. Technician Certifications Compliance Overview
+        // 2. Technician Certifications Compliance Overview (1-Week / 7-Day Forecasting Rule)
         $techAlerts = TechnicianCertification::with('technician')
             ->orderBy('expiry_date', 'asc')
             ->get()
             ->map(function (TechnicianCertification $c) {
                 $expiry = Carbon::parse($c->expiry_date)->startOfDay();
                 $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
+                $leadDays = 7;
                 $status = $c->status === 'Renewal Submitted'
                     ? 'Renewal Submitted'
-                    : ($daysLeft < 0 ? 'Expired' : ($daysLeft <= 14 ? 'Critical' : ($daysLeft <= $c->renewal_lead_days ? 'Expiring Soon' : 'Active')));
+                    : ($daysLeft < 0 ? 'Expired' : ($daysLeft <= 3 ? 'Critical' : ($daysLeft <= $leadDays ? 'Expiring Soon' : 'Active')));
+
+                $tech = $c->technician;
+                $techRole = ($tech && (int) $tech->role_id === 7) ? 'Head Technician' : 'Technician';
 
                 return [
-                    'certification_id'   => $c->certification_id,
-                    'technician_id'      => $c->user_id,
-                    'technician_name'    => $c->technician?->name ?? 'Technician #' . $c->user_id,
-                    'certification_name' => $c->certification_name,
-                    'issuing_body'       => $c->issuing_body,
-                    'certificate_number' => $c->certificate_number,
-                    'expiry_date'        => $expiry->format('M d, Y'),
-                    'days_until_expiry'  => $daysLeft,
-                    'status'             => $status,
+                    'certification_id'      => $c->certification_id,
+                    'technician_id'         => $c->user_id,
+                    'user_id'               => $c->user_id,
+                    'technician_name'       => $tech?->name ?? 'Technician #' . $c->user_id,
+                    'technician_role'       => $techRole,
+                    'certification_name'    => $c->certification_name,
+                    'issuing_body'          => $c->issuing_body,
+                    'certificate_number'    => $c->certificate_number,
+                    'issued_date'           => Carbon::parse($c->issued_date)->format('M d, Y'),
+                    'expiry_date'           => $expiry->format('M d, Y'),
+                    'expiry_date_raw'       => $expiry->toDateString(),
+                    'days_until_expiry'     => $daysLeft,
+                    'renewal_lead_days'     => $leadDays,
+                    'status'                => $status,
+                    'is_reminder_triggered' => ($daysLeft <= $leadDays) || $status === 'Renewal Submitted',
+                    'has_submitted_once'    => $status === 'Renewal Submitted',
+                    'can_technician_submit' => ($daysLeft <= $leadDays) && $status !== 'Renewal Submitted',
+                    'notes'                 => $c->notes,
+                    'action_notice'         => $this->buildCertificationNotice($c->certification_name, $c->issuing_body, $daysLeft, $status),
                 ];
             });
 
@@ -1444,14 +1583,14 @@ class ForecastingService
             }
         }
 
-        // 2. Evaluate Technician Certifications expiring within renewal_lead_days (default 45 days)
+        // 2. Evaluate Technician Certifications expiring within 1 week (7 days)
         $certs = TechnicianCertification::with('technician')->get();
         foreach ($certs as $cert) {
             $expiry = Carbon::parse($cert->expiry_date)->startOfDay();
             $daysLeft = (int) now()->startOfDay()->diffInDays($expiry, false);
 
-            if ($daysLeft <= $cert->renewal_lead_days && $cert->status !== 'Renewal Submitted') {
-                $status = $daysLeft < 0 ? 'Expired' : ($daysLeft <= 14 ? 'Critical' : 'Expiring Soon');
+            if ($daysLeft <= 7 && $cert->status !== 'Renewal Submitted') {
+                $status = $daysLeft < 0 ? 'Expired' : ($daysLeft <= 3 ? 'Critical' : 'Expiring Soon');
                 $cert->update([
                     'status'           => $status,
                     'last_reminded_at' => now(),
@@ -1460,7 +1599,7 @@ class ForecastingService
                 if ($cert->technician) {
                     $title = $daysLeft < 0
                         ? "EXPIRED Certification: {$cert->certification_name}"
-                        : "Certification Renewal Reminder: {$cert->certification_name} ({$daysLeft} days left)";
+                        : "1-Week Certification Expiry Reminder: {$cert->certification_name} ({$daysLeft} days left)";
 
                     $msg = $this->buildCertificationNotice($cert->certification_name, $cert->issuing_body, $daysLeft, $status);
 

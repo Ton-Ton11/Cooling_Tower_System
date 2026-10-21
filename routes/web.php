@@ -17,6 +17,7 @@ use App\Http\Controllers\Shared\InventoryFolderController;
 use App\Http\Controllers\Manager\ManagerDashboardController;
 use App\Http\Controllers\Manager\ManagerBookingController;
 use App\Http\Controllers\Manager\ManagerAnnouncementController;
+use App\Http\Controllers\Manager\ManagerSalesController;
 
 use App\Http\Controllers\AdminAssistant\AdminAssistantDashboardController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantStaffController;
@@ -42,6 +43,7 @@ use App\Http\Controllers\Customer\CustomerFeedbackController;
 use App\Http\Controllers\Customer\CustomerComplaintController;
 use App\Http\Controllers\Shared\TechnicianTeamController;
 use App\Http\Controllers\Shared\ToolChecklistController;
+use App\Http\Controllers\Shared\LocationAutocompleteController;
 use App\Http\Controllers\HeadTechnician\HeadTechnicianDashboardController;
 
 use App\Http\Controllers\ProfileController;
@@ -58,6 +60,10 @@ Route::get('/', function () {
     ]);
 });
 
+// Public & Authenticated Geospatial Address Autocomplete + Forward Geocoding
+Route::get('/api/location/autocomplete', [LocationAutocompleteController::class, 'autocomplete'])
+    ->name('location.autocomplete');
+
 Route::get('/dashboard', function () {
     if (! auth()->check()) {
         return redirect()->route('login');
@@ -68,9 +74,7 @@ Route::get('/dashboard', function () {
         2 => redirect()->route('manager.dashboard'),
         3 => redirect()->route('admin-assistant.dashboard'),
         4 => redirect()->route('tools-man.dashboard'),
-        5 => (bool) auth()->user()->is_head_technician
-            ? redirect()->route('head-technician.dashboard')
-            : redirect()->route('technician.dashboard'),
+        5 => redirect()->route('technician.dashboard'),
         6 => redirect()->route('customer.dashboard'),
         7 => redirect()->route('head-technician.dashboard'),
         default => redirect()->route('login'),
@@ -291,6 +295,10 @@ Route::prefix('manager')
         // Manager also has access to the performance endpoint (shared with super-admin logic)
         Route::controller(TechnicianPerformanceController::class)->group(function () {
             Route::get('/performance', 'performanceIndex')->name('performance.index');
+        });
+
+        Route::controller(ManagerSalesController::class)->group(function () {
+            Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
         });
 
         // ─── Service Catalog & Pricing / Unit Types / Brands ───
@@ -525,6 +533,7 @@ Route::prefix('technician')
             Route::get('/checklists', 'technicianIndex')->name('checklists.index');
             Route::post('/checklists', 'store')->name('checklists.store');
             Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
+            Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -578,6 +587,7 @@ Route::prefix('head-technician')
             Route::get('/checklists', 'technicianIndex')->name('checklists.index');
             Route::post('/checklists', 'store')->name('checklists.store');
             Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
+            Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -610,6 +620,7 @@ Route::prefix('customer')
             Route::get('/bookings', 'bookingsIndex')->name('bookings.index');
             Route::post('/bookings', 'storeBooking')->name('bookings.store');
             Route::match(['post', 'patch'], '/bookings/{bookingId}/reschedule', 'reschedule')->name('bookings.reschedule');
+            Route::post('/bookings/{bookingId}/complete-payment', 'completePayment')->name('bookings.complete-payment');
             Route::patch('/bookings/{bookingId}/cancel', 'cancel')->name('bookings.cancel');
             Route::post('/bookings/{bookingId}/quotation-response', 'respondQuotation')->name('bookings.quotation-response');
         });
@@ -637,8 +648,9 @@ Route::middleware(['auth', 'verified'])
     ->name('forecasting.')
     ->controller(\App\Http\Controllers\Shared\ForecastingController::class)
     ->group(function () {
+        Route::get('/certifications', 'indexCertifications')->name('certifications.index');
         Route::post('/certifications', 'storeCertification')->name('certifications.store');
-        Route::patch('/certifications/{certificationId}/renew', 'renewCertification')->name('certifications.renew');
+        Route::match(['post', 'patch'], '/certifications/{certificationId}/renew', 'renewCertification')->name('certifications.renew');
         Route::post('/evaluate-reminders', 'triggerReminderEvaluation')->name('evaluate');
         Route::match(['get', 'post'], '/warranty/track', 'trackAcWarranty')->name('warranty.track');
         Route::post('/warranty/{acUnitId}/status', 'updateAcUnitWarrantyStatus')->name('warranty.status');

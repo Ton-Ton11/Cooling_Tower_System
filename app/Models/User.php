@@ -19,7 +19,6 @@ class User extends Authenticatable implements MustVerifyEmail
 
     protected $fillable = [
         'role_id',
-        'is_head_technician',
         'given_name',
         'middle_name',
         'last_name',
@@ -47,7 +46,6 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
         'birthdate' => 'date:Y-m-d',
         'role_id' => 'integer',
-        'is_head_technician' => 'boolean',
         'is_active' => 'boolean',
     ];
 
@@ -169,7 +167,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function isHeadTechnician(): bool
     {
-        return (int) $this->role_id === 7 || ((int) $this->role_id === 5 && (bool) $this->is_head_technician);
+        return (int) $this->role_id === 7;
     }
 
     public function isCustomer(): bool
