@@ -23,13 +23,13 @@ export default function VerifyEmail({ status, email }) {
             <div className="mb-6">
                 <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-700 bg-sky-50 border border-sky-200/70 px-3 py-1 rounded-full mb-3">
                     <span className="size-1.5 rounded-full bg-blue-600" />
-                    One-Click Gmail Verification
+                    Verify
                 </div>
                 <h2 className="text-2xl font-extrabold font-display text-[#14224A] mb-1.5">
                     Check your Gmail Inbox
                 </h2>
                 <p className="text-sm text-slate-500 leading-relaxed">
-                    We sent a <strong className="text-slate-700">one-click verification link</strong> to your Gmail address. Simply open the email and click the verification button to activate your account:
+                    We sent a <strong className="text-slate-700">verification link</strong> to your Gmail address. Simply open the email and click the verification button to activate your account:
                 </p>
 
                 {email && (
@@ -57,7 +57,7 @@ export default function VerifyEmail({ status, email }) {
                 <div className="mb-5 rounded-xl bg-emerald-50 border border-emerald-200/80 px-4 py-3 text-xs font-semibold text-emerald-700 flex items-start gap-2.5">
                     <ShieldCheck className="size-4 shrink-0 mt-0.5 text-emerald-600" />
                     <span>
-                        A fresh one-click verification link has been sent to your Gmail inbox!
+                        Verification link has been sent to your Gmail inbox!
                     </span>
                 </div>
             )}

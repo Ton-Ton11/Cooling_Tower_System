@@ -97,16 +97,6 @@ export default function Register({ onToggleView }) {
           <p className="text-slate-300 text-lg mb-8 leading-relaxed">
             Join thousands of satisfied customers. Create an account to easily book services and manage your property's climate control.
           </p>
-          <div className="flex items-center gap-4 text-sm font-medium pt-2 border-t border-white/10">
-            <div className="flex -space-x-3">
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=1" alt="User" />
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=2" alt="User" />
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=3" alt="User" />
-            </div>
-            <div className="text-slate-300">
-              Trusted by <strong className="text-orange-400 font-bold">10,000+</strong> residential & commercial clients
-            </div>
-          </div>
         </div>
       </div>
 
@@ -150,7 +140,6 @@ export default function Register({ onToggleView }) {
                 <input 
                   id="given_name" 
                   type="text" 
-                  placeholder="John"
                   value={data.given_name}
                   onChange={(e) => setData('given_name', e.target.value)}
                   className={inputBaseClass}
@@ -162,7 +151,6 @@ export default function Register({ onToggleView }) {
                 <input 
                   id="last_name" 
                   type="text" 
-                  placeholder="Doe"
                   value={data.last_name}
                   onChange={(e) => setData('last_name', e.target.value)}
                   className={inputBaseClass}
@@ -178,7 +166,6 @@ export default function Register({ onToggleView }) {
               <input 
                 id="middle_name" 
                 type="text" 
-                placeholder="Smith"
                 value={data.middle_name}
                 onChange={(e) => setData('middle_name', e.target.value)}
                 className={inputBaseClass}
@@ -224,7 +211,6 @@ export default function Register({ onToggleView }) {
                 <input 
                   id="contact_number" 
                   type="tel" 
-                  placeholder="+63 917 000 0000"
                   value={data.contact_number}
                   onChange={(e) => setData('contact_number', e.target.value)}
                   className={iconInputClass}
@@ -235,13 +221,13 @@ export default function Register({ onToggleView }) {
 
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700" htmlFor="address">
-                Address & Geospatial Location Verification
+                Address
               </label>
               <GeospatialAddressAutocomplete
                 id="address"
                 value={data.address}
                 allowOutsideSave={true}
-                placeholder="Type street, barangay, or city (e.g., Brgy. Tetuan, Zamboanga City)..."
+                placeholder="Type street, barangay, or city"
                 onChange={(val) => {
                   setData('address', val);
                   if (locationError) setLocationError('');
@@ -258,9 +244,6 @@ export default function Register({ onToggleView }) {
                 <label className="text-sm font-semibold text-slate-700" htmlFor="reg_email">
                   Gmail Address
                 </label>
-                <span className="text-[11px] font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200/70">
-                  Gmail Verification Required
-                </span>
               </div>
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 size-5 text-slate-400 pointer-events-none" />
@@ -277,7 +260,7 @@ export default function Register({ onToggleView }) {
                 />
               </div>
               <p className="text-[11px] text-slate-500">
-                A 6-digit verification code and confirmation link will be sent to your Gmail inbox.
+                A verification link will be sent to your Gmail inbox.
               </p>
               {(gmailError || errors.email) && (
                 <div className="text-xs font-medium text-red-600">{gmailError || errors.email}</div>

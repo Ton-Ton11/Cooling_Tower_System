@@ -66,16 +66,6 @@ export default function Login({ onToggleView, status }) {
           <p className="text-slate-300 text-lg mb-8 leading-relaxed">
             Access your personalized service dashboard, manage appointments, and track your maintenance history in one secure place.
           </p>
-          <div className="flex items-center gap-4 text-sm font-medium pt-2 border-t border-white/10">
-            <div className="flex -space-x-3">
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=1" alt="User" />
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=2" alt="User" />
-              <img className="size-10 rounded-full border-2 border-[#0E1A33]" src="https://i.pravatar.cc/100?img=3" alt="User" />
-            </div>
-            <div className="text-slate-300">
-              Trusted by <strong className="text-orange-400 font-bold">10,000+</strong> residential & commercial clients
-            </div>
-          </div>
         </div>
       </div>
 
