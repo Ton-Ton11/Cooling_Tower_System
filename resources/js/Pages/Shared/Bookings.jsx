@@ -1,0 +1,1506 @@
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePage } from "@inertiajs/react";
+import Modal from "../../Components/Modal";
+import StatusBadge from "../../Components/StatusBadge";
+import {
+    SUPER_ADMIN_ENDPOINTS,
+    extractErrorMessage,
+    formatCurrency,
+    formatDateTime,
+} from "../../utils/superAdmin";
+import {
+    toLocalYmd,
+    isSundayDate,
+    MAX_DAILY_SLOTS,
+    MAX_JOBS_PER_TEAM_PER_DAY,
+} from "../../utils/bookingSchedule";
+
+const tabs = [
+    "Pending",
+    "Approved",
+    "In-Progress",
+    "Completed",
+    "Cancelled",
+    "All",
+];
+
+const PhoneIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 16.92z" />
+    </svg>
+);
+const MapPinIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+        <circle cx="12" cy="10" r="3" />
+    </svg>
+);
+const CalendarIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+);
+const CreditCardIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+        <line x1="1" y1="10" x2="23" y2="10" />
+    </svg>
+);
+const MailIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+        <polyline points="22,6 12,13 2,6" />
+    </svg>
+);
+const UserIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+    </svg>
+);
+const FileTextIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+    </svg>
+);
+const CheckIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <polyline points="20 6 9 17 4 12" />
+    </svg>
+);
+const WrenchIcon = ({ size = 13, color = "currentColor" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" />
+    </svg>
+);
+
+function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
+    const { auth } = usePage().props;
+    const currentUser = auth?.user;
+    const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
+    const [tab, setTab] = useState("Pending");
+    const [bookings, setBookings] = useState([]);
+    const [technicians, setTechnicians] = useState([]);
+    const [teams, setTeams] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [assigning, setAssigning] = useState(false);
+    const [completing, setCompleting] = useState(false);
+    const [approveModal, setApproveModal] = useState(null);
+    const [completeModal, setCompleteModal] = useState(null);
+    const [assignment, setAssignment] = useState({
+        booking_status: "Approved",
+        assign_mode: "individual", // "individual" | "team"
+        assigned_team_id: "",
+        lead_technician_id: "",
+        assistant_technician_id: "",
+        manager_note: "",
+    });
+    const [completionForm, setCompletionForm] = useState({
+        requested_by_name: "",
+        payment_verified: false,
+        amount_turned_over: "",
+        verification_notes: "",
+    });
+    const [clientPanel, setClientPanel] = useState(null);
+
+    const fetchBookings = useCallback(
+        async (showLoader = true) => {
+            if (showLoader) {
+                setLoading(true);
+            }
+
+            try {
+                const { data } = await window.axios.get(ep.bookings);
+                setBookings(Array.isArray(data?.data) ? data.data : []);
+                setTechnicians(
+                    Array.isArray(data?.technicians) ? data.technicians : [],
+                );
+                if (Array.isArray(data?.teams)) {
+                    setTeams(data.teams);
+                } else if (ep.teams) {
+                    try {
+                        const teamsRes = await window.axios.get(ep.teams);
+                        setTeams(Array.isArray(teamsRes.data?.data) ? teamsRes.data.data : []);
+                    } catch {
+                        // ignore teams error
+                    }
+                }
+            } catch (error) {
+                addToast(
+                    extractErrorMessage(error, "Unable to load bookings."),
+                    "error",
+                );
+            } finally {
+                setLoading(false);
+            }
+        },
+        [addToast, ep],
+    );
+
+    useEffect(() => {
+        fetchBookings();
+    }, [fetchBookings]);
+
+    const filtered = useMemo(
+        () =>
+            tab === "All"
+                ? bookings
+                : tab === "Pending"
+                ? bookings.filter((booking) =>
+                      ["Pending", "Payment Incomplete", "Reschedule Notice"].includes(
+                          booking.booking_status,
+                      ),
+                  )
+                : bookings.filter((booking) => booking.booking_status === tab),
+        [bookings, tab],
+    );
+
+    const clientHistory = useMemo(() => {
+        if (!clientPanel) {
+            return [];
+        }
+
+        return bookings.filter(
+            (booking) =>
+                booking.client_id === clientPanel.client_id &&
+                booking.booking_id !== clientPanel.booking_id,
+        );
+    }, [bookings, clientPanel]);
+
+    const openAssignmentModal = (booking) => {
+        setApproveModal(booking);
+        setAssignment({
+            booking_status: ["Payment Incomplete", "Reschedule Notice"].includes(booking.booking_status)
+                ? booking.booking_status
+                : "Approved",
+            assign_mode: booking.assigned_team_id ? "team" : "individual",
+            assigned_team_id: booking.assigned_team_id ? String(booking.assigned_team_id) : "",
+            lead_technician_id: booking.lead_technician_id
+                ? String(booking.lead_technician_id)
+                : (booking.assigned_tech_id ? String(booking.assigned_tech_id) : ""),
+            assistant_technician_id: booking.assistant_technician_id
+                ? String(booking.assistant_technician_id)
+                : "",
+            manager_note: "",
+        });
+    };
+
+    const openCompleteModal = (booking) => {
+        const turnover = booking.payment_turnover || booking.service_details?.payment_turnover || {};
+        setCompleteModal(booking);
+        setCompletionForm({
+            requested_by_name: booking.requested_by_name || booking.service_details?.requested_by_name || booking.client_name || "",
+            payment_verified: false,
+            amount_turned_over: turnover.net_collected !== undefined ? String(turnover.net_collected) : "",
+            verification_notes: "",
+        });
+    };
+
+    const handleSwapRoles = () => {
+        setAssignment((prev) => ({
+            ...prev,
+            lead_technician_id: prev.assistant_technician_id,
+            assistant_technician_id: prev.lead_technician_id,
+        }));
+    };
+
+    const handleAssign = async () => {
+        if (assigning || !approveModal) {
+            return;
+        }
+
+        if (assignment.booking_status === "Approved") {
+            if (assignment.assign_mode === "team") {
+                if (!assignment.assigned_team_id && (!assignment.lead_technician_id || !assignment.assistant_technician_id)) {
+                    addToast("Please select a formed team with at least two technicians.", "error");
+                    return;
+                }
+            } else {
+                if (!assignment.lead_technician_id || !assignment.assistant_technician_id) {
+                    addToast("Please select both a Lead Technician and an Assistant Technician.", "error");
+                    return;
+                }
+                if (assignment.lead_technician_id === assignment.assistant_technician_id) {
+                    addToast("The Lead and Assistant must be two different technicians.", "error");
+                    return;
+                }
+            }
+        }
+
+        setAssigning(true);
+
+        try {
+            const payload = {
+                booking_status: assignment.booking_status,
+                manager_note: assignment.manager_note?.trim() || null,
+            };
+
+            if (assignment.booking_status === "Approved") {
+                if (assignment.assign_mode === "team" && assignment.assigned_team_id) {
+                    payload.assigned_team_id = Number(assignment.assigned_team_id);
+                }
+                if (assignment.lead_technician_id) {
+                    payload.lead_technician_id = Number(assignment.lead_technician_id);
+                }
+                if (assignment.assistant_technician_id) {
+                    payload.assistant_technician_id = Number(assignment.assistant_technician_id);
+                }
+            }
+
+            const { data } = await window.axios.patch(
+                ep.approveBooking(approveModal.booking_id),
+                payload,
+            );
+
+            addToast(data?.message || "Booking updated successfully.");
+            setApproveModal(null);
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to update the booking."),
+                "error",
+            );
+        } finally {
+            setAssigning(false);
+        }
+    };
+
+    const handleCompleteBooking = async () => {
+        if (completing || !completeModal) return;
+        if (!completionForm.requested_by_name.trim()) {
+            addToast("Please input who requested this service before declaring the booking completed.", "error");
+            return;
+        }
+        if (!completionForm.payment_verified) {
+            addToast("Please verify and confirm the payment turned over by the technician.", "error");
+            return;
+        }
+        setCompleting(true);
+        try {
+            const completeEndpoint = ep.completeBooking ? ep.completeBooking(completeModal.booking_id) : `/api/manager/bookings/${completeModal.booking_id}/complete`;
+            const { data } = await window.axios.patch(completeEndpoint, {
+                requested_by_name: completionForm.requested_by_name.trim(),
+                payment_verified: completionForm.payment_verified ? 1 : 0,
+                amount_turned_over: completionForm.amount_turned_over !== "" ? Number(completionForm.amount_turned_over) : null,
+                verification_notes: completionForm.verification_notes.trim() || null,
+            });
+            addToast(data?.message || `Booking #${completeModal.booking_id} declared completed!`);
+            setCompleteModal(null);
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to complete booking."),
+                "error",
+            );
+        } finally {
+            setCompleting(false);
+        }
+    };
+
+    return (
+        <div style={{ animation: "fadeInUp 0.25s ease" }}>
+            <div className="page-header">
+                <div>
+                    <h1 className="page-title font-display">
+                        Bookings Management
+                    </h1>
+                    <p className="page-subtitle">
+                        Review, approve, assign, and track live service bookings
+                    </p>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span
+                        style={{
+                            fontSize: 12,
+                            color: "#9CA3AF",
+                            background: "#F5F7FA",
+                            border: "1px solid #E5E7EB",
+                            padding: "5px 12px",
+                            borderRadius: 8,
+                        }}
+                    >
+                        {
+                            bookings.filter(
+                                (booking) => booking.booking_status === "Pending",
+                            ).length
+                        }{" "}
+                        pending
+                    </span>
+                    <button className="btn-secondary" onClick={() => fetchBookings()}>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div
+                className="tab-bar"
+                style={{ marginBottom: 20, display: "inline-flex" }}
+            >
+                {tabs.map((currentTab) => {
+                    const count =
+                        currentTab === "All"
+                            ? bookings.length
+                            : bookings.filter(
+                                (booking) =>
+                                    booking.booking_status === currentTab,
+                            ).length;
+
+                    return (
+                        <button
+                            key={currentTab}
+                            className={`tab-item ${tab === currentTab ? "active" : ""}`}
+                            onClick={() => setTab(currentTab)}
+                        >
+                            {currentTab}
+                            <span
+                                style={{
+                                    marginLeft: 6,
+                                    fontSize: 10,
+                                    color:
+                                        tab === currentTab
+                                            ? "#3F7DFF"
+                                            : "#9CA3AF",
+                                }}
+                            >
+                                {count}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="card" style={{ padding: 20, marginTop: 16 }}>
+                <p className="section-label" style={{ marginBottom: 12 }}>
+                    Booking Details — manage assignments and view client records
+                </p>
+
+                {loading ? (
+                    <div
+                        style={{
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
+                        }}
+                    >
+                        Loading bookings...
+                    </div>
+                ) : filtered.length === 0 ? (
+                    <div
+                        style={{
+                            padding: 24,
+                            borderRadius: 12,
+                            background: "#F9FAFB",
+                            color: "#6B7280",
+                        }}
+                    >
+                        No bookings match the selected tab.
+                    </div>
+                ) : (
+                    <div style={{ overflowX: "auto" }}>
+                        <table
+                            style={{
+                                width: "100%",
+                                borderCollapse: "collapse",
+                                minWidth: 860,
+                            }}
+                        >
+                            <thead>
+                                <tr style={{ background: "#F5F7FA" }}>
+                                    {[
+                                        "ID",
+                                        "Client",
+                                        "Service",
+                                        "Scheduled",
+                                        "Assigned Team & Tech",
+                                        "Status",
+                                        ...(tab !== "Pending" ? ["Payment"] : []),
+                                        "Action",
+                                    ].map((heading) => {
+                                        const isAction = heading === "Action";
+                                        return (
+                                            <th
+                                                key={heading}
+                                                className={isAction ? "sticky-action-col" : ""}
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    textAlign: isAction ? "right" : "left",
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    letterSpacing: "0.05em",
+                                                    textTransform: "uppercase",
+                                                    color: "#6B7280",
+                                                    whiteSpace: "nowrap",
+                                                    borderBottom: "1px solid #EAECF0",
+                                                    ...(isAction
+                                                        ? {
+                                                              position: "sticky",
+                                                              right: 0,
+                                                              zIndex: 10,
+                                                              background: "#F5F7FA",
+                                                          }
+                                                        : {}),
+                                                }}
+                                            >
+                                                {heading}
+                                            </th>
+                                        );
+                                    })}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.map((booking) => {
+                                    const canAssign = [
+                                        "Pending",
+                                        "Payment Incomplete",
+                                        "Reschedule Notice",
+                                        "Approved",
+                                    ].includes(booking.booking_status);
+                                    const canComplete = [
+                                        "In-Progress",
+                                    ].includes(booking.booking_status);
+
+                                    return (
+                                        <tr
+                                            key={booking.booking_id}
+                                            style={{
+                                                borderTop: "1px solid #F5F7FA",
+                                            }}
+                                            onMouseEnter={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "rgba(63,125,255,0.04)";
+                                            }}
+                                            onMouseLeave={(event) => {
+                                                event.currentTarget.style.background =
+                                                    "transparent";
+                                            }}
+                                        >
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    fontWeight: 600,
+                                                    color: "#3F7DFF",
+                                                }}
+                                            >
+                                                #{booking.booking_id}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 13,
+                                                    color: "#1E2F5F",
+                                                }}
+                                            >
+                                                {booking.client_name}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#6B7280",
+                                                    maxWidth: 200,
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                {booking.service}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                    color: "#9CA3AF",
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                {formatDateTime(
+                                                    booking.scheduled_date,
+                                                )}
+                                            </td>
+                                            <td
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    fontSize: 12,
+                                                }}
+                                            >
+                                                {booking.lead_technician_name || booking.assigned_tech_name ? (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "#0E1A33" }}>
+                                                            <UserIcon size={12} color="#2563EB" />
+                                                            <span>{booking.lead_technician_name || booking.assigned_tech_name}</span>
+                                                            <span style={{ fontSize: 9, fontWeight: 800, background: "#EFF6FF", color: "#1D4ED8", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
+                                                                Lead
+                                                            </span>
+                                                        </div>
+                                                        {booking.assistant_technician_name && (
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                                                                <UserIcon size={12} color="#64748B" />
+                                                                <span>{booking.assistant_technician_name}</span>
+                                                                <span style={{ fontSize: 9, fontWeight: 800, background: "#F1F5F9", color: "#64748B", padding: "1px 5px", borderRadius: 4, textTransform: "uppercase" }}>
+                                                                    Assistant
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ color: "#D97706", fontWeight: 600, fontSize: 11, background: "#FEF3C7", padding: "2px 8px", borderRadius: 6 }}>
+                                                        Awaiting Assignment
+                                                    </span>
+                                                )}
+                                                {booking.assigned_by_name && (
+                                                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>
+                                                        assigned by {booking.assigned_by_name}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: "10px 12px" }}>
+                                                <StatusBadge
+                                                    status={booking.booking_status}
+                                                />
+                                            </td>
+                                            {tab !== "Pending" && (
+                                                <td style={{ padding: "10px 12px" }}>
+                                                    <StatusBadge
+                                                        status={booking.payment_status}
+                                                    />
+                                                </td>
+                                            )}
+                                            <td
+                                                className="sticky-action-col"
+                                                style={{
+                                                    padding: "10px 12px",
+                                                    position: "sticky",
+                                                    right: 0,
+                                                    zIndex: 5,
+                                                    background: "#FFFFFF",
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        gap: 6,
+                                                        flexWrap: "nowrap",
+                                                        alignItems: "center",
+                                                        justifyContent: "flex-end",
+                                                    }}
+                                                >
+                                                    {canAssign && !readOnly && (
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{
+                                                                padding:
+                                                                    "5px 10px",
+                                                                fontSize: 11,
+                                                            }}
+                                                            onClick={() =>
+                                                                openAssignmentModal(
+                                                                    booking,
+                                                                )
+                                                            }
+                                                        >
+                                                            Manage
+                                                        </button>
+                                                    )}
+                                                    {canComplete && !readOnly && (
+                                                        <button
+                                                            className="btn-secondary"
+                                                            style={{
+                                                                padding: "5px 10px",
+                                                                fontSize: 11,
+                                                                background: booking.payment_turnover ? "#FEF3C7" : "#ECFDF5",
+                                                                color: booking.payment_turnover ? "#92400E" : "#065F46",
+                                                                borderColor: booking.payment_turnover ? "#FCD34D" : "#A7F3D0",
+                                                                fontWeight: 700,
+                                                            }}
+                                                            onClick={() => openCompleteModal(booking)}
+                                                        >
+                                                            {booking.payment_turnover ? "Verify Turnover & Complete" : "Complete"}
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        className="btn-secondary"
+                                                        style={{
+                                                            padding: "5px 10px",
+                                                            fontSize: 11,
+                                                        }}
+                                                        onClick={() =>
+                                                            setClientPanel(booking)
+                                                        }
+                                                    >
+                                                        Client
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Manage Booking Modal (3 Statuses: Approve, Return Payment / Payment Incomplete, Reschedule Notice) */}
+            {(() => {
+                const isApproveSelected = assignment.booking_status === "Approved";
+                const selectedLead = technicians.find((t) => String(t.user_id) === String(assignment.lead_technician_id));
+                const selectedAssistant = technicians.find((t) => String(t.user_id) === String(assignment.assistant_technician_id));
+                const isBothSelected = Boolean(selectedLead && selectedAssistant && selectedLead.user_id !== selectedAssistant.user_id);
+
+                // Count daily bookings on the same local date as approveModal.scheduled_date
+                const modalDateYmd = approveModal?.scheduled_date
+                    ? toLocalYmd(approveModal.scheduled_date)
+                    : null;
+                const isModalDateSunday = modalDateYmd ? isSundayDate(modalDateYmd) : false;
+
+                // Count approved/active jobs already assigned on modalDateYmd
+                const approvedOnDateCount = modalDateYmd
+                    ? bookings.filter((b) => {
+                          if (b.booking_id === approveModal?.booking_id) return false;
+                          if (["Cancelled", "Pending", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status)) return false;
+                          const bYmd = b.scheduled_date ? toLocalYmd(b.scheduled_date) : null;
+                          return bYmd === modalDateYmd;
+                      }).length
+                    : 0;
+                const isDateSlotsFull = approvedOnDateCount >= MAX_DAILY_SLOTS;
+
+                const getTechDailyCount = (techId) => {
+                    if (!modalDateYmd || !techId) return 0;
+                    return bookings.filter((b) => {
+                        if (b.booking_id === approveModal?.booking_id) return false;
+                        if (["Cancelled", "Pending", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status)) return false;
+                        const bYmd = b.scheduled_date ? toLocalYmd(b.scheduled_date) : null;
+                        if (bYmd !== modalDateYmd) return false;
+                        return (
+                            Number(b.lead_technician_id) === Number(techId) ||
+                            Number(b.assistant_technician_id) === Number(techId) ||
+                            Number(b.assigned_tech_id) === Number(techId)
+                        );
+                    }).length;
+                };
+
+                const getTeamDailyCount = (team) => {
+                    if (!modalDateYmd || !team) return 0;
+                    const memberIds = Array.isArray(team.members)
+                        ? team.members.map((m) => Number(m.user_id))
+                        : [];
+                    return bookings.filter((b) => {
+                        if (b.booking_id === approveModal?.booking_id) return false;
+                        if (["Cancelled", "Pending", "Payment Incomplete", "Reschedule Notice"].includes(b.booking_status)) return false;
+                        const bYmd = b.scheduled_date ? toLocalYmd(b.scheduled_date) : null;
+                        if (bYmd !== modalDateYmd) return false;
+                        if (Number(b.assigned_team_id) === Number(team.team_id)) return true;
+                        return (
+                            memberIds.includes(Number(b.lead_technician_id)) ||
+                            memberIds.includes(Number(b.assistant_technician_id)) ||
+                            memberIds.includes(Number(b.assigned_tech_id))
+                        );
+                    }).length;
+                };
+
+                const leadDailyCount = selectedLead ? getTechDailyCount(selectedLead.user_id) : 0;
+                const assistantDailyCount = selectedAssistant ? getTechDailyCount(selectedAssistant.user_id) : 0;
+                const exceedsDailyLimit =
+                    isApproveSelected &&
+                    (leadDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
+                        assistantDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
+                        isDateSlotsFull ||
+                        isModalDateSunday);
+
+                const canConfirmManage = isApproveSelected
+                    ? isBothSelected && !exceedsDailyLimit
+                    : true;
+
+                return (
+                    <Modal
+                        open={!!approveModal}
+                        title={`Manage Booking #${approveModal?.booking_id ?? ""}`}
+                        message="Review booking and choose an action below."
+                        confirmLabel={
+                            assigning
+                                ? "Processing..."
+                                : isApproveSelected
+                                ? "Approve & Assign"
+                                : assignment.booking_status === "Payment Incomplete"
+                                ? "Mark Payment Incomplete"
+                                : "Send Reschedule Notice"
+                        }
+                        confirmDisabled={assigning || !canConfirmManage}
+                        maxWidth={640}
+                        onConfirm={handleAssign}
+                        onCancel={() => !assigning && setApproveModal(null)}
+                    >
+                        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                            {/* Customer & Service Summary Box */}
+                            {approveModal && (
+                                <div
+                                    style={{
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                        borderRadius: 12,
+                                        padding: 12,
+                                        display: "grid",
+                                        gridTemplateColumns: "1fr 1fr",
+                                        gap: 12,
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    <div>
+                                        <span style={{ color: "#64748B", fontWeight: 700, fontSize: 11 }}>Customer</span>
+                                        <div style={{ fontWeight: 800, color: "#1E2F5F", marginTop: 2, fontSize: 13 }}>{approveModal.client_name}</div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <PhoneIcon size={13} color="#64748B" />
+                                            <span>{approveModal.client_contact_number || "No contact"}</span>
+                                        </div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <MapPinIcon size={13} color="#64748B" />
+                                            <span>{approveModal.client_address || "No address"}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span style={{ color: "#64748B", fontWeight: 700, fontSize: 11 }}>Service</span>
+                                        <div style={{ fontWeight: 800, color: "#2563EB", marginTop: 2, fontSize: 13 }}>{approveModal.service}</div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <CalendarIcon size={13} color="#64748B" />
+                                            <span>{formatDateTime(approveModal.scheduled_date)}</span>
+                                        </div>
+                                        <div style={{ color: "#475569", marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                                            <CreditCardIcon size={13} color="#64748B" />
+                                            <span>{approveModal.payment_status} ({formatCurrency(approveModal.amount_paid)}) {approveModal.reference_number ? `• Ref: ${approveModal.reference_number}` : ""}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Step 1: Booking Status */}
+                            <div>
+                                <label className="section-label" style={{ marginBottom: 6, display: "block", fontWeight: 700, color: "#1E2F5F", fontSize: 11 }}>
+                                    Booking Status
+                                </label>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                                    {[
+                                        {
+                                            value: "Approved",
+                                            title: "Approve",
+                                            subtitle: "Assign technicians to job",
+                                            activeBg: "#EFF6FF",
+                                            activeBorder: "#2563EB",
+                                            activeText: "#1E40AF",
+                                        },
+                                        {
+                                            value: "Payment Incomplete",
+                                            title: "Incomplete Payment",
+                                            subtitle: "10-min window to settle",
+                                            activeBg: "#FFFBEB",
+                                            activeBorder: "#D97706",
+                                            activeText: "#92400E",
+                                        },
+                                        {
+                                            value: "Reschedule Notice",
+                                            title: "Reschedule Notice",
+                                            subtitle: "Request date change (Free)",
+                                            activeBg: "#EEF2FF",
+                                            activeBorder: "#4F46E5",
+                                            activeText: "#3730A3",
+                                        },
+                                    ].map((opt) => {
+                                        const isSel = assignment.booking_status === opt.value;
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                onClick={() =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        booking_status: opt.value,
+                                                    }))
+                                                }
+                                                style={{
+                                                    textAlign: "left",
+                                                    padding: "10px 12px",
+                                                    borderRadius: 10,
+                                                    border: `2px solid ${isSel ? opt.activeBorder : "#E2E8F0"}`,
+                                                    background: isSel ? opt.activeBg : "#FFFFFF",
+                                                    cursor: "pointer",
+                                                    transition: "all 0.15s ease",
+                                                }}
+                                            >
+                                                <div style={{ fontSize: 12, fontWeight: 800, color: isSel ? opt.activeText : "#1E2F5F" }}>
+                                                    {opt.title}
+                                                </div>
+                                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 2, lineHeight: 1.3 }}>
+                                                    {opt.subtitle}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* IF STATUS == APPROVED: Show Technician / Formed Team Assignment Fields */}
+                            {isApproveSelected && (
+                                <>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F1F5F9", padding: "8px 12px", borderRadius: 10 }}>
+                                        <div>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: "#334155", display: "block" }}>
+                                                Assign Technicians • {approvedOnDateCount}/{MAX_DAILY_SLOTS} slots booked on {modalDateYmd || "date"}
+                                            </span>
+                                            {isModalDateSunday && (
+                                                <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
+                                                    ⚠ Sunday is a rest day. Please send a Reschedule Notice.
+                                                </span>
+                                            )}
+                                            {!isModalDateSunday && isDateSlotsFull && (
+                                                <span style={{ fontSize: 10, fontWeight: 700, color: "#DC2626" }}>
+                                                    ⚠ All {MAX_DAILY_SLOTS} slots on {modalDateYmd} are already assigned.
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div style={{ display: "flex", gap: 6 }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssignment(prev => ({ ...prev, assign_mode: "individual", assigned_team_id: "" }))}
+                                                style={{
+                                                    padding: "5px 10px",
+                                                    borderRadius: 8,
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                    background: assignment.assign_mode === "individual" ? "#2563EB" : "#FFFFFF",
+                                                    color: assignment.assign_mode === "individual" ? "#FFFFFF" : "#475569",
+                                                }}
+                                            >
+                                                Pair Technicians
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssignment(prev => ({ ...prev, assign_mode: "team" }))}
+                                                style={{
+                                                    padding: "5px 10px",
+                                                    borderRadius: 8,
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    border: "none",
+                                                    cursor: "pointer",
+                                                    background: assignment.assign_mode === "team" ? "#2563EB" : "#FFFFFF",
+                                                    color: assignment.assign_mode === "team" ? "#FFFFFF" : "#475569",
+                                                }}
+                                            >
+                                                Teams ({teams.length})
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {assignment.assign_mode === "team" && (
+                                        <div>
+                                            <label className="section-label" style={{ marginBottom: 4, display: "block", fontWeight: 700, color: "#1E2F5F", fontSize: 11 }}>
+                                                Select Team
+                                            </label>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.assigned_team_id}
+                                                onChange={(e) => {
+                                                    const tId = e.target.value;
+                                                    const foundTeam = teams.find(t => String(t.team_id) === String(tId));
+                                                    let leadId = "";
+                                                    let asstId = "";
+                                                    if (foundTeam && Array.isArray(foundTeam.members)) {
+                                                        leadId = foundTeam.leader_id
+                                                            ? String(foundTeam.leader_id)
+                                                            : (foundTeam.members[0] ? String(foundTeam.members[0].user_id) : "");
+                                                        const second = foundTeam.members.find(m => String(m.user_id) !== leadId);
+                                                        asstId = second ? String(second.user_id) : "";
+                                                    }
+                                                    setAssignment(prev => ({
+                                                        ...prev,
+                                                        assigned_team_id: tId,
+                                                        lead_technician_id: leadId || prev.lead_technician_id,
+                                                        assistant_technician_id: asstId || prev.assistant_technician_id,
+                                                    }));
+                                                }}
+                                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, borderColor: "#CBD5E1", fontSize: 12 }}
+                                            >
+                                                <option value="">-- Choose Team --</option>
+                                                {teams.map((tm) => {
+                                                    const teamCount = getTeamDailyCount(tm);
+                                                    const teamFull = teamCount >= MAX_JOBS_PER_TEAM_PER_DAY;
+                                                    return (
+                                                        <option key={tm.team_id} value={tm.team_id} disabled={teamFull}>
+                                                            {tm.team_name} — Lead: {tm.leader_name} ({teamCount}/1 job today){teamFull ? " (Booked)" : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {/* Technician Selection Controls */}
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                        {/* Lead Technician */}
+                                        <div>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                                                <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F", fontSize: 11 }}>
+                                                    Lead Technician
+                                                </label>
+                                                <span style={{ fontSize: 10, fontWeight: 600, color: "#2563EB", background: "#EFF6FF", padding: "1px 5px", borderRadius: 4 }}>
+                                                    Lead
+                                                </span>
+                                            </div>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.lead_technician_id}
+                                                onChange={(event) =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        lead_technician_id: event.target.value,
+                                                    }))
+                                                }
+                                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, borderColor: "#CBD5E1", fontSize: 12 }}
+                                            >
+                                                <option value="">Select Technician</option>
+                                                {technicians.map((technician) => {
+                                                    const isAssistant = String(technician.user_id) === String(assignment.assistant_technician_id);
+                                                    const countToday = getTechDailyCount(technician.user_id);
+                                                    const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
+                                                    return (
+                                                        <option
+                                                            key={technician.user_id}
+                                                            value={technician.user_id}
+                                                            disabled={isAssistant || isFull}
+                                                        >
+                                                            {technician.full_name} ({countToday}/1 job){isFull ? " — Booked" : isAssistant ? " (Assistant)" : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+
+                                        {/* Assistant Technician */}
+                                        <div>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                                                <label className="section-label" style={{ margin: 0, fontWeight: 700, color: "#1E2F5F", fontSize: 11 }}>
+                                                    Assistant Technician
+                                                </label>
+                                                <span style={{ fontSize: 10, fontWeight: 600, color: "#64748B", background: "#F1F5F9", padding: "1px 5px", borderRadius: 4 }}>
+                                                    Partner
+                                                </span>
+                                            </div>
+                                            <select
+                                                className="input-field"
+                                                value={assignment.assistant_technician_id}
+                                                onChange={(event) =>
+                                                    setAssignment((prev) => ({
+                                                        ...prev,
+                                                        assistant_technician_id: event.target.value,
+                                                    }))
+                                                }
+                                                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, borderColor: "#CBD5E1", fontSize: 12 }}
+                                            >
+                                                <option value="">Select Technician</option>
+                                                {technicians.map((technician) => {
+                                                    const isLead = String(technician.user_id) === String(assignment.lead_technician_id);
+                                                    const countToday = getTechDailyCount(technician.user_id);
+                                                    const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
+                                                    return (
+                                                        <option
+                                                            key={technician.user_id}
+                                                            value={technician.user_id}
+                                                            disabled={isLead || isFull}
+                                                        >
+                                                            {technician.full_name} ({countToday}/1 job){isFull ? " — Booked" : isLead ? " (Lead)" : ""}
+                                                        </option>
+                                                    );
+                                                })}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {(assignment.lead_technician_id || assignment.assistant_technician_id) && (
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                            <span style={{ fontSize: 11, color: exceedsDailyLimit ? "#DC2626" : "#64748B", fontWeight: 500 }}>
+                                                {isModalDateSunday
+                                                    ? "Sunday is a rest day. Please reschedule."
+                                                    : isDateSlotsFull
+                                                        ? `All ${MAX_DAILY_SLOTS} slots on ${modalDateYmd} are full.`
+                                                        : exceedsDailyLimit
+                                                            ? `Technician already has a job on ${modalDateYmd}.`
+                                                            : `1 job per team/day (${MAX_DAILY_SLOTS} max daily slots).`}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={handleSwapRoles}
+                                                style={{
+                                                    border: "none",
+                                                    background: "transparent",
+                                                    color: "#2563EB",
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    cursor: "pointer",
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    gap: 4,
+                                                }}
+                                            >
+                                                <span>⇄</span> Swap Roles
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* ASSIGNED TEAM VISUAL CONFIRMATION BOX */}
+                                    <div
+                                        style={{
+                                            background: isBothSelected ? "#F0FDF4" : "#F8FAFC",
+                                            border: `1px solid ${isBothSelected ? "#86EFAC" : "#E2E8F0"}`,
+                                            borderRadius: 10,
+                                            padding: "10px 14px",
+                                        }}
+                                    >
+                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: isBothSelected ? "#166534" : "#64748B" }}>
+                                                Assigned Team
+                                            </span>
+                                            {isBothSelected ? (
+                                                <span style={{ fontSize: 11, fontWeight: 600, color: "#16A34A" }}>
+                                                    ✓ Ready
+                                                </span>
+                                            ) : (
+                                                <span style={{ fontSize: 11, fontWeight: 500, color: "#D97706" }}>
+                                                    Select 2 Technicians
+                                                </span>
+                                            )}
+                                        </div>
+                                        {isBothSelected ? (
+                                            <div style={{ fontSize: 12, fontWeight: 600, color: "#0E1A33" }}>
+                                                {selectedLead?.full_name} (Lead) &amp; {selectedAssistant?.full_name} (Assistant)
+                                            </div>
+                                        ) : (
+                                            <div style={{ fontSize: 11, color: "#94A3B8" }}>
+                                                Choose a Lead and an Assistant technician above.
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+
+                            {/* IF STATUS == PAYMENT INCOMPLETE */}
+                            {assignment.booking_status === "Payment Incomplete" && (
+                                <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: 10, padding: 12, fontSize: 12, color: "#92400E" }}>
+                                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                        Payment Incomplete (10-Minute Timer)
+                                    </div>
+                                    <p style={{ margin: "0 0 8px", lineHeight: 1.4, fontSize: 11 }}>
+                                        Customer will be given 10 minutes to settle payment, after which the booking will be automatically cancelled.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="Optional note to customer..."
+                                        value={assignment.manager_note}
+                                        onChange={(e) => setAssignment(prev => ({ ...prev, manager_note: e.target.value }))}
+                                        style={{ width: "100%", background: "#FFFFFF", fontSize: 12 }}
+                                    />
+                                </div>
+                            )}
+
+                            {/* IF STATUS == RESCHEDULE NOTICE */}
+                            {assignment.booking_status === "Reschedule Notice" && (
+                                <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 10, padding: 12, fontSize: 12, color: "#3730A3" }}>
+                                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                        Reschedule Notice (Free)
+                                    </div>
+                                    <p style={{ margin: "0 0 8px", lineHeight: 1.4, fontSize: 11 }}>
+                                        Customer will be notified to pick another available date and time slot free of charge.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="Optional note explaining why..."
+                                        value={assignment.manager_note}
+                                        onChange={(e) => setAssignment(prev => ({ ...prev, manager_note: e.target.value }))}
+                                        style={{ width: "100%", background: "#FFFFFF", fontSize: 12 }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </Modal>
+                );
+            })()}
+
+            {/* Verify Payment Turnover & Declare Booking Completed Modal */}
+            <Modal
+                open={!!completeModal}
+                title={`Verify Payment Turnover & Complete Booking #${completeModal?.booking_id}`}
+                message="Before declaring this booking completed, verify the payment handed over by the technician and record who requested this service."
+                confirmLabel={completing ? "Declaring Completed..." : "Verify Turnover & Declare Complete"}
+                confirmDisabled={completing || !completionForm.requested_by_name.trim() || !completionForm.payment_verified}
+                maxWidth={540}
+                onConfirm={handleCompleteBooking}
+                onCancel={() => !completing && setCompleteModal(null)}
+            >
+                {completeModal && (
+                    <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div
+                            style={{
+                                background: "#F9FAFB",
+                                border: "1px solid #E5E7EB",
+                                borderRadius: 10,
+                                padding: 12,
+                            }}
+                        >
+                            <p style={{ margin: "0 0 4px" }}>
+                                <strong>Customer Account:</strong> {completeModal.client_name}
+                            </p>
+                            <p style={{ margin: "0 0 4px" }}>
+                                <strong>Service:</strong> {completeModal.service}
+                            </p>
+                            <p style={{ margin: "0" }}>
+                                <strong>Assigned Team:</strong>{" "}
+                                {completeModal.lead_technician_name
+                                    ? `${completeModal.lead_technician_name} (Lead) & ${completeModal.assistant_technician_name || "Assistant"}`
+                                    : completeModal.assigned_tech_name || "Unassigned"}
+                            </p>
+                        </div>
+
+                        {/* Technician Payment Turnover Summary */}
+                        {completeModal.payment_turnover ? (
+                            <div
+                                style={{
+                                    background: "#FFFBEB",
+                                    border: "1px solid #FCD34D",
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    fontSize: 12,
+                                    color: "#92400E",
+                                }}
+                            >
+                                <div style={{ fontWeight: 800, marginBottom: 6, textTransform: "uppercase", fontSize: 11 }}>
+                                    💰 Technician Post-Service Payment Turnover
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                                    <div>Total Service Charge: <strong>{formatCurrency(completeModal.payment_turnover.total_service_price || 0)}</strong></div>
+                                    <div>Down Payment Credited: <strong>- {formatCurrency(completeModal.payment_turnover.reservation_down_payment || 300)}</strong></div>
+                                    <div>Net Collected by Tech: <strong style={{ color: "#065F46" }}>{formatCurrency(completeModal.payment_turnover.net_collected || 0)}</strong></div>
+                                    <div>Payment Method: <strong>{completeModal.payment_turnover.payment_method || completeModal.service_payment_method}</strong></div>
+                                </div>
+                                {completeModal.payment_turnover.reference_number && (
+                                    <div style={{ marginTop: 4 }}>
+                                        GCash Ref No.: <strong>{completeModal.payment_turnover.reference_number}</strong>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div
+                                style={{
+                                    background: "#F8FAFC",
+                                    border: "1px solid #E2E8F0",
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    fontSize: 12,
+                                    color: "#475569",
+                                }}
+                            >
+                                <strong>Reservation Down Payment Paid:</strong> {formatCurrency(completeModal.amount_paid || 300)} ({completeModal.payment_method || "GCash"})
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="section-label" style={{ display: "block", marginBottom: 6, fontWeight: 700, color: "#1E2F5F" }}>
+                                WHO REQUESTED THIS SERVICE? <span style={{ color: "#DC2626" }}>*</span>
+                            </label>
+                            <input
+                                type="text"
+                                className="input-field"
+                                value={completionForm.requested_by_name}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, requested_by_name: e.target.value }))}
+                                placeholder="Enter full name of person who requested the service"
+                                required
+                                style={{ width: "100%" }}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="section-label" style={{ display: "block", marginBottom: 6, fontWeight: 700, color: "#1E2F5F" }}>
+                                AMOUNT TURNED OVER BY TECHNICIAN (₱)
+                            </label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="input-field"
+                                value={completionForm.amount_turned_over}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, amount_turned_over: e.target.value }))}
+                                placeholder="e.g. 1200.00"
+                                style={{ width: "100%" }}
+                            />
+                        </div>
+
+                        <label
+                            style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: 10,
+                                background: "#ECFDF5",
+                                border: "1px solid #A7F3D0",
+                                borderRadius: 10,
+                                padding: "10px 12px",
+                                fontSize: 12,
+                                color: "#065F46",
+                                cursor: "pointer",
+                            }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={completionForm.payment_verified}
+                                onChange={(e) => setCompletionForm(prev => ({ ...prev, payment_verified: e.target.checked }))}
+                                style={{ marginTop: 3 }}
+                            />
+                            <span>
+                                <strong>I carefully confirm and verify</strong> that the technician has handed over the customer's post-service payment and all tools have been accounted for.
+                            </span>
+                        </label>
+                    </div>
+                )}
+            </Modal>
+
+            {clientPanel && (
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 500,
+                        background: "rgba(0,0,0,0.4)",
+                        backdropFilter: "blur(4px)",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        justifyContent: "flex-end",
+                    }}
+                    onClick={() => setClientPanel(null)}
+                >
+                    <div
+                        style={{
+                            width: 420,
+                            height: "100vh",
+                            background: "#fff",
+                            borderLeft: "1px solid #E5E7EB",
+                            overflow: "auto",
+                            padding: 24,
+                            animation: "slideInRight 0.25s ease",
+                            boxShadow: "-8px 0 32px rgba(0,0,0,0.12)",
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div
+                            style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                marginBottom: 20,
+                            }}
+                        >
+                            <h3
+                                style={{
+                                    fontSize: 16,
+                                    fontWeight: 700,
+                                    color: "#1E2F5F",
+                                    margin: 0,
+                                }}
+                            >
+                                Client Details
+                            </h3>
+                            <button
+                                onClick={() => setClientPanel(null)}
+                                style={{
+                                    background: "none",
+                                    border: "none",
+                                    color: "#9CA3AF",
+                                    cursor: "pointer",
+                                    fontSize: 20,
+                                }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div
+                            style={{
+                                background: "#F5F7FA",
+                                borderRadius: 14,
+                                padding: 16,
+                                marginBottom: 16,
+                            }}
+                        >
+                            <div
+                                style={{
+                                    display: "flex",
+                                    gap: 12,
+                                    alignItems: "center",
+                                    marginBottom: 12,
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        width: 44,
+                                        height: 44,
+                                        borderRadius: 12,
+                                        background:
+                                            "linear-gradient(135deg,#3F7DFF,#1E2F5F)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        color: "#fff",
+                                    }}
+                                >
+                                    <UserIcon size={20} color="#fff" />
+                                </div>
+                                <div>
+                                    <p
+                                        style={{
+                                            fontSize: 15,
+                                            fontWeight: 700,
+                                            color: "#1E2F5F",
+                                            margin: 0,
+                                        }}
+                                    >
+                                        {clientPanel.client_name}
+                                    </p>
+                                    <p
+                                        style={{
+                                            fontSize: 12,
+                                            color: "#9CA3AF",
+                                            margin: "2px 0 0",
+                                        }}
+                                    >
+                                        Client ID #{clientPanel.client_id}
+                                    </p>
+                                </div>
+                            </div>
+                            <div
+                                style={{
+                                    fontSize: 13,
+                                    color: "#6B7280",
+                                    lineHeight: 2.1,
+                                }}
+                            >
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <FileTextIcon size={14} color="#64748B" />
+                                    <span>Service: <strong style={{ color: "#1E2F5F" }}>{clientPanel.service}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <CalendarIcon size={14} color="#64748B" />
+                                    <span>Scheduled: <strong style={{ color: "#1E2F5F" }}>{formatDateTime(clientPanel.scheduled_date)}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <PhoneIcon size={14} color="#64748B" />
+                                    <span>Contact: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_contact_number || "Not provided"}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <MailIcon size={14} color="#64748B" />
+                                    <span>Email: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_email || "Not provided"}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <MapPinIcon size={14} color="#64748B" />
+                                    <span>Address: <strong style={{ color: "#1E2F5F" }}>{clientPanel.client_address || "Not provided"}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <CreditCardIcon size={14} color="#64748B" />
+                                    <span>Payment: <strong style={{ color: "#1E2F5F" }}>{clientPanel.payment_status}{clientPanel.amount_paid ? ` · ${formatCurrency(clientPanel.amount_paid)}` : ""}</strong></span>
+                                </p>
+                                <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <WrenchIcon size={14} color="#64748B" />
+                                    <span>Assigned Tech: <strong style={{ color: "#1E2F5F" }}>{clientPanel.assigned_tech_name || "Unassigned"}</strong></span>
+                                </p>
+                            </div>
+                        </div>
+
+                        {clientHistory.length > 0 && (
+                            <div>
+                                <p
+                                    style={{
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        color: "#6B7280",
+                                        textTransform: "uppercase",
+                                        letterSpacing: "0.05em",
+                                        marginBottom: 10,
+                                    }}
+                                >
+                                    Booking History
+                                </p>
+                                {clientHistory.map((booking) => (
+                                    <div
+                                        key={booking.booking_id}
+                                        style={{
+                                            background: "#F5F7FA",
+                                            borderRadius: 12,
+                                            padding: 12,
+                                            marginBottom: 8,
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "flex-start",
+                                                gap: 8,
+                                            }}
+                                        >
+                                            <div>
+                                                <p
+                                                    style={{
+                                                        fontSize: 11,
+                                                        color: "#3F7DFF",
+                                                        fontWeight: 600,
+                                                        margin: 0,
+                                                    }}
+                                                >
+                                                    #{booking.booking_id}
+                                                </p>
+                                                <p
+                                                    style={{
+                                                        fontSize: 12,
+                                                        color: "#1E2F5F",
+                                                        marginTop: 2,
+                                                    }}
+                                                >
+                                                    {booking.service}
+                                                </p>
+                                                <p
+                                                    style={{
+                                                        fontSize: 11,
+                                                        color: "#9CA3AF",
+                                                        marginTop: 2,
+                                                    }}
+                                                >
+                                                    {formatDateTime(
+                                                        booking.scheduled_date,
+                                                    )}
+                                                </p>
+                                            </div>
+                                            <StatusBadge
+                                                status={booking.booking_status}
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default Bookings;

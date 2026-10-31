@@ -1,0 +1,1226 @@
+<?php
+
+namespace App\Http\Controllers\Customer;
+
+use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\Controller;
+use App\Http\Controllers\Shared\LocationAutocompleteController;
+use App\Models\Booking;
+use App\Models\CustomerUnitDetail;
+use App\Models\Payment;
+use App\Models\RescheduleBooking;
+use App\Models\Service;
+use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+
+class CustomerBookingController extends Controller
+{
+    /**
+     * Ensure the 3 primary customer-facing services exist in the database.
+     */
+    public static function ensurePrimaryServicesExist(): void
+    {
+        $primaryServices = [
+            1 => [
+                'service_name' => 'Installation',
+                'description' => 'For new air-conditioning unit installation, replacement, or relocation.',
+                'base_price' => 0.00,
+                'category' => 'Installation',
+                'display_order' => 1,
+                'is_active' => true,
+            ],
+            2 => [
+                'service_name' => 'Repair / Check-up',
+                'description' => 'For air-conditioning problems, troubleshooting, inspection, diagnosis, and repair requests.',
+                'base_price' => 0.00,
+                'category' => 'Repair',
+                'display_order' => 2,
+                'is_active' => true,
+            ],
+            3 => [
+                'service_name' => 'Cleaning / Preventive Maintenance',
+                'description' => 'For regular cleaning, deep cleaning, and preventive maintenance of your air-conditioning unit.',
+                'base_price' => 0.00,
+                'category' => 'Maintenance',
+                'display_order' => 3,
+                'is_active' => true,
+            ],
+        ];
+
+        // 1. Re-map any bookings referencing legacy service IDs to 1, 2, 3
+        DB::table('bookings')->whereIn('service_id', [6, 7, 14])->update(['service_id' => 1]);
+        DB::table('bookings')->whereIn('service_id', [4, 5, 8, 15])->update(['service_id' => 2]);
+        DB::table('bookings')->whereIn('service_id', [16])->update(['service_id' => 3]);
+
+        // 2. Remove any services outside 1, 2, 3
+        DB::table('services')->whereNotIn('service_id', [1, 2, 3])->delete();
+
+        // 3. Upsert IDs 1, 2, 3 with primary definitions
+        foreach ($primaryServices as $id => $ps) {
+            DB::table('services')->updateOrInsert(
+                ['service_id' => $id],
+                array_merge($ps, [
+                    'updated_at' => now(),
+                ])
+            );
+        }
+    }
+
+    /**
+     * Get available customer service categories.
+     */
+    public function services(): JsonResponse
+    {
+        static::ensurePrimaryServicesExist();
+
+        $services = Service::whereIn('service_name', [
+            'Installation',
+            'Repair / Check-up',
+            'Cleaning / Preventive Maintenance'
+        ])
+        ->orderBy('display_order')
+        ->get();
+
+        return response()->json([
+            'data' => $services,
+        ]);
+    }
+
+    /**
+     * Get dynamic customer catalog (3 customer services, 9 visual unit types, brands, capacities, and policy).
+     */
+    public function catalog(): JsonResponse
+    {
+        static::ensurePrimaryServicesExist();
+
+        $services = Service::whereIn('service_name', [
+            'Installation',
+            'Repair / Check-up',
+            'Cleaning / Preventive Maintenance'
+        ])
+        ->orderBy('display_order')
+        ->get();
+
+        $unitTypes = [
+            [
+                'id' => 1,
+                'name' => 'Wall-Mounted Split Type',
+                'code' => 'Wall-Mounted Split Type',
+                'description' => 'Common residential and small commercial split-type unit.',
+                'icon' => 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
+            ],
+            [
+                'id' => 2,
+                'name' => 'Window Type',
+                'code' => 'Window Type',
+                'description' => 'Self-contained air-conditioning unit installed in a window or wall opening.',
+                'icon' => 'M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z',
+            ],
+            [
+                'id' => 3,
+                'name' => 'Floor-Mounted',
+                'code' => 'Floor-Mounted',
+                'description' => 'Floor-standing air-conditioning unit.',
+                'icon' => 'M9 3v18m6-18v18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z',
+            ],
+            [
+                'id' => 4,
+                'name' => 'Ceiling Cassette',
+                'code' => 'Ceiling Cassette',
+                'description' => 'Ceiling-mounted cassette type air-conditioning unit.',
+                'icon' => 'M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6z',
+            ],
+            [
+                'id' => 5,
+                'name' => 'Ceiling Suspended',
+                'code' => 'Ceiling Suspended',
+                'description' => 'Ceiling-suspended air-conditioning unit.',
+                'icon' => 'M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8',
+            ],
+            [
+                'id' => 6,
+                'name' => 'Ducted / Concealed',
+                'code' => 'Ducted / Concealed',
+                'description' => 'Air-conditioning system with concealed indoor unit and ductwork.',
+                'icon' => 'M3 7h18M3 12h18M3 17h18',
+            ],
+            [
+                'id' => 7,
+                'name' => 'Central / Package Unit',
+                'code' => 'Central / Package Unit',
+                'description' => 'Larger centralized or packaged air-conditioning system.',
+                'icon' => 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4',
+            ],
+            [
+                'id' => 8,
+                'name' => 'VRF / VRV System',
+                'code' => 'VRF / VRV System',
+                'description' => 'Multi-unit air-conditioning system commonly used in commercial buildings.',
+                'icon' => 'M4 4h7v7H4V4zm9 0h7v7h-7V4zm0 9h7v7h-7v-7zm-9 0h7v7H4v-7z',
+            ],
+            [
+                'id' => 9,
+                'name' => 'Other / Not Sure',
+                'code' => 'Other / Not Sure',
+                'description' => "I’m not sure what type of unit I have.",
+                'icon' => 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+            ],
+        ];
+
+        $brands = [
+            'Samsung',
+            'LG',
+            'Panasonic',
+            'Carrier',
+            'Daikin',
+            'Mitsubishi',
+            'Condura',
+            'Kolin',
+            'Fujitsu',
+            'Other',
+        ];
+
+        $capacities = [
+            'hp' => ['0.5 HP', '0.75 HP', '1.0 HP', '1.5 HP', '2.0 HP', '2.5 HP', '3.0 HP', '4.0 HP', '5.0 HP', 'Not Sure'],
+            'commercial' => ['1.0 TR', '1.5 TR', '2.0 TR', '2.5 TR', '3.0 TR', '4.0 TR', '5.0 TR', '10.0+ TR', 'BTU Capacity', 'Not Sure'],
+        ];
+
+        $policy = [
+            'fee_name' => 'Appointment Reservation Fee',
+            'amount' => 300.00,
+            'reschedule_fee' => 150.00,
+            'allowed_cancellation_hours' => 24,
+            'gcash_account' => '0917-123-4567',
+            'gcash_name' => 'Cooling Tower Airconditioning Services',
+            'notice' => 'An appointment reservation fee is required to secure your requested service schedule. Your reservation fee is separate from the final service quotation.',
+            'terms' => [
+                'Service Request Only: This booking is an initial service request and schedule reservation. Final service charges will be determined by assessment and an official quotation.',
+                'Reservation Fee Separation: The ₱300.00 reservation fee is strictly for reserving your schedule and is not the full service price.',
+                'Fee Crediting: If your service proceeds, the reservation fee may be credited toward your final service bill based on company policy.',
+                'Cancellation Policy: Cancellations made at least 24 hours prior to the appointment are eligible for rescheduling or refund.',
+                'Rescheduling Policy: Rescheduling requested within the allowed window transfers the reservation fee to your new schedule.',
+                'Late Cancellation / No-Show: Late cancellations (under 24 hours) or customer no-shows may forfeit the reservation fee to cover administrative costs.',
+                'Company Cancellation: If the service appointment is rescheduled or cancelled by the company due to emergencies or weather, your booking and fee are fully protected.',
+            ],
+        ];
+
+        return response()->json([
+            'services' => $services,
+            'unit_types' => $unitTypes,
+            'brands' => $brands,
+            'capacities' => $capacities,
+            'policy' => $policy,
+            'schedule_config' => $this->getScheduleConfig(),
+        ]);
+    }
+
+    /**
+     * Automatically cancel bookings in 'Payment Incomplete' status whose 10-minute deadline has expired,
+     * and mark their reservation payment status as 'Returned'.
+     */
+    public static function autoExpireIncompletePayments(): void
+    {
+        $expiredBookings = Booking::with('payments')
+            ->where('booking_status', 'Payment Incomplete')
+            ->get();
+
+        foreach ($expiredBookings as $booking) {
+            $details = is_array($booking->service_details) ? $booking->service_details : [];
+            $dueAtStr = $details['payment_due_at'] ?? null;
+            $dueAt = $dueAtStr ? Carbon::parse($dueAtStr) : ($booking->updated_at ? $booking->updated_at->copy()->addMinutes(10) : now()->subMinute());
+
+            if (now()->greaterThanOrEqualTo($dueAt)) {
+                DB::transaction(function () use ($booking, $details) {
+                    $details['payment_expired_at'] = now()->toISOString();
+                    $details['payment_returned'] = true;
+
+                    $booking->update([
+                        'booking_status' => 'Cancelled',
+                        'cancellation_reason' => 'Automatically cancelled: Incomplete payment was not completed within the 10-minute window. Payment returned.',
+                        'service_details' => $details,
+                        'updated_at' => now(),
+                    ]);
+
+                    DB::table('payment')
+                        ->where('booking_id', $booking->booking_id)
+                        ->update([
+                            'payment_status' => 'Returned',
+                            'notes' => 'Payment returned after 10-minute payment completion timeout.',
+                            'updated_at' => now(),
+                        ]);
+
+                    DB::table('activity_logs')->insert([
+                        'user_id' => $booking->client_id,
+                        'action_type' => 'BOOKING_AUTO_CANCEL_PAYMENT_TIMEOUT',
+                        'description' => "Booking #{$booking->booking_id} was automatically cancelled after the 10-minute payment completion timer expired. Payment status set to Returned.",
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                });
+            }
+        }
+    }
+
+    /**
+     * List bookings belonging to the authenticated customer.
+     */
+    public function bookingsIndex(Request $request): JsonResponse
+    {
+        static::autoExpireIncompletePayments();
+        $userId = (int) $request->user()->user_id;
+
+        $query = Booking::with(['service', 'technician', 'team', 'payments', 'feedback', 'rescheduleBookings'])
+            ->where('client_id', $userId)
+            ->orderByDesc('created_at');
+
+        if ($status = $request->string('status')->trim()->value()) {
+            if ($status === 'Active') {
+                $query->whereIn('booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Payment Incomplete', 'Reschedule Notice']);
+            } elseif ($status !== 'All') {
+                $query->where('booking_status', $status);
+            }
+        }
+
+        $bookings = $query->get()->map(function ($b) {
+            $latestPay = $b->payments->sortByDesc('payment_id')->first();
+            $unitsList = is_array($b->units_data) ? $b->units_data : [];
+            $totalUnitsCount = 0;
+            if (! empty($unitsList)) {
+                foreach ($unitsList as $u) {
+                    $totalUnitsCount += max(1, (int) ($u['quantity'] ?? 1));
+                }
+            } else {
+                $totalUnitsCount = 1;
+            }
+
+            $leadUser = $b->leadTechnician ?: $b->technician;
+            $leadName = $leadUser ? trim("{$leadUser->given_name} {$leadUser->middle_name} {$leadUser->last_name}") : null;
+            $assistantUser = $b->assistantTechnician;
+            $assistantName = $assistantUser ? trim("{$assistantUser->given_name} {$assistantUser->middle_name} {$assistantUser->last_name}") : null;
+
+            $assignedTeamName = null;
+            if ($leadName && $assistantName) {
+                $assignedTeamName = "{$leadName} & {$assistantName}";
+            } elseif ($leadName) {
+                $assignedTeamName = "{$leadName} (Lead)";
+            } elseif ($b->team?->team_name) {
+                $assignedTeamName = $b->team->team_name;
+            }
+
+            return [
+                'booking_id' => $b->booking_id,
+                'client_id' => $b->client_id,
+                'service_id' => $b->service_id,
+                'service_name' => $b->service?->service_name ?? 'Aircon Service',
+                'service_description' => $b->service?->description,
+                'assigned_tech_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
+                'assigned_tech_name' => $leadName,
+                'lead_technician_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
+                'lead_technician_name' => $leadName,
+                'assistant_technician_id' => $b->assistant_technician_id,
+                'assistant_technician_name' => $assistantName,
+                'assigned_team' => [
+                    'lead' => $leadUser ? [
+                        'user_id' => (int) $leadUser->user_id,
+                        'name' => $leadName,
+                        'role' => 'Lead Technician',
+                    ] : null,
+                    'assistant' => $assistantUser ? [
+                        'user_id' => (int) $assistantUser->user_id,
+                        'name' => $assistantName,
+                        'role' => 'Assistant Technician',
+                    ] : null,
+                ],
+                'assigned_tech_contact' => $leadUser?->contact_number,
+                'assigned_team_id' => $b->assigned_team_id,
+                'assigned_team_name' => $assignedTeamName,
+                'scheduled_date' => $b->scheduled_date?->format('Y-m-d H:i:s'),
+                'scheduled_date_formatted' => $b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD',
+                'alternative_schedule' => $b->alternative_schedule,
+                'booking_status' => $b->booking_status,
+                'quotation_status' => $b->quotation_status ?? 'Pending Assessment',
+                'quotation_data' => $b->quotation_data,
+                'service_order_status' => $b->service_order_status ?? 'Pending Quotation',
+                'soa_data' => $b->soa_data,
+                'policy_acknowledged' => (bool) $b->policy_acknowledged,
+                'total_units_count' => $totalUnitsCount,
+                'units_data' => $unitsList,
+                'service_details' => $b->service_details ?? [],
+                'preferred_arrival_time' => $b->scheduled_date ? $b->scheduled_date->format('h:i A') : ($b->service_details['preferred_arrival_time'] ?? null),
+                'rate_type' => $b->service_details['rate_type'] ?? null,
+                'is_differential' => (bool) ($b->service_details['is_differential'] ?? false),
+                'service_payment_method' => $b->service_payment_method ?? 'Cash',
+                'cancellation_reason' => $b->cancellation_reason,
+                'notes' => $b->notes,
+                'created_at' => $b->created_at?->toISOString(),
+                'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
+                'payment_status' => $latestPay?->payment_status ?? 'Pending',
+                'payment_method' => $latestPay?->payment_method ?? 'GCash',
+                'booking_fee_paid' => (float) ($latestPay?->amount_paid ?? 0),
+                'reference_number' => $latestPay?->reference_number,
+                'payments' => $b->payments->map(function ($p) {
+                    return [
+                        'payment_id' => $p->payment_id,
+                        'payment_type' => $p->payment_type ?? 'Appointment Reservation Fee',
+                        'amount_paid' => (float) $p->amount_paid,
+                        'payment_method' => $p->payment_method,
+                        'payment_status' => $p->payment_status,
+                        'reference_number' => $p->reference_number,
+                        'sender_name' => $p->sender_name,
+                        'sender_number' => $p->sender_number,
+                        'receipt_image' => $p->receipt_image ? asset('storage/' . $p->receipt_image) : null,
+                        'payment_date' => $p->payment_date?->toISOString(),
+                    ];
+                }),
+                'feedback' => $b->feedback ? [
+                    'feedback_id' => $b->feedback->feedback_id,
+                    'rating' => $b->feedback->rating,
+                    'feedback' => $b->feedback->feedback,
+                    'submitted_at' => $b->feedback->submitted_at?->toISOString(),
+                ] : null,
+                'is_rescheduled' => $b->rescheduleBookings->isNotEmpty(),
+                'reschedules' => $b->rescheduleBookings->map(function ($r) {
+                    return [
+                        'reschedule_id' => $r->reschedule_id,
+                        'previous_scheduled_date' => $r->previous_scheduled_date?->format('Y-m-d H:i:s'),
+                        'previous_scheduled_date_formatted' => $r->previous_scheduled_date ? $r->previous_scheduled_date->format('M d, Y h:i A') : 'N/A',
+                        'new_scheduled_date' => $r->new_scheduled_date?->format('Y-m-d H:i:s'),
+                        'new_scheduled_date_formatted' => $r->new_scheduled_date ? $r->new_scheduled_date->format('M d, Y h:i A') : 'N/A',
+                        'reason' => $r->reschedule_reason,
+                        'fee' => (float) $r->reschedule_fee,
+                        'status' => $r->status,
+                        'created_at' => $r->created_at?->toISOString(),
+                        'created_at_formatted' => $r->created_at ? $r->created_at->format('M d, Y h:i A') : '',
+                    ];
+                }),
+            ];
+        });
+
+        return response()->json([
+            'data' => $bookings,
+            'schedule_config' => $this->getScheduleConfig(),
+        ]);
+    }
+
+    /**
+     * Store a newly created service booking request with GCash reservation fee.
+     */
+    public function storeBooking(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $userId = (int) $user->user_id;
+
+        // Auto-heal primary services in database and expire timed-out incomplete payments
+        static::ensurePrimaryServicesExist();
+        static::autoExpireIncompletePayments();
+
+        // Resolve or fallback service_id intelligently if missing or non-existent
+        $reqServiceId = (int) $request->input('service_id');
+        if (! in_array($reqServiceId, [1, 2, 3], true) || ! Service::where('service_id', $reqServiceId)->exists()) {
+            $serviceDetails = $request->input('service_details');
+            if (is_string($serviceDetails)) {
+                $serviceDetails = json_decode($serviceDetails, true) ?: [];
+            }
+            $category = $serviceDetails['category'] ?? null;
+
+            $resolvedId = match ($reqServiceId) {
+                1, 6, 7, 14 => 1,
+                2, 4, 5, 8, 15 => 2,
+                3, 16 => 3,
+                default => null,
+            };
+
+            if (! $resolvedId && $category) {
+                $resolvedId = match (true) {
+                    str_contains(strtolower($category), 'install') => 1,
+                    str_contains(strtolower($category), 'repair') || str_contains(strtolower($category), 'check') => 2,
+                    default => 3,
+                };
+            }
+
+            $resolvedId = $resolvedId ?: 1;
+            $request->merge(['service_id' => $resolvedId]);
+        }
+
+        $validated = $request->validate([
+            'service_id' => ['required', 'integer', 'exists:services,service_id'],
+            'units' => ['nullable'],
+            'service_details' => ['nullable'],
+            'aircon_brand' => ['nullable', 'string', 'max:100'],
+            'aircon_type' => ['nullable', 'string', 'max:100'],
+            'unit_quantity' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'scheduled_date' => ['required', 'date', 'after:now'],
+            'preferred_arrival_time' => ['nullable', 'string', 'max:50'],
+            'rate_type' => ['nullable', 'string', 'max:50'],
+            'is_differential' => ['nullable'],
+            'alternative_schedule' => ['nullable', 'string', 'max:150'],
+            'service_payment_method' => ['nullable', 'string', Rule::in(['Cash', 'GCash'])],
+            'booking_fee' => ['nullable', 'numeric', 'min:0'],
+            'reference_number' => ['required', 'string', 'min:5', 'max:13'],
+            'sender_name' => ['nullable', 'string', 'max:150'],
+            'sender_number' => ['nullable', 'string', 'max:50'],
+            'notes' => ['nullable', 'string', 'max:1500'],
+            'service_address' => [
+                'nullable',
+                'string',
+                'max:1000',
+                function ($attribute, $value, $fail) use ($user, $request) {
+                    $effectiveAddress = trim((string) ($value ?: $user->address));
+                    $lat = $request->filled('service_latitude') ? (float) $request->input('service_latitude') : null;
+                    $lon = $request->filled('service_longitude') ? (float) $request->input('service_longitude') : null;
+                    $eval = LocationAutocompleteController::evaluateGeospatialLocation($effectiveAddress, $lat, $lon);
+                    if (! $eval['is_within_zamboanga_city']) {
+                        $fail('This booking service is available within Zamboanga City only. Your forward-geocoded location (' . ($eval['detected_city'] ?: $effectiveAddress) . ') is outside Zamboanga City.');
+                    }
+                },
+            ],
+            'service_latitude' => ['nullable', 'numeric'],
+            'service_longitude' => ['nullable', 'numeric'],
+            'contact_number' => ['nullable', 'string', 'max:50'],
+            'additional_contact_number' => ['nullable', 'string', 'max:50'],
+            'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            'repair_media' => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,mp4,mov,webm', 'max:20480'],
+            'policy_acknowledged' => ['nullable'],
+        ]);
+
+        $receiptPath = null;
+        if ($request->hasFile('receipt_image')) {
+            $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
+        }
+
+        $repairMediaPath = null;
+        if ($request->hasFile('repair_media')) {
+            $repairMediaPath = $request->file('repair_media')->store('repair_media', 'public');
+        }
+
+        $service = Service::findOrFail($validated['service_id']);
+        $bookingFee = isset($validated['booking_fee']) && (float) $validated['booking_fee'] > 0
+            ? (float) $validated['booking_fee']
+            : 300.00;
+
+        // Parse units data
+        $units = $request->input('units');
+        if (is_string($units)) {
+            $units = json_decode($units, true) ?: [];
+        }
+        if (! is_array($units)) {
+            $units = [];
+        }
+
+        // Parse service specific details
+        $serviceDetails = $request->input('service_details');
+        if (is_string($serviceDetails)) {
+            $serviceDetails = json_decode($serviceDetails, true) ?: [];
+        }
+        if (! is_array($serviceDetails)) {
+            $serviceDetails = [];
+        }
+
+        $firstUnit = $units[0] ?? null;
+        $primaryBrand = $firstUnit['brand'] ?? $validated['aircon_brand'] ?? 'Carrier';
+        if ($primaryBrand === 'Other' && ! empty($firstUnit['other_brand'])) {
+            $primaryBrand = $firstUnit['other_brand'];
+        }
+        $primaryType = $firstUnit['unit_type'] ?? $validated['aircon_type'] ?? 'Wall-Mounted Split Type';
+        $totalQuantity = 0;
+        if (! empty($units)) {
+            foreach ($units as $u) {
+                $totalQuantity += max(1, (int) ($u['quantity'] ?? 1));
+            }
+        } else {
+            $totalQuantity = max(1, (int) ($validated['unit_quantity'] ?? 1));
+        }
+
+        DB::beginTransaction();
+        try {
+            // 1. Update customer unit details & address
+            CustomerUnitDetail::updateOrCreate(
+                ['user_id' => $userId],
+                [
+                    'aircon_brand' => $primaryBrand,
+                    'aircon_type' => $primaryType,
+                    'unit_quantity' => $totalQuantity,
+                ]
+            );
+
+            $updateData = [];
+            if (! empty($validated['service_address']) && $validated['service_address'] !== $user->address) {
+                $updateData['address'] = $validated['service_address'];
+            }
+            if (! empty($validated['contact_number']) && $validated['contact_number'] !== $user->contact_number) {
+                $updateData['contact_number'] = $validated['contact_number'];
+            }
+            if (! empty($updateData)) {
+                $updateData['updated_at'] = now();
+                DB::table('users')->where('user_id', $userId)->update($updateData);
+            }
+
+            // 2. Validate Sunday rest day & 5-slot daily capacity before creating Booking
+            $scheduledDateTime = Carbon::parse($validated['scheduled_date']);
+
+            if ($scheduledDateTime->isSunday()) {
+                throw ValidationException::withMessages([
+                    'scheduled_date' => ['Bookings are not available on Sundays as it is a rest day for our workers. Please select a date from Monday to Saturday.'],
+                ]);
+            }
+
+            if (! empty($validated['alternative_schedule']) && preg_match('/^(\d{4}-\d{2}-\d{2})/', $validated['alternative_schedule'], $altMatch)) {
+                $altCarbon = Carbon::parse($altMatch[1]);
+                if ($altCarbon->isSunday()) {
+                    throw ValidationException::withMessages([
+                        'alternative_schedule' => ['Alternative schedule cannot fall on a Sunday as it is a rest day for our workers.'],
+                    ]);
+                }
+            }
+
+            $maxDailySlots = (int) config('booking_schedule.max_daily_slots', 5);
+            $targetDateYmd = $scheduledDateTime->format('Y-m-d');
+            $activeBookingsOnDate = Booking::whereDate('scheduled_date', $targetDateYmd)
+                ->whereNotIn('booking_status', ['Cancelled', 'Reschedule Notice'])
+                ->lockForUpdate()
+                ->count();
+
+            if ($activeBookingsOnDate >= $maxDailySlots) {
+                throw ValidationException::withMessages([
+                    'scheduled_date' => ["All {$maxDailySlots} daily booking slots for {$scheduledDateTime->format('M d, Y')} are already full. This date is unavailable unless a booking is cancelled or rescheduled."],
+                ]);
+            }
+
+            $preferredArrivalTime = $scheduledDateTime->format('h:i A');
+
+            // Determine rate type based on schedule configuration
+            $diffConfig = config('booking_schedule.differential', ['start_time' => '00:00', 'end_time' => '05:00']);
+            $timeMinutes = ($scheduledDateTime->hour * 60) + $scheduledDateTime->minute;
+            $diffStartParts = explode(':', $diffConfig['start_time'] ?? '00:00');
+            $diffStartMins = ((int) $diffStartParts[0] * 60) + (int) ($diffStartParts[1] ?? 0);
+            $diffEndParts = explode(':', $diffConfig['end_time'] ?? '05:00');
+            $diffEndMins = ((int) $diffEndParts[0] * 60) + (int) ($diffEndParts[1] ?? 0);
+
+            $isDiff = ($timeMinutes >= $diffStartMins && $timeMinutes <= $diffEndMins);
+            $rateType = $isDiff ? 'Differential Rate' : 'Regular Rate';
+
+            $serviceDetails['preferred_arrival_time'] = $preferredArrivalTime;
+            $serviceDetails['preferred_arrival_time_raw'] = $scheduledDateTime->format('H:i');
+            $serviceDetails['rate_type'] = $rateType;
+            $serviceDetails['is_differential'] = $isDiff;
+            if ($repairMediaPath) {
+                $serviceDetails['repair_media_path'] = $repairMediaPath;
+                $serviceDetails['repair_media_url'] = asset('storage/' . $repairMediaPath);
+            }
+            if ((int) $service->service_id === 1 && ! array_key_exists('company_supplied_unit', $serviceDetails)) {
+                $serviceDetails['company_supplied_unit'] = (($serviceDetails['unit_available'] ?? 'Yes') === 'No');
+            }
+
+            $bookingNotes = $validated['notes'] ?? null;
+            if (! empty($validated['additional_contact_number'])) {
+                $serviceDetails['additional_contact_number'] = $validated['additional_contact_number'];
+                $altContactNote = 'Additional Contact: ' . $validated['additional_contact_number'];
+                $bookingNotes = $bookingNotes ? ($bookingNotes . ' | ' . $altContactNote) : $altContactNote;
+            }
+
+            $booking = Booking::create([
+                'client_id' => $userId,
+                'service_id' => $service->service_id,
+                'assigned_tech_id' => null,
+                'scheduled_date' => $scheduledDateTime,
+                'alternative_schedule' => $validated['alternative_schedule'] ?? null,
+                'booking_status' => 'Pending',
+                'quotation_status' => 'Pending Assessment',
+                'service_order_status' => 'Pending Quotation',
+                'service_payment_method' => $validated['service_payment_method'] ?? 'Cash',
+                'notes' => $bookingNotes,
+                'units_data' => $units,
+                'service_details' => $serviceDetails,
+                'policy_acknowledged' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // 3. Create Payment record for Appointment Reservation Fee
+            Payment::create([
+                'booking_id' => $booking->booking_id,
+                'booking_price' => 0.00,
+                'unit_price' => 0.00,
+                'spare_parts_price' => 0.00,
+                'amount_paid' => $bookingFee,
+                'payment_status' => 'Paid',
+                'payment_method' => 'GCash',
+                'payment_type' => 'Appointment Reservation Fee',
+                'reference_number' => $validated['reference_number'],
+                'sender_name' => $validated['sender_name'] ?? $user->name,
+                'sender_number' => $validated['sender_number'] ?? $user->contact_number,
+                'receipt_image' => $receiptPath,
+                'notes' => 'Appointment Reservation Fee (Schedule Security)',
+                'payment_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // 4. Activity Log
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'BOOKING_CREATE',
+                'description' => sprintf(
+                    'Customer submitted service request #%d for %s with %d unit(s) scheduled on %s (%s). GCash Ref: %s.',
+                    $booking->booking_id,
+                    $service->service_name,
+                    $totalQuantity,
+                    $scheduledDateTime->format('M d, Y h:i A'),
+                    $rateType,
+                    $validated['reference_number']
+                ),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Your service request and appointment reservation have been received! Our staff will review your request and prepare an official quotation.',
+                'booking_id' => $booking->booking_id,
+                'booking' => $booking->fresh(['service']),
+            ], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            if ($receiptPath) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Respond to an official quotation (Accept, Decline, or Request Clarification).
+     */
+    public function respondQuotation(Request $request, int $bookingId): JsonResponse
+    {
+        $userId = (int) $request->user()->user_id;
+
+        $booking = Booking::where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'action' => ['required', 'string', Rule::in(['accept', 'decline', 'clarify'])],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $action = $validated['action'];
+        $notes = $validated['notes'] ?? null;
+
+        DB::beginTransaction();
+        try {
+            if ($action === 'accept') {
+                $booking->update([
+                    'quotation_status' => 'Accepted',
+                    'service_order_status' => 'Service Order Generated',
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . '[Customer]: Accepted quotation on ' . now()->format('M d, Y h:i A') . ($notes ? ". Customer Notes: {$notes}" : '')),
+                    'updated_at' => now(),
+                ]);
+                $msg = 'You have accepted the official quotation! A Service Order has been generated for technician dispatch.';
+            } elseif ($action === 'decline') {
+                $booking->update([
+                    'quotation_status' => 'Declined',
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . '[Customer]: Declined quotation on ' . now()->format('M d, Y h:i A') . ($notes ? ". Reason: {$notes}" : '')),
+                    'updated_at' => now(),
+                ]);
+                $msg = 'You have declined the quotation. Our customer representative will get in touch with you.';
+            } else {
+                $booking->update([
+                    'quotation_status' => 'Clarification Requested',
+                    'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . '[Customer Clarification]: ' . ($notes ?: 'Customer requested clarification regarding quotation.')),
+                    'updated_at' => now(),
+                ]);
+                $msg = 'Your quotation clarification request has been submitted to our team.';
+            }
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'QUOTATION_' . strtoupper($action),
+                'description' => "Customer {$action}ed quotation for Booking #{$booking->booking_id}.",
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => $msg,
+                'booking' => $booking->fresh(['service', 'technician', 'team', 'payments']),
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Complete an incomplete payment within the 10-minute deadline set by Manager.
+     */
+    public function completePayment(Request $request, int $bookingId): JsonResponse
+    {
+        static::autoExpireIncompletePayments();
+        $userId = (int) $request->user()->user_id;
+
+        $booking = Booking::where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        if ($booking->booking_status !== 'Payment Incomplete') {
+            throw ValidationException::withMessages([
+                'booking' => ['This booking is no longer awaiting payment completion (it may have expired or already been updated).'],
+            ]);
+        }
+
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        if (! empty($details['payment_due_at']) && now()->greaterThanOrEqualTo(Carbon::parse($details['payment_due_at']))) {
+            static::autoExpireIncompletePayments();
+            throw ValidationException::withMessages([
+                'booking' => ['The 10-minute payment window has expired. Your booking was automatically cancelled and your payment marked for return.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'reference_number' => ['required', 'string', 'min:5', 'max:13'],
+            'amount_paid' => ['nullable', 'numeric', 'min:1'],
+            'sender_name' => ['nullable', 'string', 'max:150'],
+            'sender_number' => ['nullable', 'string', 'max:50'],
+            'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+        ]);
+
+        $receiptPath = null;
+        if ($request->hasFile('receipt_image')) {
+            $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
+        }
+
+        DB::beginTransaction();
+        try {
+            $details['payment_completed_at'] = now()->toISOString();
+            unset($details['payment_due_at']);
+
+            $booking->update([
+                'booking_status' => 'Pending',
+                'service_details' => $details,
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "[Customer]: Completed reservation payment within 10-minute window (Ref: {$validated['reference_number']})."),
+                'updated_at' => now(),
+            ]);
+
+            Payment::create([
+                'booking_id' => $booking->booking_id,
+                'booking_price' => 0.00,
+                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : 300.00,
+                'payment_status' => 'Paid',
+                'payment_method' => 'GCash',
+                'payment_type' => 'Appointment Reservation Fee (Completed)',
+                'reference_number' => $validated['reference_number'],
+                'sender_name' => $validated['sender_name'] ?? $request->user()->name,
+                'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
+                'receipt_image' => $receiptPath,
+                'notes' => 'Completed payment within 10-minute deadline.',
+                'payment_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'BOOKING_PAYMENT_COMPLETED',
+                'description' => "Customer completed payment for Booking #{$booking->booking_id} within the 10-minute deadline (GCash Ref: {$validated['reference_number']}). Status reset to Pending.",
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Payment submitted successfully! Your booking has been returned to Pending for manager approval.',
+                'booking' => $booking->fresh(['service', 'technician', 'payments']),
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            if ($receiptPath) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Reschedule a booking (requires GCash rescheduling fee unless Manager set Reschedule Notice).
+     */
+    public function reschedule(Request $request, int $bookingId): JsonResponse
+    {
+        static::autoExpireIncompletePayments();
+        $userId = (int) $request->user()->user_id;
+
+        $booking = Booking::where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        if (in_array($booking->booking_status, ['Completed', 'Cancelled'], true)) {
+            throw ValidationException::withMessages([
+                'booking' => ['Completed or Cancelled bookings cannot be rescheduled.'],
+            ]);
+        }
+
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        $isManagerRescheduleNotice = $booking->booking_status === 'Reschedule Notice'
+            || ! empty($details['reschedule_notice_by_manager']);
+
+        $validated = $request->validate([
+            'new_scheduled_date' => ['required', 'date', 'after:now'],
+            'reschedule_fee' => ['nullable', 'numeric', 'min:0'],
+            'reference_number' => $isManagerRescheduleNotice
+                ? ['nullable', 'string', 'max:13']
+                : ['required', 'string', 'min:5', 'max:13'],
+            'sender_name' => ['nullable', 'string', 'max:150'],
+            'sender_number' => ['nullable', 'string', 'max:50'],
+            'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            'reschedule_reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $newDate = Carbon::parse($validated['new_scheduled_date']);
+
+        if ($newDate->isSunday()) {
+            throw ValidationException::withMessages([
+                'new_scheduled_date' => ['Rescheduling is not available on Sundays as it is a rest day for our workers. Please select a date from Monday to Saturday.'],
+            ]);
+        }
+
+        $maxDailySlots = (int) config('booking_schedule.max_daily_slots', 5);
+        $targetDateYmd = $newDate->format('Y-m-d');
+        $activeBookingsOnDate = Booking::where('booking_id', '!=', $booking->booking_id)
+            ->whereDate('scheduled_date', $targetDateYmd)
+            ->whereNotIn('booking_status', ['Cancelled', 'Reschedule Notice'])
+            ->count();
+
+        if ($activeBookingsOnDate >= $maxDailySlots) {
+            throw ValidationException::withMessages([
+                'new_scheduled_date' => ["All {$maxDailySlots} daily booking slots for {$newDate->format('M d, Y')} are already full. This date is unavailable unless a booking is cancelled or rescheduled."],
+            ]);
+        }
+
+        // Enforce half-day slot blocking on the original date if triggered by Manager's Reschedule Notice
+        if ($isManagerRescheduleNotice) {
+            $blockedDate = $details['reschedule_notice_original_date']
+                ?? ($booking->scheduled_date ? $booking->scheduled_date->format('Y-m-d') : null);
+            $blockedPeriod = $details['reschedule_notice_blocked_period']
+                ?? (($booking->scheduled_date && (int) $booking->scheduled_date->hour < 13) ? 'morning_noon' : 'afternoon_evening');
+
+            if ($blockedDate && $newDate->format('Y-m-d') === $blockedDate) {
+                $newHour = (int) $newDate->hour;
+                if ($blockedPeriod === 'morning_noon' && $newHour < 13) {
+                    throw ValidationException::withMessages([
+                        'new_scheduled_date' => ['Morning and noon slots are unavailable on this date per the reschedule notice. Please choose an afternoon slot or another date.'],
+                    ]);
+                }
+                if ($blockedPeriod === 'afternoon_evening' && $newHour >= 13) {
+                    throw ValidationException::withMessages([
+                        'new_scheduled_date' => ['Afternoon and evening slots are unavailable on this date per the reschedule notice. Please choose a morning/noon slot or another date.'],
+                    ]);
+                }
+            }
+        }
+
+        $receiptPath = null;
+        if ($request->hasFile('receipt_image')) {
+            $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
+        }
+
+        $rescheduleFee = $isManagerRescheduleNotice
+            ? 0.00
+            : (isset($validated['reschedule_fee']) && (float) $validated['reschedule_fee'] > 0
+                ? (float) $validated['reschedule_fee']
+                : 150.00);
+
+        DB::beginTransaction();
+        try {
+            $oldDate = $booking->scheduled_date;
+            $oldDateStr = $oldDate ? $oldDate->format('M d, Y h:i A') : 'N/A';
+
+            $diffConfig = config('booking_schedule.differential', ['start_time' => '00:00', 'end_time' => '05:00']);
+            $timeMinutes = ($newDate->hour * 60) + $newDate->minute;
+            $diffStartParts = explode(':', $diffConfig['start_time'] ?? '00:00');
+            $diffStartMins = ((int) $diffStartParts[0] * 60) + (int) ($diffStartParts[1] ?? 0);
+            $diffEndParts = explode(':', $diffConfig['end_time'] ?? '05:00');
+            $diffEndMins = ((int) $diffEndParts[0] * 60) + (int) ($diffEndParts[1] ?? 0);
+            $isDiff = ($timeMinutes >= $diffStartMins && $timeMinutes <= $diffEndMins);
+            $rateType = $isDiff ? 'Differential Rate' : 'Regular Rate';
+
+            $details['preferred_arrival_time'] = $newDate->format('h:i A');
+            $details['preferred_arrival_time_raw'] = $newDate->format('H:i');
+            $details['rate_type'] = $rateType;
+            $details['is_differential'] = $isDiff;
+            unset(
+                $details['reschedule_notice_by_manager'],
+                $details['reschedule_notice_original_date'],
+                $details['reschedule_notice_blocked_period'],
+                $details['reschedule_notice_message']
+            );
+
+            $booking->update([
+                'scheduled_date' => $newDate,
+                'booking_status' => 'Pending', // Resets to Pending so Admin/Manager can re-dispatch
+                'assigned_tech_id' => null,
+                'lead_technician_id' => null,
+                'assistant_technician_id' => null,
+                'assigned_team_id' => null,
+                'assigned_by' => null,
+                'assigned_at' => null,
+                'service_details' => $details,
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "Rescheduled from {$oldDateStr} to " . $newDate->format('M d, Y h:i A') . " ({$rateType})" . ($isManagerRescheduleNotice ? ' [Free via Manager Reschedule Notice]' : '') . ". Reason: " . ($validated['reschedule_reason'] ?? 'Customer request')),
+                'updated_at' => now(),
+            ]);
+
+            $paymentId = null;
+            if (! $isManagerRescheduleNotice && $rescheduleFee > 0) {
+                $payment = Payment::create([
+                    'booking_id' => $booking->booking_id,
+                    'booking_price' => 0.00,
+                    'amount_paid' => $rescheduleFee,
+                    'payment_status' => 'Paid',
+                    'payment_method' => 'GCash',
+                    'payment_type' => 'Reschedule Fee',
+                    'reference_number' => $validated['reference_number'],
+                    'sender_name' => $validated['sender_name'] ?? $request->user()->name,
+                    'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
+                    'receipt_image' => $receiptPath,
+                    'notes' => 'Rescheduling Fee payment',
+                    'payment_date' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                $paymentId = $payment->payment_id;
+            }
+
+            $reschedule = RescheduleBooking::create([
+                'booking_id' => $booking->booking_id,
+                'client_id' => $userId,
+                'previous_scheduled_date' => $oldDate,
+                'new_scheduled_date' => $newDate,
+                'reschedule_reason' => $validated['reschedule_reason'] ?? ($isManagerRescheduleNotice ? 'Manager Reschedule Notice' : 'Customer request'),
+                'reschedule_fee' => $rescheduleFee,
+                'payment_id' => $paymentId,
+                'status' => 'Pending',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'BOOKING_RESCHEDULE',
+                'description' => sprintf(
+                    'Customer rescheduled booking #%d to %s (%s). Reschedule record #%d.',
+                    $booking->booking_id,
+                    $newDate->format('M d, Y h:i A'),
+                    $isManagerRescheduleNotice ? 'Free Reschedule Notice' : ('GCash Ref: ' . ($validated['reference_number'] ?? 'N/A')),
+                    $reschedule->reschedule_id
+                ),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Booking rescheduled successfully! Status is set to Pending for manager confirmation.',
+                'booking' => $booking->fresh(['service', 'technician', 'payments', 'rescheduleBookings']),
+                'reschedule' => $reschedule,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            if ($receiptPath) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Cancel a pending or active booking.
+     */
+    public function cancel(Request $request, int $bookingId): JsonResponse
+    {
+        $userId = (int) $request->user()->user_id;
+
+        $booking = Booking::where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        if (in_array($booking->booking_status, ['Completed', 'Cancelled'], true)) {
+            throw ValidationException::withMessages([
+                'booking' => ['This booking is already completed or cancelled.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'cancellation_reason' => ['required', 'string', 'min:5', 'max:1000'],
+        ]);
+
+        $booking->update([
+            'booking_status' => 'Cancelled',
+            'cancellation_reason' => $validated['cancellation_reason'],
+            'updated_at' => now(),
+        ]);
+
+        DB::table('activity_logs')->insert([
+            'user_id' => $userId,
+            'action_type' => 'BOOKING_CANCEL',
+            'description' => sprintf(
+                'Customer cancelled booking #%d. Reason: %s',
+                $booking->booking_id,
+                $validated['cancellation_reason']
+            ),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Booking has been cancelled.',
+            'booking' => $booking->fresh(['service', 'technician']),
+        ]);
+    }
+
+    /**
+     * Build the dynamic booking schedule and arrival time slots.
+     */
+    private function getScheduleConfig(): array
+    {
+        static::autoExpireIncompletePayments();
+
+        $config = config('booking_schedule', []);
+        $interval = (int) ($config['interval_minutes'] ?? 30);
+        $maxDailySlots = (int) ($config['max_daily_slots'] ?? 5);
+        $maxJobsPerTeamPerDay = (int) ($config['max_jobs_per_team_per_day'] ?? 1);
+        $closedDaysOfWeek = $config['closed_days_of_week'] ?? [0];
+
+        $generateSlots = function (string $startTime, string $endTime, string $rateType, string $badge, bool $isDifferential) use ($interval) {
+            $slots = [];
+            $startMinutes = $this->timeStringToMinutes($startTime);
+            $endMinutes = $this->timeStringToMinutes($endTime);
+
+            $curr = $startMinutes;
+            while ($curr <= $endMinutes) {
+                $hours = intdiv($curr, 60);
+                $mins = $curr % 60;
+                $time24 = sprintf('%02d:%02d', $hours, $mins);
+                $dateTime = Carbon::createFromTime($hours, $mins, 0);
+                $label = $dateTime->format('h:i A');
+
+                $slots[] = [
+                    'id' => $time24,
+                    'time' => $time24,
+                    'label' => $label,
+                    'rate_type' => $rateType,
+                    'badge' => $badge,
+                    'is_differential' => $isDifferential,
+                ];
+
+                $curr += $interval;
+            }
+
+            return $slots;
+        };
+
+        $regular = $config['regular'] ?? [
+            'key' => 'regular',
+            'title' => 'Regular Hours',
+            'subtitle' => 'Standard Business Hours (08:00 AM – 05:00 PM)',
+            'rate_name' => 'Regular Rate',
+            'badge' => 'Regular',
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+            'notice_title' => 'Regular Rate',
+            'notice_message' => 'Standard service rate applies.',
+            'is_differential' => false,
+        ];
+
+        $differential = $config['differential'] ?? [
+            'key' => 'differential',
+            'title' => 'Differential Hours',
+            'subtitle' => 'Early Morning (Kadlawon / 12:00 AM – 05:00 AM)',
+            'rate_name' => 'Differential Rate',
+            'badge' => 'Differential',
+            'start_time' => '00:00',
+            'end_time' => '05:00',
+            'notice_title' => 'Differential Rate Applies',
+            'notice_message' => 'An additional differential charge will be included in your quotation.',
+            'is_differential' => true,
+        ];
+
+        $regular['slots'] = $generateSlots(
+            $regular['start_time'] ?? '08:00',
+            $regular['end_time'] ?? '17:00',
+            'regular',
+            $regular['badge'] ?? 'Regular',
+            false
+        );
+
+        $differential['slots'] = $generateSlots(
+            $differential['start_time'] ?? '00:00',
+            $differential['end_time'] ?? '05:00',
+            'differential',
+            $differential['badge'] ?? 'Differential',
+            true
+        );
+
+        // Compute daily active slot counts and booked times from today onwards
+        // Active bookings are those not in 'Cancelled' or 'Reschedule Notice'
+        $activeBookings = DB::table('bookings')
+            ->whereNotNull('scheduled_date')
+            ->whereDate('scheduled_date', '>=', now()->toDateString())
+            ->whereNotIn('booking_status', ['Cancelled', 'Reschedule Notice'])
+            ->get(['booking_id', 'scheduled_date', 'booking_status']);
+
+        $dailySlotCounts = [];
+        $bookingsByDate = [];
+        foreach ($activeBookings as $b) {
+            $dt = Carbon::parse($b->scheduled_date);
+            $ymd = $dt->format('Y-m-d');
+            $time24 = $dt->format('H:i');
+
+            $dailySlotCounts[$ymd] = ($dailySlotCounts[$ymd] ?? 0) + 1;
+            if (! isset($bookingsByDate[$ymd])) {
+                $bookingsByDate[$ymd] = [];
+            }
+            $bookingsByDate[$ymd][] = [
+                'booking_id' => (int) $b->booking_id,
+                'time' => $time24,
+                'status' => $b->booking_status,
+            ];
+        }
+
+        $fullDates = [];
+        foreach ($dailySlotCounts as $ymd => $count) {
+            if ($count >= $maxDailySlots) {
+                $fullDates[] = $ymd;
+            }
+        }
+
+        return [
+            'interval_minutes' => $interval,
+            'max_daily_slots' => $maxDailySlots,
+            'max_jobs_per_team_per_day' => $maxJobsPerTeamPerDay,
+            'closed_days_of_week' => $closedDaysOfWeek,
+            'daily_slot_counts' => $dailySlotCounts,
+            'bookings_by_date' => $bookingsByDate,
+            'full_dates' => $fullDates,
+            'regular' => $regular,
+            'differential' => $differential,
+        ];
+    }
+
+    private function timeStringToMinutes(string $timeStr): int
+    {
+        $parts = explode(':', $timeStr);
+        $hours = isset($parts[0]) ? (int) $parts[0] : 0;
+        $mins = isset($parts[1]) ? (int) $parts[1] : 0;
+        return ($hours * 60) + $mins;
+    }
+}
+
