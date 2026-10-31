@@ -3,6 +3,7 @@ import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import {
     SUPER_ADMIN_ENDPOINTS,
+    TOOLS_MAN_ENDPOINTS,
     extractErrorMessage,
     formatDateTime,
 } from "../../utils/superAdmin";
@@ -60,7 +61,7 @@ const ZapIcon = ({ size = 14, color = "currentColor" }) => (
     </svg>
 );
 
-export default function Checklists({ addToast, onDataChanged, endpoints, currentUser }) {
+export default function Checklists({ addToast, onDataChanged, endpoints, currentUser, isToolsMan: propIsToolsMan }) {
     const ep = endpoints || SUPER_ADMIN_ENDPOINTS;
     let authUser = currentUser || null;
     if (!authUser && typeof window !== 'undefined') {
@@ -75,12 +76,27 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
             }
         } catch (e) {}
     }
+    const roleId = Number(authUser?.role_id ?? 0);
+    const isToolsMan = Boolean(propIsToolsMan || roleId === 4 || ep === TOOLS_MAN_ENDPOINTS);
+
+    const visibleTabs = useMemo(() => {
+        return isToolsMan
+            ? ["All", "Pending", "Approved", "Completed"]
+            : tabs;
+    }, [isToolsMan]);
+
     const userId = authUser?.user_id || authUser?.id || null;
     const userStorageKey = useMemo(() => {
         return userId ? `checklists_recent_u${userId}` : 'checklists_recent_guest';
     }, [userId]);
 
     const [tab, setTab] = useState("All");
+
+    useEffect(() => {
+        if (isToolsMan && tab === "History") {
+            setTab("All");
+        }
+    }, [isToolsMan, tab]);
     const [checklists, setChecklists] = useState([]);
     const [catalog, setCatalog] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -738,282 +754,6 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                 </div>
             </div>
 
-            {/* Recent & Quick Access Field */}
-            {recentChecklists.length > 0 && (
-                <div
-                    className="card"
-                    style={{
-                        padding: "16px 20px",
-                        marginBottom: 20,
-                        background: "linear-gradient(to right, #FFFFFF, #F8FAFC)",
-                        border: "1px solid #E2E8F0",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
-                    }}
-                >
-                    <div
-                        style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            marginBottom: showRecentSection ? 14 : 0,
-                            flexWrap: "wrap",
-                            gap: 8,
-                        }}
-                    >
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span
-                                style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    width: 28,
-                                    height: 28,
-                                    borderRadius: 7,
-                                    background: "#EFF6FF",
-                                    color: "#3F7DFF",
-                                }}
-                            >
-                                <ZapIcon size={14} color="#3F7DFF" />
-                            </span>
-                            <div>
-                                <h3
-                                    style={{
-                                        margin: 0,
-                                        fontSize: 14,
-                                        fontWeight: 700,
-                                        color: "#1E2F5F",
-                                        letterSpacing: "-0.01em",
-                                    }}
-                                >
-                                    Recent Checklists & Quick Access
-                                </h3>
-                                <p
-                                    style={{
-                                        margin: 0,
-                                        fontSize: 11,
-                                        color: "#6B7280",
-                                    }}
-                                >
-                                    Fast 1-click access to your recently inspected, dispatched, or active workflows
-                                </p>
-                            </div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            {recentChecklistIds.length > 0 && (
-                                <button
-                                    onClick={handleClearRecent}
-                                    style={{
-                                        background: "transparent",
-                                        border: "none",
-                                        color: "#9CA3AF",
-                                        fontSize: 11,
-                                        cursor: "pointer",
-                                        textDecoration: "underline",
-                                        padding: "4px 6px",
-                                    }}
-                                >
-                                    Clear History
-                                </button>
-                            )}
-                            <button
-                                onClick={() => setShowRecentSection((prev) => !prev)}
-                                style={{
-                                    background: "#F1F5F9",
-                                    border: "1px solid #CBD5E1",
-                                    borderRadius: 6,
-                                    padding: "4px 10px",
-                                    fontSize: 11,
-                                    fontWeight: 600,
-                                    color: "#475569",
-                                    cursor: "pointer",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: 4,
-                                }}
-                            >
-                                {showRecentSection ? "Hide ▲" : "Show Recent ▼"}
-                            </button>
-                        </div>
-                    </div>
-
-                    {showRecentSection && (
-                        <div
-                            style={{
-                                display: "grid",
-                                gridTemplateColumns:
-                                    "repeat(auto-fill, minmax(240px, 1fr))",
-                                gap: 12,
-                            }}
-                        >
-                            {recentChecklists.map((cl) => {
-                                const clientName =
-                                    cl.client_name ||
-                                    cl.booking?.client_name ||
-                                    "Customer";
-                                const serviceName =
-                                    cl.service_name ||
-                                    cl.booking?.service_name ||
-                                    "Aircon Service";
-
-                                return (
-                                    <div
-                                        key={cl.checklist_id}
-                                        onClick={() => handleOpenManageModal(cl)}
-                                        style={{
-                                            background: "#FFFFFF",
-                                            border: "1px solid #E2E8F0",
-                                            borderRadius: 8,
-                                            padding: "12px 14px",
-                                            cursor: "pointer",
-                                            transition:
-                                                "transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: 8,
-                                            position: "relative",
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.transform =
-                                                "translateY(-2px)";
-                                            e.currentTarget.style.borderColor =
-                                                "#3F7DFF";
-                                            e.currentTarget.style.boxShadow =
-                                                "0 6px 16px rgba(63,125,255,0.09)";
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.transform =
-                                                "translateY(0)";
-                                            e.currentTarget.style.borderColor =
-                                                "#E2E8F0";
-                                            e.currentTarget.style.boxShadow =
-                                                "none";
-                                        }}
-                                    >
-                                        <div
-                                            style={{
-                                                display: "flex",
-                                                justifyContent:
-                                                    "space-between",
-                                                alignItems: "center",
-                                            }}
-                                        >
-                                            <div
-                                                style={{
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: 6,
-                                                }}
-                                            >
-                                                <span
-                                                    style={{
-                                                        fontSize: 13,
-                                                        fontWeight: 700,
-                                                        color: "#3F7DFF",
-                                                    }}
-                                                >
-                                                    #{cl.checklist_id}
-                                                </span>
-                                                <span
-                                                    style={{
-                                                        fontSize: 11,
-                                                        color: "#6B7280",
-                                                    }}
-                                                >
-                                                    Booking #{cl.booking_id}
-                                                </span>
-                                            </div>
-                                            <StatusBadge status={cl.status} />
-                                        </div>
-
-                                        <div>
-                                            <div
-                                                style={{
-                                                    fontSize: 13,
-                                                    fontWeight: 600,
-                                                    color: "#1E2F5F",
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                                title={clientName}
-                                            >
-                                                {clientName}
-                                            </div>
-                                            <div
-                                                style={{
-                                                    fontSize: 11,
-                                                    color: "#4B5563",
-                                                    marginTop: 2,
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                    whiteSpace: "nowrap",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    gap: 4,
-                                                }}
-                                            >
-                                                <WrenchIcon size={12} color="#64748B" />
-                                                <span>{serviceName}</span>
-                                            </div>
-                                        </div>
-
-                                        <div
-                                            style={{
-                                                display: "flex",
-                                                justifyContent:
-                                                    "space-between",
-                                                alignItems: "center",
-                                                marginTop: 2,
-                                                paddingTop: 8,
-                                                borderTop: "1px dashed #F1F5F9",
-                                            }}
-                                        >
-                                            <span
-                                                style={{
-                                                    fontSize: 11,
-                                                    color: cl.team_name
-                                                        ? "#1D4ED8"
-                                                        : "#9CA3AF",
-                                                    fontWeight: 500,
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                    whiteSpace: "nowrap",
-                                                    maxWidth: 130,
-                                                    display: "inline-flex",
-                                                    alignItems: "center",
-                                                    gap: 4,
-                                                }}
-                                            >
-                                                {cl.team_name ? (
-                                                    <>
-                                                        <UsersIcon size={12} color="#1D4ED8" />
-                                                        <span>{cl.team_name}</span>
-                                                    </>
-                                                ) : (
-                                                    "No team"
-                                                )}
-                                            </span>
-                                            <span
-                                                style={{
-                                                    fontSize: 11,
-                                                    color: "#3F7DFF",
-                                                    fontWeight: 600,
-                                                    display: "inline-flex",
-                                                    alignItems: "center",
-                                                    gap: 2,
-                                                }}
-                                            >
-                                                Inspect ↗
-                                            </span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
-
             {/* Filter Tabs & Search Bar Toolbar */}
             <div
                 style={{
@@ -1030,7 +770,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                     className="tab-bar"
                     style={{ margin: 0, display: "inline-flex", flexWrap: "wrap" }}
                 >
-                    {tabs.map((t) => {
+                    {visibleTabs.map((t) => {
                         let count = 0;
                         if (t === "All") count = checklists.length;
                         else if (t === "History")
@@ -1167,7 +907,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
             </div>
 
             {/* History Tab Explanatory Banner */}
-            {tab === "History" && (
+            {!isToolsMan && tab === "History" && (
                 <div
                     style={{
                         background: "#F8FAFC",

@@ -49,6 +49,8 @@ export default function Dashboard() {
         tools: (
             <Tools
                 addToast={addToast}
+                onNavigate={onNavigate}
+                onDataChanged={handleDataChanged}
             />
         ),
         certificates: (

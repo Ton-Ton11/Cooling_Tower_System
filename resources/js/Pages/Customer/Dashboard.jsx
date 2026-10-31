@@ -23,7 +23,7 @@ const navItems = [
     { id: "dashboard", label: "Dashboard", icon: ic.dashboard },
     { id: "book", label: "Book a Service", icon: ic.book },
     { id: "bookings", label: "My Bookings", icon: ic.bookings },
-    { id: "history", label: "Service History", icon: ic.history },
+    { id: "service_history", label: "Service History", icon: ic.history },
     { id: "warranty", label: "AC Unit Warranty Tracking", icon: ic.warranty },
     { id: "complaints", label: "Support & Complaints", icon: ic.complaints },
     { id: "announcements", label: "Announcements", icon: ic.announcements },
@@ -66,7 +66,7 @@ export default function CustomerDashboard() {
                 defaultTab="Pending"
             />
         ),
-        history: (
+        service_history: (
             <ServiceHistory
                 addToast={addToast}
             />

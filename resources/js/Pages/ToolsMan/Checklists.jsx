@@ -6,6 +6,7 @@ export default function ToolsManChecklists(props) {
         <Checklists
             {...props}
             endpoints={props.endpoints || TOOLS_MAN_ENDPOINTS}
+            isToolsMan={true}
         />
     );
 }

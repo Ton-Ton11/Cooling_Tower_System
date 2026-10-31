@@ -480,7 +480,22 @@ abstract class SuperAdminBaseController extends Controller
 
     protected function mapBookings(Collection $rows): Collection
     {
-        return $rows->map(function ($row) {
+        if ($rows->isEmpty()) {
+            return collect();
+        }
+
+        $bookingIds = $rows->pluck('booking_id')->filter()->unique()->all();
+        $latestChecklistByBooking = collect();
+        if (! empty($bookingIds) && \Illuminate\Support\Facades\Schema::hasTable('tool_checklists')) {
+            $latestChecklistByBooking = DB::table('tool_checklists')
+                ->whereIn('booking_id', $bookingIds)
+                ->orderByDesc('checklist_id')
+                ->get(['checklist_id', 'booking_id', 'status'])
+                ->groupBy('booking_id')
+                ->map(fn ($items) => $items->first());
+        }
+
+        return $rows->map(function ($row) use ($latestChecklistByBooking) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id ?? null;
             $leadName = $row->lead_tech_user_id
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -521,6 +536,8 @@ abstract class SuperAdminBaseController extends Controller
                     ? json_decode($row->quotation_data, true)
                     : $row->quotation_data;
             }
+
+            $latestChecklist = $latestChecklistByBooking->get($row->booking_id);
 
             return [
                 'booking_id' => (int) $row->booking_id,
@@ -574,6 +591,8 @@ abstract class SuperAdminBaseController extends Controller
                 'reference_number' => $row->payment_reference_number ?? null,
                 'amount_paid' => $row->amount_paid !== null ? (float) $row->amount_paid : null,
                 'payment_date' => $row->payment_date,
+                'checklist_id' => $latestChecklist ? (int) $latestChecklist->checklist_id : null,
+                'checklist_status' => $latestChecklist->status ?? null,
                 'service_report' => $row->service_report_id ? [
                     'report_id' => (int) $row->service_report_id,
                     'status' => $row->service_report_status,
@@ -1427,7 +1446,9 @@ abstract class SuperAdminBaseController extends Controller
             $serviceDetails['payment_due_at'],
             $serviceDetails['reschedule_notice_by_manager'],
             $serviceDetails['reschedule_notice_original_date'],
-            $serviceDetails['reschedule_notice_blocked_period']
+            $serviceDetails['reschedule_notice_blocked_period'],
+            $serviceDetails['job_started_by_tech'],
+            $serviceDetails['job_started_at']
         );
 
         DB::table('bookings')
@@ -1443,6 +1464,10 @@ abstract class SuperAdminBaseController extends Controller
                 'service_details' => json_encode($serviceDetails),
                 'updated_at' => now(),
             ]);
+
+        if ($targetStatus === 'Approved') {
+            self::syncAutoStartForTechnicians([(int) $leadTechId, (int) $assistantTechId]);
+        }
 
         $leadUser = DB::table('users')->where('user_id', $leadTechId)->first(['given_name', 'middle_name', 'last_name']);
         $assistantUser = DB::table('users')->where('user_id', $assistantTechId)->first(['given_name', 'middle_name', 'last_name']);
@@ -1479,6 +1504,30 @@ abstract class SuperAdminBaseController extends Controller
             abort(404);
         }
 
+        $latestChecklist = DB::table('tool_checklists')
+            ->where('booking_id', $bookingId)
+            ->orderByDesc('checklist_id')
+            ->first(['checklist_id', 'status']);
+
+        if (! $latestChecklist || $latestChecklist->status !== 'Completed') {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'checklist' => ['Please ensure the Tools & Materials Checklist is marked Completed by the Tools Man before completing this booking.'],
+            ]);
+        }
+
+        $serviceDetails = [];
+        if (! empty($booking->service_details)) {
+            $serviceDetails = is_string($booking->service_details)
+                ? (json_decode($booking->service_details, true) ?: [])
+                : (is_array($booking->service_details) ? $booking->service_details : []);
+        }
+
+        if (empty($serviceDetails['payment_turnover'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'payment_turnover' => ['The assigned technician must turn over the collected customer payment before this booking can be completed.'],
+            ]);
+        }
+
         $validated = $request->validate([
             'requested_by_name' => ['required', 'string', 'min:2', 'max:255'],
             'payment_verified' => ['required', 'accepted'],
@@ -1488,13 +1537,6 @@ abstract class SuperAdminBaseController extends Controller
             'requested_by_name.required' => 'Please input the name of the person who requested this service.',
             'payment_verified.accepted' => 'Please confirm and verify that the technician has handed over the customer payment.',
         ]);
-
-        $serviceDetails = [];
-        if (! empty($booking->service_details)) {
-            $serviceDetails = is_string($booking->service_details)
-                ? (json_decode($booking->service_details, true) ?: [])
-                : (is_array($booking->service_details) ? $booking->service_details : []);
-        }
 
         $turnover = $serviceDetails['payment_turnover'] ?? [];
         $turnover['verified_by_manager'] = true;
@@ -1666,11 +1708,237 @@ abstract class SuperAdminBaseController extends Controller
 
         app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
 
+        // Once this booking is completed (checklist completed + payment turned over + booking completed),
+        // automatically start the next eligible present scheduled booking for the assigned technicians.
+        self::syncAutoStartForTechnicians(self::getAssignedTechnicianIdsForBooking($booking));
+
         $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
 
         return [
             'message' => 'Payment turnover verified, booking declared Completed, and post-service forecasting activated.',
             'data' => $this->mapBookings(collect([$updated]))->first(),
         ];
+    }
+
+    /**
+     * Return all assigned technician IDs for a booking.
+     */
+    public static function getAssignedTechnicianIdsForBooking(object $booking): array
+    {
+        $ids = array_values(array_unique(array_filter([
+            ! empty($booking->lead_technician_id) ? (int) $booking->lead_technician_id : null,
+            ! empty($booking->assistant_technician_id) ? (int) $booking->assistant_technician_id : null,
+            ! empty($booking->assigned_tech_id) ? (int) $booking->assigned_tech_id : null,
+        ])));
+
+        if (empty($ids) && ! empty($booking->assigned_team_id)) {
+            $ids = DB::table('technician_team_members')
+                ->where('team_id', (int) $booking->assigned_team_id)
+                ->pluck('technician_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Evaluate whether an Approved/Dispatched booking can automatically start right now:
+     * 1) Its scheduled date must be present (today or earlier).
+     * 2) Any recent/earlier or currently active booking assigned to its technicians must have:
+     *    - Tools & Materials Checklist completed (status = 'Completed')
+     *    - Collected payment turned over to Manager
+     *    - Booking marked Completed (booking_status = 'Completed')
+     */
+    public static function evaluateBookingAutoStart(object $booking): array
+    {
+        $schedCarbon = ! empty($booking->scheduled_date) ? Carbon::parse($booking->scheduled_date) : null;
+        $isScheduledDatePresent = $schedCarbon ? $schedCarbon->copy()->startOfDay()->lte(now()->startOfDay()) : false;
+
+        $techIds = self::getAssignedTechnicianIdsForBooking($booking);
+        if (empty($techIds)) {
+            return [
+                'is_scheduled_date_present' => $isScheduledDatePresent,
+                'blocking_booking_id' => null,
+                'can_auto_start' => false,
+            ];
+        }
+
+        $teamIds = DB::table('technician_team_members')
+            ->whereIn('technician_id', $techIds)
+            ->pluck('team_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $bookingId = (int) $booking->booking_id;
+
+        $otherBookings = DB::table('bookings')
+            ->where('booking_id', '!=', $bookingId)
+            ->whereIn('booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Completed'])
+            ->where(function ($q) use ($techIds, $teamIds) {
+                $q->whereIn('lead_technician_id', $techIds)
+                    ->orWhereIn('assistant_technician_id', $techIds)
+                    ->orWhereIn('assigned_tech_id', $techIds);
+
+                if (! empty($teamIds)) {
+                    $q->orWhere(function ($teamQuery) use ($teamIds) {
+                        $teamQuery->whereNull('lead_technician_id')
+                            ->whereNull('assistant_technician_id')
+                            ->whereNull('assigned_tech_id')
+                            ->whereIn('assigned_team_id', $teamIds);
+                    });
+                }
+            })
+            ->orderBy('scheduled_date')
+            ->orderBy('booking_id')
+            ->get([
+                'booking_id',
+                'booking_status',
+                'scheduled_date',
+                'service_details',
+            ]);
+
+        if ($otherBookings->isEmpty()) {
+            return [
+                'is_scheduled_date_present' => $isScheduledDatePresent,
+                'blocking_booking_id' => null,
+                'can_auto_start' => $isScheduledDatePresent,
+            ];
+        }
+
+        $otherIds = $otherBookings->pluck('booking_id')->all();
+        $latestChecklists = DB::table('tool_checklists')
+            ->whereIn('booking_id', $otherIds)
+            ->orderByDesc('checklist_id')
+            ->get(['checklist_id', 'booking_id', 'status'])
+            ->groupBy('booking_id')
+            ->map(fn ($items) => $items->first());
+
+        $blockingBookingId = null;
+
+        foreach ($otherBookings as $other) {
+            $otherDetails = ! empty($other->service_details)
+                ? (is_string($other->service_details) ? (json_decode($other->service_details, true) ?: []) : (array) $other->service_details)
+                : [];
+
+            $otherSched = ! empty($other->scheduled_date) ? Carbon::parse($other->scheduled_date) : null;
+
+            $isCurrentlyActive = ($other->booking_status === 'In-Progress')
+                || (! empty($otherDetails['job_started_by_tech']) && $other->booking_status !== 'Completed');
+
+            $isPrecedingSchedule = $otherSched && $schedCarbon && (
+                $otherSched->lt($schedCarbon)
+                || ($otherSched->equalTo($schedCarbon) && (int) $other->booking_id < $bookingId)
+            );
+
+            if (! $isCurrentlyActive && ! $isPrecedingSchedule) {
+                continue;
+            }
+
+            $latestCl = $latestChecklists->get($other->booking_id);
+            $wasStartedInWorkflow = ! empty($otherDetails['job_started_by_tech']);
+
+            $isBookingCompleted = $other->booking_status === 'Completed';
+            $isChecklistCompleted = $latestCl
+                ? ($latestCl->status === 'Completed')
+                : (! $wasStartedInWorkflow && $isBookingCompleted);
+            $isPaymentTurnedOver = ! empty($otherDetails['payment_turnover'])
+                || (! $wasStartedInWorkflow && $isBookingCompleted);
+
+            if (! $isBookingCompleted || ! $isChecklistCompleted || ! $isPaymentTurnedOver) {
+                $blockingBookingId = (int) $other->booking_id;
+                break;
+            }
+        }
+
+        return [
+            'is_scheduled_date_present' => $isScheduledDatePresent,
+            'blocking_booking_id' => $blockingBookingId,
+            'can_auto_start' => $isScheduledDatePresent && $blockingBookingId === null,
+        ];
+    }
+
+    /**
+     * Synchronize auto-started state in chronological order for all Approved/Dispatched bookings
+     * involving the given technician IDs.
+     */
+    public static function syncAutoStartForTechnicians(array $technicianIds): void
+    {
+        $techIds = array_values(array_unique(array_filter(array_map('intval', $technicianIds))));
+        if (empty($techIds)) {
+            return;
+        }
+
+        $teamIds = DB::table('technician_team_members')
+            ->whereIn('technician_id', $techIds)
+            ->pluck('team_id')
+            ->unique()
+            ->values()
+            ->all();
+
+        $candidates = DB::table('bookings')
+            ->whereIn('booking_status', ['Approved', 'Dispatched'])
+            ->where(function ($q) use ($techIds, $teamIds) {
+                $q->whereIn('lead_technician_id', $techIds)
+                    ->orWhereIn('assistant_technician_id', $techIds)
+                    ->orWhereIn('assigned_tech_id', $techIds);
+
+                if (! empty($teamIds)) {
+                    $q->orWhere(function ($teamQuery) use ($teamIds) {
+                        $teamQuery->whereNull('lead_technician_id')
+                            ->whereNull('assistant_technician_id')
+                            ->whereNull('assigned_tech_id')
+                            ->whereIn('assigned_team_id', $teamIds);
+                    });
+                }
+            })
+            ->orderBy('scheduled_date')
+            ->orderBy('booking_id')
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            $eval = self::evaluateBookingAutoStart($candidate);
+            $details = ! empty($candidate->service_details)
+                ? (is_string($candidate->service_details) ? (json_decode($candidate->service_details, true) ?: []) : (array) $candidate->service_details)
+                : [];
+
+            if ($eval['can_auto_start']) {
+                if (empty($details['job_started_by_tech'])) {
+                    $details['job_started_by_tech'] = true;
+                    $details['job_started_at'] = $details['job_started_at'] ?? now()->toISOString();
+
+                    DB::table('bookings')
+                        ->where('booking_id', $candidate->booking_id)
+                        ->update([
+                            'service_details' => json_encode($details),
+                            'updated_at' => now(),
+                        ]);
+                }
+
+                $leadTechId = (int) ($candidate->lead_technician_id ?: ($candidate->assigned_tech_id ?: $techIds[0]));
+                $existingReport = DB::table('service_reports')->where('booking_id', $candidate->booking_id)->first();
+                if (! $existingReport) {
+                    DB::table('service_reports')->insert([
+                        'booking_id' => $candidate->booking_id,
+                        'technician_id' => $leadTechId,
+                        'job_started_at' => now(),
+                        'status' => 'In-Progress',
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            } elseif (! empty($details['job_started_by_tech'])) {
+                unset($details['job_started_by_tech'], $details['job_started_at']);
+                DB::table('bookings')
+                    ->where('booking_id', $candidate->booking_id)
+                    ->update([
+                        'service_details' => json_encode($details),
+                        'updated_at' => now(),
+                    ]);
+            }
+        }
     }
 }

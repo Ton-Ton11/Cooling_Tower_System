@@ -34,6 +34,8 @@ export default function Dashboard() {
             <Checklists
                 addToast={addToast}
                 onDataChanged={handleDataChanged}
+                currentUser={currentUser}
+                isToolsMan={true}
             />
         ),
         materials: (

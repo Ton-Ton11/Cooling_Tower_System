@@ -121,13 +121,17 @@ class ToolChecklistController extends Controller
         ])
             ->where(function ($q) use ($userId, $myTeamIds) {
                 $q->where('technician_id', $userId)
-                    ->orWhereIn('team_id', $myTeamIds)
                     ->orWhereHas('booking', function ($bq) use ($userId, $myTeamIds) {
                         $bq->where('assigned_tech_id', $userId)
                             ->orWhere('lead_technician_id', $userId)
                             ->orWhere('assistant_technician_id', $userId);
                         if (! empty($myTeamIds)) {
-                            $bq->orWhereIn('assigned_team_id', $myTeamIds);
+                            $bq->orWhere(function ($teamQuery) use ($myTeamIds) {
+                                $teamQuery->whereNull('lead_technician_id')
+                                    ->whereNull('assistant_technician_id')
+                                    ->whereNull('assigned_tech_id')
+                                    ->whereIn('assigned_team_id', $myTeamIds);
+                            });
                         }
                     });
             })
@@ -175,9 +179,40 @@ class ToolChecklistController extends Controller
             ]);
         }
 
-        if (in_array($booking->booking_status, ['Completed', 'Cancelled'], true)) {
+        if (! in_array($booking->booking_status, ['Approved', 'Dispatched', 'In-Progress'], true)) {
             throw ValidationException::withMessages([
-                'booking_id' => ['Cannot create a tool checklist for a completed or cancelled booking task.'],
+                'booking_id' => ['A tools and materials checklist can only be created after the booking has been approved and assigned to you.'],
+            ]);
+        }
+
+        if ($booking->booking_status !== 'In-Progress') {
+            $bookingRow = DB::table('bookings')->where('booking_id', $booking->booking_id)->first();
+            if ($bookingRow) {
+                $eval = \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::evaluateBookingAutoStart($bookingRow);
+                if (! $eval['is_scheduled_date_present']) {
+                    $schedCarbon = $booking->scheduled_date ? \Carbon\Carbon::parse($booking->scheduled_date) : null;
+                    $formattedSched = $schedCarbon ? $schedCarbon->format('M d, Y') : 'its scheduled date';
+                    throw ValidationException::withMessages([
+                        'booking_id' => ["Booking #{$booking->booking_id} is scheduled for {$formattedSched} and will start automatically on that date."],
+                    ]);
+                }
+                if (! empty($eval['blocking_booking_id'])) {
+                    throw ValidationException::withMessages([
+                        'booking_id' => ["Booking #{$booking->booking_id} will start automatically once Booking #{$eval['blocking_booking_id']} has its checklist completed, payment turned over, and is marked Completed."],
+                    ]);
+                }
+            }
+        }
+
+        $existingChecklist = ToolChecklist::where('booking_id', $booking->booking_id)
+            ->orderByDesc('checklist_id')
+            ->first();
+
+        if ($existingChecklist) {
+            throw ValidationException::withMessages([
+                'booking_id' => $existingChecklist->status === 'Pending'
+                    ? ["Checklist #{$existingChecklist->checklist_id} has already been created for Booking #{$booking->booking_id} and is awaiting Tools Man approval. You can edit the existing checklist instead."]
+                    : ["Checklist #{$existingChecklist->checklist_id} for Booking #{$booking->booking_id} has already been {$existingChecklist->status}."],
             ]);
         }
 
@@ -462,6 +497,12 @@ class ToolChecklistController extends Controller
 
         $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem'])->findOrFail($checklistId);
 
+        if ($checklist->status !== 'Pending') {
+            throw ValidationException::withMessages([
+                'checklist' => ["Checklist #{$checklist->checklist_id} has already been {$checklist->status}."],
+            ]);
+        }
+
         $userId = (int) $user->user_id;
 
         DB::transaction(function () use ($checklist, $userId) {
@@ -484,11 +525,15 @@ class ToolChecklistController extends Controller
                     'status' => 'consumed',
                 ]);
 
-            // Automatically transition customer's booking status from Approved to In-Progress!
-            if ($checklist->booking && in_array($checklist->booking->booking_status, ['Approved', 'Dispatched', 'Pending'], true)) {
-                $checklist->booking->update([
-                    'booking_status' => 'In-Progress',
-                ]);
+            // Automatically transition customer's booking status from Approved to In-Progress after Tools Man approves checklist!
+            if ($checklist->booking_id) {
+                DB::table('bookings')
+                    ->where('booking_id', $checklist->booking_id)
+                    ->whereIn('booking_status', ['Approved', 'Dispatched', 'Pending'])
+                    ->update([
+                        'booking_status' => 'In-Progress',
+                        'updated_at' => now(),
+                    ]);
             }
 
             $freshChecklist = $checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem']);
@@ -952,6 +997,13 @@ class ToolChecklistController extends Controller
                         'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
                         'updated_at' => now(),
                     ]);
+            }
+
+            $bookingRow = DB::table('bookings')->where('booking_id', $freshChecklist->booking_id)->first();
+            if ($bookingRow) {
+                \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::syncAutoStartForTechnicians(
+                    \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::getAssignedTechnicianIdsForBooking($bookingRow)
+                );
             }
         }
 

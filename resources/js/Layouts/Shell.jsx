@@ -19,6 +19,8 @@ import ServiceCatalog from "../Pages/Shared/ServiceCatalog";
 import TeamManagement from "../Pages/Shared/TeamManagement";
 import CertificateMonitoring from "../Pages/Shared/CertificateMonitoring";
 import UserProfileSettings from "../Pages/Shared/UserProfileSettings";
+import UserHistory from "../Pages/Shared/UserHistory";
+import { recordUserActivity } from "../utils/userActivityHistory";
 import {
     SUPER_ADMIN_ENDPOINTS,
     extractErrorMessage,
@@ -198,8 +200,24 @@ function Shell() {
         ),
         logs: <ActivityLogs addToast={addToast} />,
         performance: <Performance addToast={addToast} />,
+        history: (
+            <UserHistory
+                onNavigate={onNavigate}
+                currentUser={currentUser}
+                addToast={addToast}
+            />
+        ),
         profile: <UserProfileSettings addToast={addToast} />,
     };
+
+    useEffect(() => {
+        if (activePage && activePage !== "history") {
+            recordUserActivity(currentUser?.id || currentUser?.user_id, {
+                pageId: activePage,
+                icon: activePage,
+            });
+        }
+    }, [activePage, currentUser]);
 
     return (
         <div

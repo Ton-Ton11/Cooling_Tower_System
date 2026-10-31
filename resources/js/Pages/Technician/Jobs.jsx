@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePage } from "@inertiajs/react";
-import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import {
     TECHNICIAN_ENDPOINTS,
@@ -8,7 +7,7 @@ import {
     formatDateTime,
 } from "../../utils/superAdmin";
 
-const tabs = ["All", "Active", "In-Progress", "Completed"];
+const tabs = ["All", "Approved", "In-Progress", "Completed"];
 
 const Icon = ({ d, size = 16 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -83,10 +82,6 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
     const [loading, setLoading] = useState(true);
     const [materialsList, setMaterialsList] = useState([]);
 
-    // Action modals
-    const [startModal, setStartModal] = useState(null);
-    const [starting, setStarting] = useState(false);
-
     const [completeModal, setCompleteModal] = useState(null);
     const [completing, setCompleting] = useState(false);
     const [reportForm, setReportForm] = useState({
@@ -139,41 +134,11 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
 
     const filtered = useMemo(() => {
         if (tab === "All") return bookings;
-        if (tab === "Active") return bookings.filter(b => ["Approved", "Dispatched"].includes(b.booking_status));
+        if (tab === "Approved") return bookings.filter(b => ["Approved", "Dispatched"].includes(b.booking_status));
         if (tab === "In-Progress") return bookings.filter(b => b.booking_status === "In-Progress");
         if (tab === "Completed") return bookings.filter(b => b.booking_status === "Completed");
         return bookings;
     }, [bookings, tab]);
-
-    // Handle Start Job
-    const handleStartJob = async () => {
-        if (!startModal || starting) return;
-        setStarting(true);
-        try {
-            const { data } = await window.axios.post(TECHNICIAN_ENDPOINTS.startJob(startModal.booking_id));
-            addToast(data?.message || "Job started! Now create your tools & materials checklist.");
-            const startedJob = startModal;
-            setStartModal(null);
-            await fetchBookings(false);
-            onDataChanged?.();
-            localStorage.setItem(
-                "cooling_tower_selected_booking_checklist",
-                JSON.stringify({
-                    booking_id: startedJob.booking_id,
-                    client_name: startedJob.client_name,
-                    service: startedJob.service,
-                    team_name: startedJob.assigned_team_name || (startedJob.lead_technician_name ? `${startedJob.lead_technician_name} & ${startedJob.assistant_technician_name || ""}`.trim() : ""),
-                })
-            );
-            if (onNavigate) {
-                onNavigate("tools");
-            }
-        } catch (error) {
-            addToast(extractErrorMessage(error, "Unable to start job."), "error");
-        } finally {
-            setStarting(false);
-        }
-    };
 
     // Handle Complete Job (Collect Payment & Turn Over to Manager)
     const handleCompleteJob = async () => {
@@ -259,9 +224,9 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
         <div style={{ animation: "fadeInUp 0.25s ease" }}>
             <div className="page-header">
                 <div>
-                    <h1 className="page-title font-display">My Assigned Jobs</h1>
+                    <h1 className="page-title font-display">My Jobs</h1>
                     <p className="page-subtitle">
-                        View schedule, start service jobs, record material usage, and submit completion reports
+                        View your scheduled jobs, prepare your tools and materials checklist, and submit service reports.
                     </p>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -277,7 +242,7 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                     const count =
                         t === "All"
                             ? bookings.length
-                            : t === "Active"
+                            : t === "Approved"
                             ? bookings.filter(b => ["Approved", "Dispatched"].includes(b.booking_status)).length
                             : t === "In-Progress"
                             ? bookings.filter(b => b.booking_status === "In-Progress").length
@@ -314,22 +279,34 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                             const isAssigned = ["Approved", "Dispatched"].includes(job.booking_status);
                             const isInProgress = job.booking_status === "In-Progress";
                             const isCompleted = job.booking_status === "Completed";
-                            const isJobStartedByTech = Boolean(job.job_started_by_tech);
-                            const hasAnotherStartedJob = Boolean(job.active_started_booking_id) && Number(job.active_started_booking_id) !== Number(job.booking_id);
-                            const hasPaymentTurnedOver = job.payment_turnover?.status === "Turned Over";
-                            const latestChecklist = Array.isArray(job.checklists) && job.checklists.length > 0
-                                ? job.checklists[0]
-                                : null;
+                            const isJobStarted = Boolean(job.job_started_by_tech);
+                            const isScheduledDatePresent = Boolean(job.is_scheduled_date_present);
+                            const hasPaymentTurnedOver = Boolean(
+                                job.payment_turnover?.status &&
+                                    String(job.payment_turnover.status).toLowerCase().includes("turned over")
+                            );
+                            const latestChecklist =
+                                (Array.isArray(job.checklists) && job.checklists.length > 0
+                                    ? job.checklists[0]
+                                    : job.checklist) || null;
+                            const isChecklistCompleted = latestChecklist?.status === "Completed";
+                            const scheduledDayText = job.scheduled_date
+                                ? new Date(job.scheduled_date).toLocaleDateString("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                      year: "numeric",
+                                  })
+                                : "scheduled date";
 
                             return (
                                 <div
                                     key={job.booking_id}
                                     style={{
-                                        border: job.is_recommended_closest ? "2px solid #2563EB" : "1px solid #E5E7EB",
+                                        border: "1px solid #E5E7EB",
                                         borderRadius: 14,
                                         padding: 20,
-                                        background: job.is_recommended_closest ? "#F8FAFF" : "#fff",
-                                        boxShadow: job.is_recommended_closest ? "0 4px 14px rgba(37,99,235,0.08)" : "0 1px 3px rgba(0,0,0,0.03)",
+                                        background: "#fff",
+                                        boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
                                         display: "flex",
                                         flexDirection: "column",
                                         gap: 14,
@@ -342,79 +319,6 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                     #{job.booking_id} · {job.client_name}
                                                 </span>
                                                 <StatusBadge status={job.booking_status} />
-                                                {job.is_recommended_closest && (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        gap: 5,
-                                                        background: "linear-gradient(135deg, #2563EB, #1D4ED8)",
-                                                        color: "#FFFFFF",
-                                                        padding: "3px 10px",
-                                                        borderRadius: 9999,
-                                                        fontSize: 11,
-                                                        fontWeight: 700,
-                                                        boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
-                                                    }}>
-                                                        <StarIcon size={11} color="#FDE047" />
-                                                        <span>Recommended Closest Schedule</span>
-                                                    </span>
-                                                )}
-                                                {isJobStartedByTech && isAssigned && (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        gap: 4,
-                                                        background: "#FEF3C7",
-                                                        color: "#B45309",
-                                                        padding: "2px 8px",
-                                                        borderRadius: 8,
-                                                        fontSize: 11,
-                                                        fontWeight: 700,
-                                                        border: "1px solid #FDE68A",
-                                                    }}>
-                                                        <span>Job Started · Awaiting Tools Man Checklist Approval</span>
-                                                    </span>
-                                                )}
-                                                {hasPaymentTurnedOver && !isCompleted && (
-                                                    <span style={{
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        gap: 4,
-                                                        background: "#DCFCE7",
-                                                        color: "#15803D",
-                                                        padding: "2px 8px",
-                                                        borderRadius: 8,
-                                                        fontSize: 11,
-                                                        fontWeight: 700,
-                                                        border: "1px solid #86EFAC",
-                                                    }}>
-                                                        <CheckIcon size={11} color="#15803D" />
-                                                        <span>Payment Turned Over (₱{Number(job.payment_turnover?.net_collected_amount || 0).toLocaleString()} {job.payment_turnover?.payment_method}) · Awaiting Manager Completion</span>
-                                                    </span>
-                                                )}
-                                                {job.assigned_team_name && (
-                                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#EFF6FF", color: "#1D4ED8", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: "1px solid #BFDBFE" }}>
-                                                        <UsersIcon size={12} color="#1D4ED8" />
-                                                        <span>{job.assigned_team_name}</span>
-                                                    </span>
-                                                )}
-                                                {latestChecklist && (
-                                                    <span style={{
-                                                        fontSize: 11,
-                                                        fontWeight: 600,
-                                                        padding: "2px 8px",
-                                                        borderRadius: 8,
-                                                        background: latestChecklist.status === "Approved" ? "#ECFDF5" : latestChecklist.status === "Completed" ? "#F0FDF4" : "#FEF3C7",
-                                                        color: latestChecklist.status === "Approved" ? "#065F46" : latestChecklist.status === "Completed" ? "#166534" : "#92400E",
-                                                        border: "1px solid currentColor",
-                                                        display: "inline-flex",
-                                                        alignItems: "center",
-                                                        gap: 4,
-                                                    }}>
-                                                        <ClipboardListIcon size={12} />
-                                                        <span>Checklist: {latestChecklist.status}</span>
-                                                    </span>
-                                                )}
                                                 {job.rating && (
                                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#FEF3C7", color: "#D97706", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
                                                         <StarIcon size={12} color="#D97706" />
@@ -434,33 +338,14 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
 
                                         {/* Action buttons */}
                                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                            {isAssigned && !isJobStartedByTech && (
-                                                <button
-                                                    className="btn-primary"
-                                                    disabled={hasAnotherStartedJob}
-                                                    title={
-                                                        hasAnotherStartedJob
-                                                            ? `You already have an active job (#${job.active_started_booking_id}) started. You can only start another job once the current booking is completed.`
-                                                            : "Start this job to unlock tools & materials checklist creation"
-                                                    }
-                                                    style={{
-                                                        display: "flex",
-                                                        alignItems: "center",
-                                                        gap: 6,
-                                                        fontSize: 12,
-                                                        padding: "8px 14px",
-                                                        opacity: hasAnotherStartedJob ? 0.55 : 1,
-                                                        cursor: hasAnotherStartedJob ? "not-allowed" : "pointer",
-                                                    }}
-                                                    onClick={() => !hasAnotherStartedJob && setStartModal(job)}
-                                                >
-                                                    <Icon d={ic.play} size={14} />
-                                                    {hasAnotherStartedJob
-                                                        ? `Locked (Finish Job #${job.active_started_booking_id} First)`
-                                                        : "Start Job"}
-                                                </button>
+                                            {isAssigned && !isJobStarted && (
+                                                <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>
+                                                    {isScheduledDatePresent && job.blocking_booking_id
+                                                        ? `Starts after Booking #${job.blocking_booking_id} is completed`
+                                                        : `Starts on ${scheduledDayText}`}
+                                                </span>
                                             )}
-                                            {isAssigned && isJobStartedByTech && (
+                                            {isAssigned && isJobStarted && !latestChecklist && (
                                                 <button
                                                     className="btn-primary"
                                                     style={{
@@ -479,47 +364,70 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                                                 booking_id: job.booking_id,
                                                                 client_name: job.client_name,
                                                                 service: job.service,
-                                                                team_name: job.assigned_team_name || (job.lead_technician_name ? `${job.lead_technician_name} & ${job.assistant_technician_name || ''}`.trim() : ""),
+                                                                booking_status: job.booking_status,
+                                                                team_name: job.assigned_team_name || (job.lead_technician_name ? `${job.lead_technician_name} & ${job.assistant_technician_name || ""}`.trim() : ""),
                                                             })
                                                         );
                                                         if (onNavigate) {
                                                             onNavigate("tools");
                                                         }
-                                                        addToast(`Opening My Tools & Materials Checklist for Booking #${job.booking_id}.`);
                                                     }}
                                                 >
-                                                    <Icon d={ic.tools} size={14} /> Request Tools & Materials Checklist
+                                                    <Icon d={ic.tools} size={14} /> Create Checklist
+                                                </button>
+                                            )}
+                                            {isAssigned && isJobStarted && latestChecklist && (
+                                                <button
+                                                    className="btn-secondary"
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 6,
+                                                        fontSize: 12,
+                                                        padding: "8px 14px",
+                                                        borderColor: "#2563EB",
+                                                        color: "#1D4ED8",
+                                                        fontWeight: 600,
+                                                    }}
+                                                    onClick={() => {
+                                                        localStorage.setItem(
+                                                            "cooling_tower_view_checklist_id",
+                                                            String(latestChecklist.checklist_id)
+                                                        );
+                                                        if (onNavigate) {
+                                                            onNavigate("tools");
+                                                        }
+                                                    }}
+                                                >
+                                                    <ClipboardListIcon size={13} color="#1D4ED8" />
+                                                    <span>
+                                                        {latestChecklist.status === "Pending"
+                                                            ? "View / Edit Checklist"
+                                                            : "View Checklist"}
+                                                    </span>
                                                 </button>
                                             )}
                                             {isInProgress && !hasPaymentTurnedOver && (
-                                                <>
-                                                    <button
-                                                        className="btn-secondary"
-                                                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", borderColor: "#2563EB", color: "#1D4ED8" }}
-                                                        onClick={() => {
-                                                            if (onNavigate) {
-                                                                onNavigate("tools");
-                                                            }
-                                                        }}
-                                                    >
-                                                        <Icon d={ic.tools} size={14} /> Return Tools to Tools Man
-                                                    </button>
-                                                    <button
-                                                        className="btn-primary"
-                                                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", background: "#16A34A" }}
-                                                        onClick={() => {
-                                                            setCompleteModal(job);
-                                                            setReportForm((prev) => ({
-                                                                ...prev,
-                                                                total_service_price: String(job.total_price || job.base_price || 1500),
-                                                                payment_method: "Cash",
-                                                                reference_number: "",
-                                                            }));
-                                                        }}
-                                                    >
-                                                        <Icon d={ic.check} size={14} /> Collect Payment & Turn Over to Manager
-                                                    </button>
-                                                </>
+                                                <button
+                                                    className="btn-primary"
+                                                    style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", background: "#16A34A" }}
+                                                    onClick={() => {
+                                                        setCompleteModal(job);
+                                                        setReportForm((prev) => ({
+                                                            ...prev,
+                                                            total_service_price: String(job.service_base_price || job.total_price || job.base_price || 1500),
+                                                            payment_method: "Cash",
+                                                            reference_number: "",
+                                                        }));
+                                                    }}
+                                                >
+                                                    <Icon d={ic.check} size={14} /> Turn Over Payment
+                                                </button>
+                                            )}
+                                            {isInProgress && hasPaymentTurnedOver && isChecklistCompleted && (
+                                                <span style={{ fontSize: 12, color: "#64748B", fontWeight: 500 }}>
+                                                    Awaiting Manager completion
+                                                </span>
                                             )}
                                             {(isCompleted || hasPaymentTurnedOver) && job.service_report && (
                                                 <button
@@ -591,14 +499,8 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
                                                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748B", display: "inline-flex", alignItems: "center", gap: 6 }}>
                                                     <UsersIcon size={13} color="#64748B" />
-                                                    <span>Assigned Technician Team</span>
+                                                    <span>Assigned Team</span>
                                                 </span>
-                                                {job.lead_technician_name && job.assistant_technician_name && (
-                                                    <span style={{ fontSize: 11, fontWeight: 600, color: "#16A34A", background: "#DCFCE7", padding: "2px 8px", borderRadius: 9999, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                                                        <CheckIcon size={12} color="#16A34A" />
-                                                        <span>2 Technicians Assigned</span>
-                                                    </span>
-                                                )}
                                             </div>
                                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
                                                 {job.lead_technician_name && (
@@ -701,18 +603,6 @@ export default function TechnicianJobs({ addToast, onDataChanged, onNavigate }) 
                     </div>
                 )}
             </div>
-
-            {/* Modal: Start Job Confirmation */}
-            <Modal
-                open={!!startModal}
-                title={`Start Job #${startModal?.booking_id}?`}
-                message={`You are about to start the ${startModal?.service} job for ${startModal?.client_name}. After starting the job, it will appear in your My Tools & Materials Checklist tab so you can request your tools and materials from the Tools Man (who will approve the checklist to change the booking status to In-Progress).`}
-                confirmLabel={starting ? "Starting..." : "Yes, Start Job & Prepare Checklist"}
-                cancelLabel="Cancel"
-                variant="primary"
-                onConfirm={handleStartJob}
-                onCancel={() => setStartModal(null)}
-            />
 
             {/* Modal: Collect Payment, Submit Service Report & Turn Over to Manager */}
             {completeModal && (

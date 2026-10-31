@@ -354,7 +354,26 @@ export default function GeospatialAddressAutocomplete({
     structuredValues = null,
     onStructuredChange = null,
     structuredErrors = {},
+    isEmployee: propIsEmployee = undefined,
 }) {
+    let authUser = null;
+    if (typeof window !== "undefined") {
+        try {
+            authUser = window?.__page?.props?.auth?.user || window?.__inertia_page?.props?.auth?.user || null;
+            if (!authUser && typeof document !== "undefined") {
+                const appEl = document.getElementById("app");
+                if (appEl?.dataset?.page) {
+                    const parsed = JSON.parse(appEl.dataset.page);
+                    authUser = parsed?.props?.auth?.user || null;
+                }
+            }
+        } catch {}
+    }
+    const roleId = Number(authUser?.role_id ?? 0);
+    const isEmployee = typeof propIsEmployee === "boolean"
+        ? propIsEmployee
+        : Boolean(authUser && roleId !== 2);
+
     const [suggestions, setSuggestions] = useState([]);
     const [loading, setLoading] = useState(false);
     const [openDropdown, setOpenDropdown] = useState(false);
@@ -763,7 +782,7 @@ export default function GeospatialAddressAutocomplete({
                 </div>
 
                 {/* Alert when outside Zamboanga City */}
-                {hasLocationInput && !activeEval.is_within_zamboanga_city && (
+                {!isEmployee && hasLocationInput && !activeEval.is_within_zamboanga_city && (
                     <div className="p-3 rounded-xl border text-xs flex items-start gap-2.5 bg-amber-50/90 border-amber-300 text-amber-950">
                         <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
@@ -788,7 +807,7 @@ export default function GeospatialAddressAutocomplete({
     return (
         <div ref={containerRef} className="space-y-2 relative">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                {value.trim().length > 1 && (
+                {!isEmployee && value.trim().length > 1 && (
                     activeEval.is_within_zamboanga_city ? (
                         <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
                             <CheckCircle2 className="size-3.5 text-emerald-600 shrink-0" />
@@ -867,7 +886,7 @@ export default function GeospatialAddressAutocomplete({
                                 </div>
                             </div>
 
-                            {!item.is_within_zamboanga_city && (
+                            {!isEmployee && !item.is_within_zamboanga_city && (
                                 <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
                                     Outside ZC
                                 </span>
@@ -877,7 +896,7 @@ export default function GeospatialAddressAutocomplete({
                 </div>
             )}
 
-            {value.trim().length > 2 && !activeEval.is_within_zamboanga_city && (
+            {!isEmployee && value.trim().length > 2 && !activeEval.is_within_zamboanga_city && (
                 <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
                     <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
                     <span>

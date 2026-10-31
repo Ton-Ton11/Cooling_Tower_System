@@ -618,14 +618,14 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                             style={{
                                                                 padding: "5px 10px",
                                                                 fontSize: 11,
-                                                                background: booking.payment_turnover ? "#FEF3C7" : "#ECFDF5",
-                                                                color: booking.payment_turnover ? "#92400E" : "#065F46",
-                                                                borderColor: booking.payment_turnover ? "#FCD34D" : "#A7F3D0",
+                                                                background: "#ECFDF5",
+                                                                color: "#065F46",
+                                                                borderColor: "#A7F3D0",
                                                                 fontWeight: 700,
                                                             }}
                                                             onClick={() => openCompleteModal(booking)}
                                                         >
-                                                            {booking.payment_turnover ? "Verify Turnover & Complete" : "Complete"}
+                                                            Complete
                                                         </button>
                                                     )}
                                                     <button
@@ -938,7 +938,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                     const teamFull = teamCount >= MAX_JOBS_PER_TEAM_PER_DAY;
                                                     return (
                                                         <option key={tm.team_id} value={tm.team_id} disabled={teamFull}>
-                                                            {tm.team_name} — Lead: {tm.leader_name} ({teamCount}/1 job today){teamFull ? " (Booked)" : ""}
+                                                            {tm.team_name} — Lead: {tm.leader_name}{teamFull ? " (Booked)" : ""}
                                                         </option>
                                                     );
                                                 })}
@@ -970,20 +970,21 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                 style={{ width: "100%", padding: "8px 10px", borderRadius: 8, borderColor: "#CBD5E1", fontSize: 12 }}
                                             >
                                                 <option value="">Select Technician</option>
-                                                {technicians.map((technician) => {
-                                                    const isAssistant = String(technician.user_id) === String(assignment.assistant_technician_id);
-                                                    const countToday = getTechDailyCount(technician.user_id);
-                                                    const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
-                                                    return (
-                                                        <option
-                                                            key={technician.user_id}
-                                                            value={technician.user_id}
-                                                            disabled={isAssistant || isFull}
-                                                        >
-                                                            {technician.full_name} ({countToday}/1 job){isFull ? " — Booked" : isAssistant ? " (Assistant)" : ""}
-                                                        </option>
-                                                    );
-                                                })}
+                                                {technicians
+                                                    .filter((technician) => !assignment.assistant_technician_id || String(technician.user_id) !== String(assignment.assistant_technician_id))
+                                                    .map((technician) => {
+                                                        const countToday = getTechDailyCount(technician.user_id);
+                                                        const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
+                                                        return (
+                                                            <option
+                                                                key={technician.user_id}
+                                                                value={technician.user_id}
+                                                                disabled={isFull}
+                                                            >
+                                                                {technician.full_name}{isFull ? " — Booked" : ""}
+                                                            </option>
+                                                        );
+                                                    })}
                                             </select>
                                         </div>
 
@@ -1009,20 +1010,21 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                 style={{ width: "100%", padding: "8px 10px", borderRadius: 8, borderColor: "#CBD5E1", fontSize: 12 }}
                                             >
                                                 <option value="">Select Technician</option>
-                                                {technicians.map((technician) => {
-                                                    const isLead = String(technician.user_id) === String(assignment.lead_technician_id);
-                                                    const countToday = getTechDailyCount(technician.user_id);
-                                                    const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
-                                                    return (
-                                                        <option
-                                                            key={technician.user_id}
-                                                            value={technician.user_id}
-                                                            disabled={isLead || isFull}
-                                                        >
-                                                            {technician.full_name} ({countToday}/1 job){isFull ? " — Booked" : isLead ? " (Lead)" : ""}
-                                                        </option>
-                                                    );
-                                                })}
+                                                {technicians
+                                                    .filter((technician) => !assignment.lead_technician_id || String(technician.user_id) !== String(assignment.lead_technician_id))
+                                                    .map((technician) => {
+                                                        const countToday = getTechDailyCount(technician.user_id);
+                                                        const isFull = countToday >= MAX_JOBS_PER_TEAM_PER_DAY;
+                                                        return (
+                                                            <option
+                                                                key={technician.user_id}
+                                                                value={technician.user_id}
+                                                                disabled={isFull}
+                                                            >
+                                                                {technician.full_name}{isFull ? " — Booked" : ""}
+                                                            </option>
+                                                        );
+                                                    })}
                                             </select>
                                         </div>
                                     </div>
@@ -1141,16 +1143,40 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             {/* Verify Payment Turnover & Declare Booking Completed Modal */}
             <Modal
                 open={!!completeModal}
-                title={`Verify Payment Turnover & Complete Booking #${completeModal?.booking_id}`}
-                message="Before declaring this booking completed, verify the payment handed over by the technician and record who requested this service."
-                confirmLabel={completing ? "Declaring Completed..." : "Verify Turnover & Declare Complete"}
-                confirmDisabled={completing || !completionForm.requested_by_name.trim() || !completionForm.payment_verified}
+                title={`Complete Booking #${completeModal?.booking_id ?? ""}`}
+                message="Verify the technician's payment turnover and record who requested this service."
+                confirmLabel={completing ? "Completing..." : "Complete Booking"}
+                confirmDisabled={
+                    completing ||
+                    completeModal?.checklist_status !== "Completed" ||
+                    !completeModal?.payment_turnover ||
+                    !completionForm.requested_by_name.trim() ||
+                    !completionForm.payment_verified
+                }
                 maxWidth={540}
                 onConfirm={handleCompleteBooking}
                 onCancel={() => !completing && setCompleteModal(null)}
             >
                 {completeModal && (
                     <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 14 }}>
+                        {(completeModal.checklist_status !== "Completed" || !completeModal.payment_turnover) && (
+                            <div
+                                style={{
+                                    background: "#FFFBEB",
+                                    border: "1px solid #FDE68A",
+                                    borderRadius: 10,
+                                    padding: "10px 12px",
+                                    fontSize: 12,
+                                    color: "#92400E",
+                                }}
+                            >
+                                {completeModal.checklist_status !== "Completed" && !completeModal.payment_turnover
+                                    ? "Before completing this booking, the Tools Man must mark the checklist Completed and the technician must turn over the collected payment."
+                                    : completeModal.checklist_status !== "Completed"
+                                    ? "Before completing this booking, the Tools Man must mark the Tools & Materials Checklist as Completed."
+                                    : "Before completing this booking, the assigned technician must turn over the collected customer payment."}
+                            </div>
+                        )}
                         <div
                             style={{
                                 background: "#F9FAFB",

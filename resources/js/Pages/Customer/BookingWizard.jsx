@@ -298,9 +298,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
 
     const [scheduledDate, setScheduledDate] = useState(() => findNextAvailableDateYmd(getTomorrowLocalYmd(), null));
     const [scheduledTime, setScheduledTime] = useState("08:00");
-    const [enableAlternativeSchedule, setEnableAlternativeSchedule] = useState(false);
-    const [altDate, setAltDate] = useState("");
-    const [altTime, setAltTime] = useState("08:30");
 
     // Dynamic 30-minute interval slots & rate classification from config
     const scheduleSlotsData = useMemo(() => {
@@ -314,10 +311,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     const selectedDateSlotInfo = useMemo(() => {
         return getDateSlotInfo(scheduledDate, scheduleConfig);
     }, [scheduledDate, scheduleConfig]);
-
-    const altDateSlotInfo = useMemo(() => {
-        return altDate ? getDateSlotInfo(altDate, scheduleConfig) : null;
-    }, [altDate, scheduleConfig]);
 
     const upcomingCalendarDays = useMemo(() => {
         return buildUpcomingScheduleCalendar(12, scheduleConfig);
@@ -489,8 +482,7 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
     const canProceedStep3 = Boolean(
         scheduledDate &&
         scheduledTime &&
-        selectedDateSlotInfo.isAvailable &&
-        (!enableAlternativeSchedule || !altDate || (altDateSlotInfo && altDateSlotInfo.isAvailable))
+        selectedDateSlotInfo.isAvailable
     );
     const canProceedStep4 = Boolean(
         refNumber.trim().length >= 5 &&
@@ -539,13 +531,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                 addToast("Sunday is a rest day for our workers. Please select a service date from Monday to Saturday.", "error");
             } else if (selectedDateSlotInfo.isFull) {
                 addToast(`All ${selectedDateSlotInfo.maxSlots} daily booking slots for ${scheduledDate} are already full. Please select another available date.`, "error");
-            } else if (enableAlternativeSchedule && altDate && altDateSlotInfo && !altDateSlotInfo.isAvailable) {
-                addToast(
-                    altDateSlotInfo.isSunday
-                        ? "Alternative schedule cannot be on a Sunday (worker rest day)."
-                        : `All ${altDateSlotInfo.maxSlots} daily slots on your alternative date (${altDate}) are already full.`,
-                    "error"
-                );
             } else {
                 addToast("Please select your preferred service date and arrival window.", "error");
             }
@@ -583,12 +568,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         // Store exact timestamp
         const timePart = scheduledTime.length === 5 ? `${scheduledTime}:00` : "08:00:00";
         const combinedDateTime = `${scheduledDate} ${timePart}`;
-
-        const altSlot = scheduleSlotsData.findSlot(altTime);
-        const altArrivalLabel = altSlot?.label || formatTime24To12(altTime);
-        const altDateTimeStr = enableAlternativeSchedule && altDate
-            ? `${altDate} at ${altArrivalLabel}${altSlot ? ` (${altSlot.is_differential ? 'Differential Rate' : 'Regular Rate'})` : ''}`
-            : null;
 
         // Compile service-specific questionnaire
         let serviceQuestions = {};
@@ -639,9 +618,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
         formData.append("preferred_arrival_time", preferredArrivalLabel);
         formData.append("rate_type", rateTypeLabel);
         formData.append("is_differential", isDifferential ? "1" : "0");
-        if (altDateTimeStr) {
-            formData.append("alternative_schedule", altDateTimeStr);
-        }
         formData.append("service_payment_method", servicePaymentMethod);
         formData.append("booking_fee", BOOKING_FEE);
         formData.append("reference_number", refNumber.trim());
@@ -1654,91 +1630,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                 </div>
                             </div>
                         </div>
-
-                        {/* Optional Alternative Schedule */}
-                        <div className="border-t border-gray-100 pt-5 space-y-4">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    id="enableAlt"
-                                    checked={enableAlternativeSchedule}
-                                    onChange={(e) => setEnableAlternativeSchedule(e.target.checked)}
-                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                                />
-                                <label htmlFor="enableAlt" className="text-xs font-bold text-gray-700 cursor-pointer">
-                                    Provide an Alternative Date / Schedule in case your first choice is fully booked
-                                </label>
-                            </div>
-
-                            {enableAlternativeSchedule && (
-                                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-4 animate-in fade-in duration-200">
-                                    <div>
-                                        <div className="flex items-center justify-between mb-1">
-                                            <label className="block text-xs font-semibold text-gray-600">Alternative Date (Mon–Sat)</label>
-                                            {altDate && altDateSlotInfo && (
-                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                                    altDateSlotInfo.isSunday || altDateSlotInfo.isFull
-                                                        ? "bg-red-100 text-red-700"
-                                                        : "bg-emerald-100 text-emerald-700"
-                                                }`}>
-                                                    {altDateSlotInfo.isSunday
-                                                        ? "Sunday (Rest Day)"
-                                                        : altDateSlotInfo.isFull
-                                                            ? `Full (${altDateSlotInfo.bookedCount}/${altDateSlotInfo.maxSlots})`
-                                                            : `${altDateSlotInfo.remainingSlots}/${altDateSlotInfo.maxSlots} Slots Left`}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <input
-                                            type="date"
-                                            min={tomorrow}
-                                            value={altDate}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setAltDate(val);
-                                                if (val) {
-                                                    const info = getDateSlotInfo(val, scheduleConfig);
-                                                    if (info.isSunday) {
-                                                        toast.error("Sunday is a rest day for our workers. Please choose Monday to Saturday for your alternative date.");
-                                                    } else if (info.isFull) {
-                                                        toast.error(`All ${info.maxSlots} daily slots on ${val} are already full.`);
-                                                    }
-                                                }
-                                            }}
-                                            className={`w-full px-3.5 py-2.5 bg-white border rounded-xl text-sm ${
-                                                altDate && altDateSlotInfo && !altDateSlotInfo.isAvailable
-                                                    ? "border-red-300 text-red-900"
-                                                    : "border-gray-300"
-                                            }`}
-                                        />
-                                        {altDate && altDateSlotInfo && !altDateSlotInfo.isAvailable && (
-                                            <p className="text-[11px] font-semibold text-red-600 mt-1">
-                                                {altDateSlotInfo.reason}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-semibold text-gray-600 mb-1">Alternative Arrival Time</label>
-                                        <select
-                                            value={altTime}
-                                            onChange={(e) => setAltTime(e.target.value)}
-                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm"
-                                        >
-                                            <optgroup label="Regular Hours">
-                                                {scheduleSlotsData.regularSlots.map(s => (
-                                                    <option key={s.id} value={s.id}>{s.label} (Regular Rate)</option>
-                                                ))}
-                                            </optgroup>
-                                            <optgroup label="Differential Hours (Early Morning)">
-                                                {scheduleSlotsData.differentialSlots.map(s => (
-                                                    <option key={s.id} value={s.id}>{s.label} (Differential Rate)</option>
-                                                ))}
-                                            </optgroup>
-                                        </select>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
                     </div>
                 )}
 
@@ -1981,9 +1872,6 @@ export default function BookingWizard({ dashboardData, addToast, onBookingCreate
                                             </span>
                                         )}
                                     </div>
-                                    {enableAlternativeSchedule && altDate && (
-                                        <p className="text-[11px] text-gray-500 mt-1">Alt: {altDate} at {scheduleSlotsData.findSlot(altTime)?.label || altTime}</p>
-                                    )}
                                 </div>
                                 <div>
                                     <span className="font-semibold text-gray-400 uppercase text-[10px]">Service Address & Contact</span>

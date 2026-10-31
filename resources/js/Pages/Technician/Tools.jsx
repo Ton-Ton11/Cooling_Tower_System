@@ -72,11 +72,12 @@ const MessageSquareIcon = ({ size = 14, color = "currentColor" }) => (
     </svg>
 );
 
-export default function TechnicianTools({ addToast, onNavigate }) {
+export default function TechnicianTools({ addToast, onNavigate, onDataChanged }) {
     const [viewTab, setViewTab] = useState("checklists"); // 'checklists' | 'catalog'
     const [checklists, setChecklists] = useState([]);
     const [catalog, setCatalog] = useState([]);
     const [assignedBookings, setAssignedBookings] = useState([]);
+    const [loadingBookings, setLoadingBookings] = useState(true);
     const [loading, setLoading] = useState(true);
 
     // Modal state for Creating / Editing Checklist
@@ -120,20 +121,22 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         }
     }, []);
 
-    // Fetch technician's started bookings to populate the task checklist tab
+    // Fetch technician's automatically started bookings (Approved / In-Progress) to populate the task checklist tab
     const fetchAssignedBookings = useCallback(async () => {
+        setLoadingBookings(true);
         try {
             const { data } = await window.axios.get(TECHNICIAN_ENDPOINTS.bookings);
             const list = Array.isArray(data?.data) ? data.data : [];
-            // Bookings appear in My Tools & Materials Checklist tab after Start Job is clicked by technician/head technician
             const startedTasks = list.filter((b) =>
                 (Boolean(b.lead_technician_id) || Boolean(b.assistant_technician_id) || Boolean(b.assigned_tech_id) || Boolean(b.assigned_team_id)) &&
                 ["Approved", "Dispatched", "In-Progress"].includes(b.booking_status) &&
-                (Boolean(b.job_started_by_tech) || b.booking_status === "In-Progress"),
+                (Boolean(b.job_started_by_tech) || b.booking_status === "In-Progress")
             );
             setAssignedBookings(startedTasks);
         } catch {
             // non-blocking
+        } finally {
+            setLoadingBookings(false);
         }
     }, []);
 
@@ -143,7 +146,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         fetchAssignedBookings();
     }, [fetchChecklists, fetchCatalog, fetchAssignedBookings]);
 
-    // Check if there was a pre-selected booking passed from "Choose Task & Prepare Checklist" in Jobs
+    // Check if there was a pre-selected booking passed from "Create Tools & Materials Checklist" in My Jobs
     useEffect(() => {
         const storedBooking = localStorage.getItem("cooling_tower_selected_booking_checklist");
         if (storedBooking) {
@@ -151,6 +154,21 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                 const parsed = JSON.parse(storedBooking);
                 if (parsed?.booking_id) {
                     setSelectedBookingId(String(parsed.booking_id));
+                    setAssignedBookings((prev) => {
+                        if (prev.some((b) => Number(b.booking_id) === Number(parsed.booking_id))) {
+                            return prev;
+                        }
+                        return [
+                            {
+                                booking_id: parsed.booking_id,
+                                client_name: parsed.client_name || "Customer",
+                                service: parsed.service || "Service",
+                                booking_status: parsed.booking_status || "Approved",
+                                assigned_team_name: parsed.team_name || "",
+                            },
+                            ...prev,
+                        ];
+                    });
                     setEditingChecklist(null);
                     setChecklistNotes("");
                     setSelectedItemsMap({});
@@ -164,13 +182,40 @@ export default function TechnicianTools({ addToast, onNavigate }) {
         }
     }, []);
 
+    // Support opening a specific checklist passed from My Jobs
+    useEffect(() => {
+        if (checklists.length === 0) return;
+        const viewId = localStorage.getItem("cooling_tower_view_checklist_id");
+        if (viewId) {
+            localStorage.removeItem("cooling_tower_view_checklist_id");
+            const target = checklists.find((c) => String(c.checklist_id) === String(viewId));
+            if (target) {
+                setViewChecklistModal(target);
+            }
+        }
+    }, [checklists]);
+
     const openCreateChecklistModal = (prefillBookingId = "") => {
         if (assignedBookings.length === 0 && !prefillBookingId) {
-            addToast("Please click 'Start Job' on your assigned booking in My Assigned Jobs first so it appears here for checklist creation.", "error");
+            addToast("No active approved job is currently assigned to you for checklist creation.", "error");
             return;
         }
+        const bookingsWithoutChecklist = assignedBookings.filter(
+            (b) => !checklists.some((c) => Number(c.booking_id) === Number(b.booking_id))
+        );
+        if (!prefillBookingId && bookingsWithoutChecklist.length === 0) {
+            addToast("All of your active assigned jobs already have a checklist created. You can view or edit a Pending checklist below.", "error");
+            return;
+        }
+        const defaultBookingId =
+            prefillBookingId ||
+            (bookingsWithoutChecklist[0]
+                ? String(bookingsWithoutChecklist[0].booking_id)
+                : assignedBookings[0]
+                ? String(assignedBookings[0].booking_id)
+                : "");
         setEditingChecklist(null);
-        setSelectedBookingId(prefillBookingId || (assignedBookings[0] ? String(assignedBookings[0].booking_id) : ""));
+        setSelectedBookingId(defaultBookingId);
         setChecklistNotes("");
         setSelectedItemsMap({});
         setActiveCategoryTab("materials");
@@ -342,6 +387,8 @@ export default function TechnicianTools({ addToast, onNavigate }) {
 
             setChecklistModalOpen(false);
             await fetchChecklists(false);
+            await fetchAssignedBookings();
+            onDataChanged?.();
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to save checklist."), "error");
         } finally {
@@ -482,12 +529,16 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
                         <div>
                             <label className="section-label" style={{ marginBottom: 6, display: "block" }}>
-                                1. Started Booking Task (Required)
+                                1. Assigned Job
                             </label>
-                            {assignedBookings.length === 0 ? (
-                                <div style={{ padding: "12px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#991B1B", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
-                                    <AlertCircleIcon size={16} color="#DC2626" />
-                                    <span><strong>No Started Job Found:</strong> Click &quot;Start Job&quot; on your assigned booking first so it appears here.</span>
+                            {loadingBookings && assignedBookings.length === 0 ? (
+                                <div style={{ padding: "12px 14px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, color: "#1E40AF", fontSize: 13 }}>
+                                    Loading your assigned job...
+                                </div>
+                            ) : assignedBookings.length === 0 ? (
+                                <div style={{ padding: "12px 14px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, color: "#475569", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                                    <AlertCircleIcon size={16} color="#64748B" />
+                                    <span>No active job is ready for a checklist yet. Jobs start automatically on their scheduled date once your previous job is completed.</span>
                                 </div>
                             ) : (
                                 <select
@@ -496,12 +547,17 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                     onChange={(e) => setSelectedBookingId(e.target.value)}
                                     disabled={!!editingChecklist}
                                 >
-                                    <option value="">Select your started booking</option>
-                                    {assignedBookings.map((b) => (
-                                        <option key={b.booking_id} value={b.booking_id}>
-                                            Booking #{b.booking_id} · {b.client_name} — {b.service || b.service_name} ({b.assigned_team_name ? `Team: ${b.assigned_team_name}` : "Assigned Team"}) [{b.booking_status}]
-                                        </option>
-                                    ))}
+                                    <option value="">Select your assigned job</option>
+                                    {assignedBookings.map((b) => {
+                                        const existingCl = !editingChecklist
+                                            ? checklists.find((c) => Number(c.booking_id) === Number(b.booking_id))
+                                            : null;
+                                        return (
+                                            <option key={b.booking_id} value={b.booking_id} disabled={Boolean(existingCl)}>
+                                                Booking #{b.booking_id} · {b.client_name} — {b.service || b.service_name}{existingCl ? " (Checklist Created)" : ""}
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             )}
                         </div>
@@ -821,7 +877,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     {assignedBookings.length > 0 && (
                         <div style={{ marginBottom: 20, padding: 16, background: "#F8FAFF", border: "1px solid #BFDBFE", borderRadius: 12 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, color: "#1E3A8A", marginBottom: 10 }}>
-                                Started Bookings Ready in My Tools & Materials Checklist
+                                Active Assigned Jobs (Automatically Started Upon Booking Approval)
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                                 {assignedBookings.map((b) => {
@@ -847,19 +903,31 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                     <StatusBadge status={b.booking_status} />
                                                 </div>
                                                 <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
-                                                    {b.service} · Scheduled {formatDateTime(b.scheduled_date)}
+                                                    {b.service}{b.scheduled_date ? ` · Scheduled ${formatDateTime(b.scheduled_date)}` : ""}
                                                 </div>
                                             </div>
-                                            <div>
+                                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                                 {existingCl ? (
-                                                    <button
-                                                        type="button"
-                                                        className="btn-secondary"
-                                                        style={{ fontSize: 12, padding: "6px 12px" }}
-                                                        onClick={() => setViewChecklistModal(existingCl)}
-                                                    >
-                                                        Checklist #{existingCl.checklist_id} ({existingCl.status}) — View / Return Tools
-                                                    </button>
+                                                    <>
+                                                        {existingCl.status === "Pending" && (
+                                                            <button
+                                                                type="button"
+                                                                className="btn-secondary"
+                                                                style={{ fontSize: 12, padding: "6px 12px", borderColor: "#2563EB", color: "#1D4ED8" }}
+                                                                onClick={() => openEditChecklistModal(existingCl)}
+                                                            >
+                                                                Edit Checklist #{existingCl.checklist_id}
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            className="btn-secondary"
+                                                            style={{ fontSize: 12, padding: "6px 12px" }}
+                                                            onClick={() => setViewChecklistModal(existingCl)}
+                                                        >
+                                                            Checklist #{existingCl.checklist_id} ({existingCl.status}) — {existingCl.status === "Pending" ? "Awaiting Tools Man Approval" : "View Checklist"}
+                                                        </button>
+                                                    </>
                                                 ) : (
                                                     <button
                                                         type="button"
@@ -867,7 +935,7 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                                                         style={{ fontSize: 12, padding: "7px 14px" }}
                                                         onClick={() => openCreateChecklistModal(String(b.booking_id))}
                                                     >
-                                                        + Create Checklist (New Page)
+                                                        + Create Tools &amp; Materials Checklist
                                                     </button>
                                                 )}
                                             </div>
@@ -890,11 +958,11 @@ export default function TechnicianTools({ addToast, onNavigate }) {
                     </div>
 
                     {/* Task Assignment Status Notice */}
-                    {assignedBookings.length === 0 && (
+                    {!loadingBookings && assignedBookings.length === 0 && (
                         <div style={{ padding: "12px 16px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 10, marginBottom: 16, display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#1E40AF" }}>
                             <InfoIcon size={18} color="#1E40AF" />
                             <div>
-                                <strong>Start Job Required First:</strong> Click <strong>Start Job</strong> on your recommended booking in <em>My Assigned Jobs</em> first. Once started, the booking will appear here so you can create your Tools &amp; Materials Checklist.
+                                <strong>Awaiting Booking Approval:</strong> Once a booking is approved and assigned to you, the job will automatically start and appear here so you can create your Tools &amp; Materials Checklist for Tools Man approval.
                             </div>
                         </div>
                     )}

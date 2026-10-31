@@ -273,6 +273,9 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
     };
 
     const displayUser = profileData.user || {};
+    const roleId = Number(displayUser.role_id ?? authUser?.role_id ?? 0);
+    const isCustomer = roleId === 2 || Boolean(auth.isCustomer);
+    const isEmployee = !isCustomer;
     const roleMeta = profileData.role_meta || {};
     // Display Given Name and Last Name only in the user profile as requested
     const fullName =
@@ -684,13 +687,18 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
 
                             <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-slate-700" htmlFor="prof_address">
-                                    Address & Geospatial Location Verification
+                                    {isCustomer ? "Address & Geospatial Location Verification" : "Address"}
                                 </label>
                                 <GeospatialAddressAutocomplete
                                     id="prof_address"
                                     value={form.address}
                                     allowOutsideSave={true}
-                                    placeholder="Search street, barangay, or city (e.g., Brgy. Canelar, Zamboanga City)..."
+                                    isEmployee={isEmployee}
+                                    placeholder={
+                                        isCustomer
+                                            ? "Search street, barangay, or city (e.g., Brgy. Canelar, Zamboanga City)..."
+                                            : "Enter address (e.g., street, barangay, city)..."
+                                    }
                                     onChange={(val) => setForm({ ...form, address: val })}
                                     error={formErrors.address ? formErrors.address[0] : ""}
                                 />
