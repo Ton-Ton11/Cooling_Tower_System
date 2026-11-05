@@ -712,6 +712,7 @@ Route::middleware(['auth'])
         Route::get('/certifications', 'indexCertifications')->name('certifications.index');
         Route::post('/certifications', 'storeCertification')->name('certifications.store');
         Route::match(['post', 'patch'], '/certifications/{certificationId}/renew', 'renewCertification')->name('certifications.renew');
+        Route::post('/certifications/{certificationId}/remind', 'remindTechnician')->name('certifications.remind');
         Route::post('/evaluate-reminders', 'triggerReminderEvaluation')->name('evaluate');
         Route::match(['get', 'post'], '/warranty/track', 'trackAcWarranty')->name('warranty.track');
         Route::post('/warranty/{acUnitId}/status', 'updateAcUnitWarrantyStatus')->name('warranty.status');

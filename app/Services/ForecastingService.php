@@ -665,17 +665,17 @@ class ForecastingService
     protected function buildCertificationNotice(string $name, string $issuer, int $daysLeft, string $status): string
     {
         if ($status === 'Renewal Submitted') {
-            return "Renewed certificate submitted by technician (1/1 limit reached). Awaiting Manager verification and new expiration date entry.";
+            return "Renewal submitted. Awaiting manager review and updated expiration date.";
         }
         if ($daysLeft < 0) {
             $ago = abs($daysLeft);
-            return "EXPIRED {$ago} days ago. 1-week forecasting reminder triggered — technician must submit the renewed certificate for Manager verification.";
+            return "Certificate expired {$ago} days ago. Please upload your renewed certificate for review.";
         }
         if ($daysLeft <= 7) {
-            return "1-Week Forecasting Reminder Triggered: Expires in {$daysLeft} " . ($daysLeft === 1 ? 'day' : 'days') . ". Please submit your renewed certificate (1 submission allowed) for Manager verification.";
+            return "Expires in {$daysLeft} " . ($daysLeft === 1 ? 'day' : 'days') . ". You can now submit your renewal details for manager verification.";
         }
 
-        return "Forecasting Validated: Certificate is active and compliant ({$daysLeft} days remaining). Reminder will automatically trigger 1 week (7 days) before expiration.";
+        return "Certificate is active and valid ({$daysLeft} days remaining). Renewal submission opens 7 days before expiration.";
     }
 
     /**

@@ -10,11 +10,19 @@ import {
     Calendar,
     Plus,
     Search,
+    Info,
+    ChevronDown,
+    ChevronUp,
+    Award,
+    FileText,
+    Bell,
 } from "lucide-react";
 
 export default function CertificateMonitoring({ addToast, onDataChanged }) {
     const [loading, setLoading] = useState(true);
     const [scanning, setScanning] = useState(false);
+    const [showGuide, setShowGuide] = useState(false);
+    const [remindingId, setRemindingId] = useState(null);
     const [data, setData] = useState({
         role_id: 5,
         is_manager: false,
@@ -35,7 +43,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
     const [searchQuery, setSearchQuery] = useState("");
     const [scopeTab, setScopeTab] = useState("all"); // "all" | "personal" (for Head Technician)
 
-    // Technician 1-time submission state
+    // Technician submission state
     const [submittingCertObj, setSubmittingCertObj] = useState(null);
     const [techCertNumber, setTechCertNumber] = useState("");
     const [techNotes, setTechNotes] = useState("");
@@ -83,7 +91,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
             } catch (err) {
                 notify(
                     err?.response?.data?.message ||
-                        "Unable to load technician certificate monitoring data.",
+                        "Unable to load certificate monitoring records.",
                     "error",
                 );
             } finally {
@@ -103,14 +111,14 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
             const res = await window.axios.post("/forecasting/evaluate-reminders");
             notify(
                 res.data?.message ||
-                    "1-week certificate forecasting validation & reminder scan completed.",
+                    "Certificate expiration scan completed.",
                 "success",
             );
             await fetchCertifications(false);
             if (onDataChanged) onDataChanged();
         } catch (err) {
             notify(
-                err?.response?.data?.message || "Could not run reminder scan.",
+                err?.response?.data?.message || "Could not complete reminder scan.",
                 "error",
             );
         } finally {
@@ -118,7 +126,37 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
         }
     };
 
+    const handleRemindCrewMember = async (cert) => {
+        try {
+            setRemindingId(cert.certification_id);
+            const res = await window.axios.post(
+                `/forecasting/certifications/${cert.certification_id}/remind`
+            );
+            notify(
+                res.data?.message ||
+                    `Reminder sent to ${cert.technician_name || "crew member"}.`,
+                "success",
+            );
+            await fetchCertifications(false);
+            if (onDataChanged) onDataChanged();
+        } catch (err) {
+            notify(
+                err?.response?.data?.message || "Failed to send reminder to crew member.",
+                "error",
+            );
+        } finally {
+            setRemindingId(null);
+        }
+    };
+
     const openTechnicianSubmitModal = (cert) => {
+        if (data.is_head_technician && Number(cert.user_id) !== Number(data.user_id)) {
+            notify(
+                "Head Technicians can only view and remind crew members. Only the crew member can submit their renewal credentials.",
+                "error",
+            );
+            return;
+        }
         setSubmittingCertObj(cert);
         setTechCertNumber(cert.certificate_number || "");
         setTechNotes("");
@@ -153,7 +191,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
             notify(
                 res.data?.message ||
-                    "Renewed certificate submitted (1/1)! Awaiting Manager verification.",
+                    "Renewal submitted! Awaiting manager verification.",
                 "success",
             );
             setSubmittingCertObj(null);
@@ -188,7 +226,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
         if (!mgrVerifiedChecked) {
             notify(
-                "Please check the verification box to confirm you have verified the technician's certificate.",
+                "Please confirm that you have verified the renewed certificate.",
                 "error",
             );
             return;
@@ -209,7 +247,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
             notify(
                 res.data?.message ||
-                    "Certificate verified and renewed! Forecasting countdown restarted.",
+                    "Certificate verified and expiry updated.",
                 "success",
             );
             setVerifyingCertObj(null);
@@ -219,7 +257,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
             const firstErr =
                 err?.response?.data?.errors?.new_expiry_date?.[0] ||
                 err?.response?.data?.message ||
-                "Failed to verify and renew certificate.";
+                "Failed to update certificate.";
             notify(firstErr, "error");
         } finally {
             setMgrSubmitting(false);
@@ -236,7 +274,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
             );
             notify(
                 res.data?.message ||
-                    "Technician certificate registered and forecasting activated.",
+                    "Technician certificate registered successfully.",
                 "success",
             );
             setShowAddForm(false);
@@ -245,7 +283,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
         } catch (err) {
             notify(
                 err?.response?.data?.message ||
-                    "Failed to register technician certificate.",
+                    "Failed to register certificate.",
                 "error",
             );
         } finally {
@@ -299,114 +337,210 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
     const summary = data.summary || {};
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6">
-            {/* HEADER BANNER */}
-            <div className="bg-gradient-to-r from-[#0E1A33] via-[#14224A] to-[#1D3B7A] rounded-3xl p-6 sm:p-8 text-white shadow-xl border border-white/10 relative overflow-hidden">
-                <div className="pointer-events-none absolute -top-20 right-10 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl" />
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto space-y-5">
+            {/* ══════════════════════════════════════════════════════════════════
+                HEADER BANNER (POLISHED, MINIMAL LABELS)
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="bg-gradient-to-r from-[#0F1B35] via-[#16274E] to-[#1F3E7C] rounded-3xl p-6 sm:p-7 text-white shadow-xl border border-white/10 relative overflow-hidden">
+                <div className="pointer-events-none absolute -top-24 right-10 h-72 w-72 rounded-full bg-blue-500/15 blur-3xl" />
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
                     <div className="space-y-2 max-w-2xl">
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-sky-400/30 text-sky-200 text-xs font-bold uppercase tracking-wider">
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-sky-400/30 text-sky-200 text-[11px] font-bold uppercase tracking-wider">
                             <ShieldCheck className="size-3.5 text-emerald-400" />
-                            <span>1-Week Forecasting Certificate Validation</span>
+                            <span>Trade & Safety Compliance</span>
                         </div>
                         <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                            Technician Certificate Status Monitoring
+                            Certificate Monitoring
                         </h1>
                         <p className="text-xs sm:text-sm text-slate-200/90 leading-relaxed">
                             {data.is_manager
-                                ? "Forecasting automatically validates technician certificates and triggers reminders 1 week (7 days) before expiration. Verify technician-submitted renewals (1 submission allowed per cycle) and enter the new expiration date to restart the countdown."
-                                : "Forecasting monitors your trade and safety certificates. When a certificate is 1 week (7 days) from expiration, a reminder triggers so you can submit your renewed certificate once for Manager verification."}
+                                ? "Monitor team certifications, review renewal submissions, and verify updated credentials to maintain compliance."
+                                : data.is_head_technician
+                                ? "Monitor crew trade and safety certifications and send renewal reminders. Crew members must submit their own renewal credentials for manager review."
+                                : "Keep track of your professional safety credentials and trade licenses. When your certificate is within 7 days of expiration, upload your renewal for manager verification."}
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                    <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        <button
+                            type="button"
+                            onClick={() => setShowGuide(!showGuide)}
+                            className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold border border-white/15 transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                            <Info className="size-3.5 text-sky-300" />
+                            <span>Status Guide</span>
+                            {showGuide ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                        </button>
+
                         {(data.is_manager || data.is_head_technician) && (
                             <button
                                 type="button"
                                 disabled={scanning}
                                 onClick={handleTriggerForecastScan}
-                                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold shadow-md transition flex items-center gap-1.5"
+                                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
                             >
                                 <RefreshCw
                                     className={`size-3.5 ${scanning ? "animate-spin" : ""}`}
                                 />
-                                <span>
-                                    {scanning
-                                        ? "Validating..."
-                                        : "Run 1-Week Reminder Scan"}
-                                </span>
+                                <span>{scanning ? "Scanning..." : "Check Due Dates"}</span>
                             </button>
                         )}
+
                         {data.is_manager && (
                             <button
                                 type="button"
                                 onClick={() => setShowAddForm(!showAddForm)}
-                                className="px-4 py-2.5 rounded-xl bg-white text-[#14224A] hover:bg-sky-50 text-xs font-extrabold shadow-md transition flex items-center gap-1.5"
+                                className="px-4 py-2.5 rounded-xl bg-white text-[#0F1B35] hover:bg-sky-50 text-xs font-extrabold shadow-sm transition flex items-center gap-1.5 cursor-pointer"
                             >
-                                <Plus className="size-3.5" />
-                                <span>
-                                    {showAddForm
-                                        ? "Close Form"
-                                        : "Register Certificate"}
-                                </span>
+                                <Plus className="size-3.5 text-blue-600" />
+                                <span>{showAddForm ? "Close Form" : "Add Certificate"}</span>
                             </button>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* KPI SUMMARY CARDS */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs">
-                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
-                        Tracked Certificates
-                    </p>
-                    <p className="text-2xl font-black text-[#14224A] mt-1">
-                        {summary.total_certificates ?? baseList.length}
-                    </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                        Monitored by forecasting engine
-                    </p>
+            {/* ══════════════════════════════════════════════════════════════════
+                USER-FRIENDLY STATUS GUIDE (EXPLAINS TERMINOLOGIES CLEARLY)
+            ══════════════════════════════════════════════════════════════════ */}
+            {showGuide && (
+                <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm animate-fadeIn">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-3.5">
+                        <div className="flex items-center gap-2">
+                            <Info className="size-4 text-blue-600" />
+                            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                                Understanding Certificate Statuses
+                            </h3>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowGuide(false)}
+                            className="text-[11px] font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                            Hide Guide
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                <span className="text-xs font-extrabold text-emerald-900">Active</span>
+                            </div>
+                            <p className="text-[11px] text-emerald-700 leading-relaxed">
+                                Valid with more than 7 days left. No action is required.
+                            </p>
+                        </div>
+
+                        <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-100 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                                <span className="text-xs font-extrabold text-amber-900">Expiring Soon</span>
+                            </div>
+                            <p className="text-[11px] text-amber-700 leading-relaxed">
+                                7 days or less remaining. The upload renewal button is now active.
+                            </p>
+                        </div>
+
+                        <div className="p-3 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                <span className="text-xs font-extrabold text-blue-900">Pending Review</span>
+                            </div>
+                            <p className="text-[11px] text-blue-700 leading-relaxed">
+                                Renewal has been submitted and is awaiting manager verification.
+                            </p>
+                        </div>
+
+                        <div className="p-3 rounded-2xl bg-rose-50/60 border border-rose-100 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                                <span className="text-xs font-extrabold text-rose-900">Expired</span>
+                            </div>
+                            <p className="text-[11px] text-rose-700 leading-relaxed">
+                                Past the expiration date. Submit your renewed credential immediately.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════════════════
+                KPI SUMMARY CARDS (MINIMAL LABELS, CLEAN METRICS)
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                            Total Tracked
+                        </p>
+                        <p className="text-2xl font-black text-slate-900 mt-0.5">
+                            {summary.total_certificates ?? baseList.length}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                            {data.is_technician && !data.is_manager ? "Your assigned credentials" : "Total crew certificates"}
+                        </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                        <Award className="size-5" />
+                    </div>
                 </div>
 
-                <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200/80 shadow-xs">
-                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800">
-                        Active & Compliant
-                    </p>
-                    <p className="text-2xl font-black text-emerald-900 mt-1">
-                        {summary.active_compliant ?? 0}
-                    </p>
-                    <p className="text-[11px] text-emerald-700 mt-0.5">
-                        More than 1 week (&gt; 7 days) left
-                    </p>
+                <div className="bg-emerald-50/70 rounded-2xl p-4 border border-emerald-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">
+                            Active & Valid
+                        </p>
+                        <p className="text-2xl font-black text-emerald-900 mt-0.5">
+                            {summary.active_compliant ?? 0}
+                        </p>
+                        <p className="text-[10px] text-emerald-700 mt-0.5">
+                            More than 7 days left
+                        </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <ShieldCheck className="size-5" />
+                    </div>
                 </div>
 
-                <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200/80 shadow-xs">
-                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-800">
-                        1-Week Reminder Triggered
-                    </p>
-                    <p className="text-2xl font-black text-amber-900 mt-1">
-                        {summary.expiring_within_1_week ?? 0}
-                    </p>
-                    <p className="text-[11px] text-amber-700 mt-0.5">
-                        Expiring in &le; 7 days (Tech must submit)
-                    </p>
+                <div className="bg-amber-50/70 rounded-2xl p-4 border border-amber-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                            Expiring Soon
+                        </p>
+                        <p className="text-2xl font-black text-amber-900 mt-0.5">
+                            {summary.expiring_within_1_week ?? 0}
+                        </p>
+                        <p className="text-[10px] text-amber-700 mt-0.5">
+                            7 days or less remaining
+                        </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                        <Clock className="size-5" />
+                    </div>
                 </div>
 
-                <div className="bg-blue-50/70 rounded-2xl p-4 border border-blue-200/80 shadow-xs">
-                    <p className="text-[11px] font-extrabold uppercase tracking-wider text-blue-800">
-                        Awaiting Manager Verification
-                    </p>
-                    <p className="text-2xl font-black text-blue-900 mt-1">
-                        {summary.pending_manager_verification ?? 0}
-                    </p>
-                    <p className="text-[11px] text-blue-700 mt-0.5">
-                        Submitted (1/1) • Ready for new expiry
-                    </p>
+                <div className="bg-blue-50/70 rounded-2xl p-4 border border-blue-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-blue-800">
+                            Pending Review
+                        </p>
+                        <p className="text-2xl font-black text-blue-900 mt-0.5">
+                            {summary.pending_manager_verification ?? 0}
+                        </p>
+                        <p className="text-[10px] text-blue-700 mt-0.5">
+                            Awaiting manager check
+                        </p>
+                    </div>
+                    <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                        <FileCheck2 className="size-5" />
+                    </div>
                 </div>
             </div>
 
-            {/* MANAGER ADD NEW CERTIFICATE FORM */}
+            {/* ══════════════════════════════════════════════════════════════════
+                MANAGER ADD NEW CERTIFICATE FORM (IF EXPANDED)
+            ══════════════════════════════════════════════════════════════════ */}
             {data.is_manager && showAddForm && (
                 <form
                     onSubmit={handleManagerAddCertificate}
@@ -414,11 +548,11 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                 >
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                         <div>
-                            <h3 className="text-sm font-extrabold text-[#14224A]">
-                                Register New Technician Certification
+                            <h3 className="text-sm font-extrabold text-[#0F1B35]">
+                                Register Technician Certificate
                             </h3>
                             <p className="text-xs text-slate-500">
-                                Forecasting will automatically monitor the expiration date and trigger a reminder 1 week (7 days) prior.
+                                The system will monitor the expiration date and trigger reminders 7 days prior.
                             </p>
                         </div>
                         <button
@@ -457,7 +591,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
                         <div>
                             <label className="block font-bold text-slate-700 mb-1">
-                                Certification Title
+                                Certificate Title
                             </label>
                             <input
                                 type="text"
@@ -475,7 +609,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
                         <div>
                             <label className="block font-bold text-slate-700 mb-1">
-                                Issuing Body
+                                Issuing Agency
                             </label>
                             <input
                                 type="text"
@@ -512,7 +646,7 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
                         <div>
                             <label className="block font-bold text-slate-700 mb-1">
-                                Issued Date
+                                Date Issued
                             </label>
                             <input
                                 type="date"
@@ -558,25 +692,25 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                         <button
                             type="submit"
                             disabled={addingCert}
-                            className="px-5 py-2 rounded-xl bg-[#14224A] hover:bg-blue-700 text-white font-bold shadow-xs"
+                            className="px-5 py-2 rounded-xl bg-[#0F1B35] hover:bg-blue-700 text-white font-bold shadow-xs"
                         >
-                            {addingCert
-                                ? "Saving..."
-                                : "Save & Activate Forecasting"}
+                            {addingCert ? "Saving..." : "Save Certificate"}
                         </button>
                     </div>
                 </form>
             )}
 
-            {/* FILTER BAR */}
-            <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* ══════════════════════════════════════════════════════════════════
+                FILTER & SEARCH TOOLBAR (MINIMAL LABELS, CLEAN TABS)
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5 flex-wrap">
                     {data.is_head_technician && (
                         <div className="flex items-center gap-1 mr-2 pr-2 border-r border-slate-200">
                             <button
                                 type="button"
                                 onClick={() => setScopeTab("all")}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                                     scopeTab === "all"
                                         ? "bg-indigo-600 text-white"
                                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -587,34 +721,30 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                             <button
                                 type="button"
                                 onClick={() => setScopeTab("personal")}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition ${
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                                     scopeTab === "personal"
                                         ? "bg-indigo-600 text-white"
                                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                                 }`}
                             >
-                                My Certificates (
-                                {data.personal_certifications?.length || 0})
+                                My Credentials ({data.personal_certifications?.length || 0})
                             </button>
                         </div>
                     )}
 
                     {[
-                        { id: "all", label: "All Certificates" },
-                        {
-                            id: "submitted",
-                            label: "Submitted for Verification",
-                        },
-                        { id: "expiring", label: "1-Week Reminder (≤ 7 Days)" },
-                        { id: "active", label: "Active (> 7 Days)" },
+                        { id: "all", label: "All" },
+                        { id: "active", label: "Active" },
+                        { id: "expiring", label: "Expiring Soon" },
+                        { id: "submitted", label: "Pending Review" },
                     ].map((tab) => (
                         <button
                             key={tab.id}
                             type="button"
                             onClick={() => setFilterStatus(tab.id)}
-                            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                                 filterStatus === tab.id
-                                    ? "bg-[#14224A] text-white shadow-xs"
+                                    ? "bg-[#0F1B35] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                             }`}
                         >
@@ -629,70 +759,63 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search technician, cert #, or issuer..."
-                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
+                        placeholder="Search certificate, number, or issuer..."
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:border-blue-600 bg-slate-50/50"
                     />
                 </div>
             </div>
 
-            {/* TECHNICIAN SINGLE-SUBMISSION MODAL / PANEL */}
+            {/* ══════════════════════════════════════════════════════════════════
+                TECHNICIAN RENEWAL SUBMISSION PANEL (CLEAN & SIMPLE)
+            ══════════════════════════════════════════════════════════════════ */}
             {submittingCertObj && (
-                <div className="bg-amber-50/90 rounded-3xl p-6 border-2 border-amber-300 shadow-lg space-y-4">
-                    <div className="flex items-start justify-between gap-4 border-b border-amber-200 pb-3">
+                <div className="bg-amber-50/90 rounded-3xl p-6 border-2 border-amber-300 shadow-lg space-y-4 animate-fadeIn">
+                    <div className="flex items-start justify-between gap-4 border-b border-amber-200/80 pb-3">
                         <div>
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-200/80 text-amber-950 text-[10px] font-extrabold uppercase">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-extrabold uppercase tracking-wider">
                                 <AlertTriangle className="size-3" />
-                                1-Week Forecasting Reminder • Single Submission (1/1)
+                                <span>Renewal Window Open</span>
                             </span>
                             <h3 className="text-base font-extrabold text-slate-900 mt-1">
-                                Submit Renewed Certificate —{" "}
-                                {submittingCertObj.certification_name}
+                                Submit Certificate Renewal: {submittingCertObj.certification_name}
                             </h3>
                             <p className="text-xs text-slate-600 mt-0.5">
-                                You can only submit your renewed certificate{" "}
-                                <strong>once</strong> per renewal cycle. After submission, the Manager will verify your certificate, confirm the renewal status, and enter the new expiration date.
+                                Enter your updated certificate number and optional proof. Your manager will verify and activate the new expiration date.
                             </p>
                         </div>
                         <button
                             type="button"
                             onClick={() => setSubmittingCertObj(null)}
-                            className="text-slate-500 hover:text-slate-900 font-bold text-sm"
+                            className="text-slate-400 hover:text-slate-800 font-bold text-sm cursor-pointer"
                         >
                             ✕
                         </button>
                     </div>
 
-                    <form
-                        onSubmit={handleTechnicianSubmitRenewal}
-                        className="space-y-4 text-xs"
-                    >
+                    <form onSubmit={handleTechnicianSubmitRenewal} className="space-y-4 text-xs">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label className="block font-bold text-slate-800 mb-1">
-                                    Renewed Certificate Number *
+                                    New Certificate Number *
                                 </label>
                                 <input
                                     type="text"
                                     required
                                     value={techCertNumber}
-                                    onChange={(e) =>
-                                        setTechCertNumber(e.target.value)
-                                    }
-                                    placeholder="Enter new certificate number (e.g. TESDA-NC2-2026-9910)"
+                                    onChange={(e) => setTechCertNumber(e.target.value)}
+                                    placeholder="e.g. TESDA-NC2-2026-9910"
                                     className="w-full rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 text-xs font-semibold"
                                 />
                             </div>
 
                             <div>
                                 <label className="block font-bold text-slate-800 mb-1">
-                                    Attach Renewed Certificate Proof (Optional Image/PDF)
+                                    Certificate File (Optional Image or PDF)
                                 </label>
                                 <input
                                     type="file"
                                     accept=".jpg,.jpeg,.png,.webp,.pdf"
-                                    onChange={(e) =>
-                                        setTechFile(e.target.files?.[0] || null)
-                                    }
+                                    onChange={(e) => setTechFile(e.target.files?.[0] || null)}
                                     className="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs"
                                 />
                             </div>
@@ -700,13 +823,13 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
                         <div>
                             <label className="block font-bold text-slate-800 mb-1">
-                                Submission Remarks / Issuing Details (Optional)
+                                Remarks / Notes (Optional)
                             </label>
                             <input
                                 type="text"
                                 value={techNotes}
                                 onChange={(e) => setTechNotes(e.target.value)}
-                                placeholder="e.g. Renewed at TESDA Zamboanga Regional Assessment Center"
+                                placeholder="e.g. Renewed at TESDA Regional Center"
                                 className="w-full rounded-xl border border-amber-300 bg-white px-3.5 py-2.5 text-xs"
                             />
                         </div>
@@ -715,50 +838,45 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                             <button
                                 type="button"
                                 onClick={() => setSubmittingCertObj(null)}
-                                className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold"
+                                className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
                                 disabled={techSubmitting}
-                                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold shadow-sm flex items-center gap-1.5"
+                                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold shadow-sm flex items-center gap-1.5 cursor-pointer"
                             >
                                 <Upload className="size-3.5" />
-                                <span>
-                                    {techSubmitting
-                                        ? "Submitting..."
-                                        : "Submit Renewed Certificate (1/1)"}
-                                </span>
+                                <span>{techSubmitting ? "Submitting..." : "Submit for Verification"}</span>
                             </button>
                         </div>
                     </form>
                 </div>
             )}
 
-            {/* MANAGER VERIFICATION & NEW EXPIRATION DATE PANEL */}
+            {/* ══════════════════════════════════════════════════════════════════
+                MANAGER VERIFICATION MODAL
+            ══════════════════════════════════════════════════════════════════ */}
             {data.is_manager && verifyingCertObj && (
-                <div className="bg-indigo-50/90 rounded-3xl p-6 border-2 border-indigo-300 shadow-lg space-y-4">
-                    <div className="flex items-start justify-between gap-4 border-b border-indigo-200 pb-3">
+                <div className="bg-indigo-50/90 rounded-3xl p-6 border-2 border-indigo-300 shadow-lg space-y-4 animate-fadeIn">
+                    <div className="flex items-start justify-between gap-4 border-b border-indigo-200/80 pb-3">
                         <div>
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-200/80 text-indigo-950 text-[10px] font-extrabold uppercase">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-200 text-indigo-950 text-[10px] font-extrabold uppercase tracking-wider">
                                 <FileCheck2 className="size-3" />
-                                Manager Certificate Verification & Countdown Reset
+                                <span>Manager Review & Countdown Reset</span>
                             </span>
                             <h3 className="text-base font-extrabold text-slate-900 mt-1">
-                                Verify & Confirm Renewal —{" "}
-                                {verifyingCertObj.technician_name || "Technician"} (
-                                {verifyingCertObj.certification_name})
+                                Verify Renewal: {verifyingCertObj.technician_name || "Technician"} ({verifyingCertObj.certification_name})
                             </h3>
                             <p className="text-xs text-slate-600 mt-0.5">
-                                Verify the technician&apos;s submitted certificate details below, confirm the renewal status, and enter the{" "}
-                                <strong>new expiration date</strong> so the forecasting countdown starts over again.
+                                Check the submitted renewal information and enter the new expiration date.
                             </p>
                         </div>
                         <button
                             type="button"
                             onClick={() => setVerifyingCertObj(null)}
-                            className="text-slate-500 hover:text-slate-900 font-bold text-sm"
+                            className="text-slate-400 hover:text-slate-800 font-bold text-sm cursor-pointer"
                         >
                             ✕
                         </button>
@@ -767,16 +885,13 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                     {verifyingCertObj.notes && (
                         <div className="p-3.5 rounded-2xl bg-white border border-indigo-200 text-xs text-slate-700">
                             <span className="font-extrabold text-indigo-900 block mb-0.5">
-                                Technician Submission Record:
+                                Technician Submission Notes:
                             </span>
                             {verifyingCertObj.notes}
                         </div>
                     )}
 
-                    <form
-                        onSubmit={handleManagerConfirmRenewal}
-                        className="space-y-4 text-xs"
-                    >
+                    <form onSubmit={handleManagerConfirmRenewal} className="space-y-4 text-xs">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label className="block font-bold text-slate-800 mb-1">
@@ -786,24 +901,20 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                                     type="text"
                                     required
                                     value={mgrCertNumber}
-                                    onChange={(e) =>
-                                        setMgrCertNumber(e.target.value)
-                                    }
+                                    onChange={(e) => setMgrCertNumber(e.target.value)}
                                     className="w-full rounded-xl border border-indigo-300 bg-white px-3.5 py-2.5 text-xs font-semibold"
                                 />
                             </div>
 
                             <div>
                                 <label className="block font-bold text-slate-800 mb-1">
-                                    New Expiration Date (Restarts Countdown) *
+                                    New Expiration Date *
                                 </label>
                                 <input
                                     type="date"
                                     required
                                     value={mgrNewExpiryDate}
-                                    onChange={(e) =>
-                                        setMgrNewExpiryDate(e.target.value)
-                                    }
+                                    onChange={(e) => setMgrNewExpiryDate(e.target.value)}
                                     className="w-full rounded-xl border border-indigo-300 bg-white px-3.5 py-2.5 text-xs font-semibold"
                                 />
                             </div>
@@ -811,13 +922,13 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
 
                         <div>
                             <label className="block font-bold text-slate-800 mb-1">
-                                Manager Verification Notes (Optional)
+                                Verification Notes (Optional)
                             </label>
                             <input
                                 type="text"
                                 value={mgrNotes}
                                 onChange={(e) => setMgrNotes(e.target.value)}
-                                placeholder="e.g. Verified authentic TESDA certificate and official receipt."
+                                placeholder="e.g. Verified valid certificate copy"
                                 className="w-full rounded-xl border border-indigo-300 bg-white px-3.5 py-2.5 text-xs"
                             />
                         </div>
@@ -826,13 +937,11 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                             <input
                                 type="checkbox"
                                 checked={mgrVerifiedChecked}
-                                onChange={(e) =>
-                                    setMgrVerifiedChecked(e.target.checked)
-                                }
+                                onChange={(e) => setMgrVerifiedChecked(e.target.checked)}
                                 className="rounded border-indigo-400 text-indigo-600 focus:ring-indigo-500 size-4"
                             />
                             <span className="font-bold text-slate-800">
-                                I have carefully verified the technician&apos;s renewed certificate and confirm activating the new expiration countdown.
+                                I confirm this renewed certificate is authentic and approved.
                             </span>
                         </label>
 
@@ -840,66 +949,75 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                             <button
                                 type="button"
                                 onClick={() => setVerifyingCertObj(null)}
-                                className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold"
+                                className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold cursor-pointer"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
                                 disabled={mgrSubmitting}
-                                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow-sm flex items-center gap-1.5"
+                                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold shadow-sm flex items-center gap-1.5 cursor-pointer"
                             >
                                 <CheckCircle2 className="size-4" />
-                                <span>
-                                    {mgrSubmitting
-                                        ? "Confirming..."
-                                        : "Confirm Renew Status & Restart Countdown"}
-                                </span>
+                                <span>{mgrSubmitting ? "Saving..." : "Approve & Update Expiry"}</span>
                             </button>
                         </div>
                     </form>
                 </div>
             )}
 
-            {/* CERTIFICATES LIST */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            {/* ══════════════════════════════════════════════════════════════════
+                CERTIFICATES LIST (ENHANCED CARD DESIGN & MINIMAL LABELS)
+            ══════════════════════════════════════════════════════════════════ */}
+            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs space-y-4">
                 {loading ? (
                     <div className="py-12 text-center text-xs text-slate-400">
-                        Loading technician certificate forecasting records...
+                        Loading certificates...
                     </div>
                 ) : filteredCertificates.length === 0 ? (
                     <div className="py-12 text-center text-xs text-slate-400">
-                        No technician certificates match the current filter.
+                        No certificates found matching your criteria.
                     </div>
                 ) : (
-                    <div className="space-y-3.5">
+                    <div className="space-y-3">
                         {filteredCertificates.map((cert) => {
-                            const daysLeft = Number(
-                                cert.days_until_expiry ?? 99,
-                            );
+                            const daysLeft = Number(cert.days_until_expiry ?? 99);
                             const isWithinOneWeek = daysLeft <= 7;
-                            const isSubmitted =
-                                cert.status === "Renewal Submitted";
+                            const isSubmitted = cert.status === "Renewal Submitted";
+                            const isExpired = daysLeft < 0;
+
+                            // Minimal, friendly badge definitions
+                            let badgeStyle = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                            let badgeText = "Active";
+
+                            if (isSubmitted) {
+                                badgeStyle = "bg-blue-50 text-blue-800 border-blue-200";
+                                badgeText = "Pending Review";
+                            } else if (isExpired) {
+                                badgeStyle = "bg-rose-50 text-rose-800 border-rose-200";
+                                badgeText = "Expired";
+                            } else if (isWithinOneWeek) {
+                                badgeStyle = "bg-amber-50 text-amber-800 border-amber-200";
+                                badgeText = `Expiring Soon (${daysLeft}d)`;
+                            }
 
                             return (
                                 <div
                                     key={cert.certification_id}
-                                    className={`p-5 rounded-2xl border transition flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                                    className={`p-5 rounded-2xl border transition hover:shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
                                         isSubmitted
-                                            ? "bg-blue-50/50 border-blue-200"
+                                            ? "bg-blue-50/30 border-blue-200/80"
                                             : isWithinOneWeek
-                                            ? "bg-amber-50/50 border-amber-200"
-                                            : "bg-slate-50/60 border-slate-200/80"
+                                            ? "bg-amber-50/30 border-amber-200/80"
+                                            : "bg-white border-slate-200/80 hover:border-slate-300"
                                     }`}
                                 >
-                                    <div className="space-y-2 max-w-3xl">
+                                    <div className="space-y-2.5 max-w-3xl">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             {cert.technician_name && (
-                                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-[#14224A] text-white">
+                                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#0F1B35] text-white">
                                                     {cert.technician_name}
-                                                    {cert.technician_role
-                                                        ? ` • ${cert.technician_role}`
-                                                        : ""}
+                                                    {cert.technician_role ? ` • ${cert.technician_role}` : ""}
                                                 </span>
                                             )}
 
@@ -908,136 +1026,142 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                                             </h3>
 
                                             <span
-                                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                                    isSubmitted
-                                                        ? "bg-blue-100 text-blue-800 border border-blue-300"
-                                                        : daysLeft < 0 ||
-                                                          cert.status ===
-                                                              "Critical"
-                                                        ? "bg-rose-100 text-rose-800 border border-rose-300"
-                                                        : isWithinOneWeek
-                                                        ? "bg-amber-100 text-amber-900 border border-amber-300"
-                                                        : "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                                                }`}
+                                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${badgeStyle}`}
                                             >
-                                                {isSubmitted
-                                                    ? "Renewal Submitted (1/1)"
-                                                    : isWithinOneWeek &&
-                                                      daysLeft >= 0
-                                                    ? `1-Week Reminder (${daysLeft}d left)`
-                                                    : cert.status}
+                                                {badgeText}
                                             </span>
                                         </div>
 
-                                        <div className="flex items-center gap-4 flex-wrap text-xs text-slate-600">
-                                            <span>
-                                                Issuer:{" "}
-                                                <strong className="text-slate-800">
-                                                    {cert.issuing_body}
-                                                </strong>
+                                        <div className="flex items-center gap-3.5 flex-wrap text-xs text-slate-500">
+                                            <span className="inline-flex items-center gap-1">
+                                                <Award className="size-3.5 text-slate-400 shrink-0" />
+                                                <span>Issuer:</span>
+                                                <strong className="text-slate-700 font-semibold">{cert.issuing_body}</strong>
                                             </span>
-                                            <span>
-                                                Certificate #:{" "}
-                                                <strong className="text-slate-800">
-                                                    {cert.certificate_number ||
-                                                        "On File"}
-                                                </strong>
+                                            <span className="inline-flex items-center gap-1">
+                                                <FileText className="size-3.5 text-slate-400 shrink-0" />
+                                                <span>License / ID:</span>
+                                                <strong className="text-slate-700 font-semibold">{cert.certificate_number || "On File"}</strong>
                                             </span>
                                             {cert.issued_date && (
                                                 <span>
-                                                    Issued:{" "}
-                                                    <strong>
-                                                        {cert.issued_date}
-                                                    </strong>
+                                                    Issued: <strong className="text-slate-700 font-semibold">{cert.issued_date}</strong>
                                                 </span>
                                             )}
                                             <span className="inline-flex items-center gap-1">
-                                                <Calendar className="size-3.5 text-slate-400" />
-                                                Expires:{" "}
-                                                <strong className="text-slate-900">
-                                                    {cert.expiry_date}
-                                                </strong>
+                                                <Calendar className="size-3.5 text-slate-400 shrink-0" />
+                                                <span>Expires:</span>
+                                                <strong className="text-slate-900 font-bold">{cert.expiry_date}</strong>
                                             </span>
                                         </div>
 
-                                        <div className="text-xs text-slate-700 bg-white px-3.5 py-2 rounded-xl border border-slate-200/80">
+                                        <div className="text-[11px] text-slate-600 bg-slate-50/80 px-3 py-1.5 rounded-xl border border-slate-200/60 leading-relaxed">
                                             {cert.action_notice}
                                         </div>
 
                                         {cert.notes && (
-                                            <p className="text-[11px] text-slate-500 italic">
-                                                {cert.notes}
+                                            <p className="text-[11px] text-slate-400 italic">
+                                                Note: {cert.notes}
                                             </p>
                                         )}
                                     </div>
 
-                                    {/* RIGHT SIDE: COUNTDOWN & ROLE-SPECIFIC ACTIONS */}
-                                    <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end justify-between gap-2.5 shrink-0">
+                                    {/* RIGHT SIDE: COUNTDOWN & ACTION BUTTON */}
+                                    <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end justify-between gap-2.5 shrink-0 border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
                                         <div className="text-left lg:text-right">
                                             <div className="inline-flex items-center gap-1.5 text-xs font-black text-slate-900">
-                                                <Clock className="size-3.5 text-indigo-600" />
+                                                <Clock className={`size-3.5 ${isExpired ? "text-rose-600" : isWithinOneWeek ? "text-amber-600" : "text-slate-600"}`} />
                                                 <span>
-                                                    {daysLeft < 0
-                                                        ? `Expired ${Math.abs(daysLeft)} days ago`
-                                                        : `${daysLeft} ${
-                                                              daysLeft === 1
-                                                                  ? "day"
-                                                                  : "days"
-                                                          } remaining`}
+                                                    {isExpired
+                                                        ? `Expired ${Math.abs(daysLeft)}d ago`
+                                                        : `${daysLeft} ${daysLeft === 1 ? "day" : "days"} remaining`}
                                                 </span>
                                             </div>
-                                            <span className="block text-[10px] font-semibold text-slate-400">
-                                                1-Week Reminder Window: &le; 7 days
+                                            <span className="block text-[10px] text-slate-400 font-medium">
+                                                Renewal opens 7d prior
                                             </span>
                                         </div>
 
-                                        {/* TECHNICIAN ACTIONS: Submit once when <= 7 days */}
-                                        {data.is_technician && !data.is_manager && (
+                                        {/* HEAD TECHNICIAN VIEWING CREW: VIEW & REMIND ONLY */}
+                                        {data.is_head_technician && Number(cert.user_id) !== Number(data.user_id) && !data.is_manager && (
                                             <div>
                                                 {isSubmitted ? (
-                                                    <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-100 text-blue-900 border border-blue-200 text-xs font-extrabold">
-                                                        <CheckCircle2 className="size-3.5 text-blue-700" />
-                                                        <span>
-                                                            Submitted (1/1) • Awaiting Manager Verification
-                                                        </span>
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 text-xs font-bold">
+                                                        <CheckCircle2 className="size-3.5 text-blue-600" />
+                                                        <span>Pending Manager Review</span>
                                                     </span>
-                                                ) : isWithinOneWeek ? (
+                                                ) : isWithinOneWeek || isExpired ? (
+                                                    <div className="flex flex-col items-start sm:items-end gap-1">
+                                                        <button
+                                                            type="button"
+                                                            disabled={remindingId === cert.certification_id}
+                                                            onClick={() => handleRemindCrewMember(cert)}
+                                                            className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                                        >
+                                                            <Bell className="size-3.5" />
+                                                            <span>
+                                                                {remindingId === cert.certification_id ? "Sending..." : "Remind Crew"}
+                                                            </span>
+                                                        </button>
+                                                        {cert.last_reminded_at && (
+                                                            <span className="text-[10px] text-slate-400">
+                                                                Reminded: {cert.last_reminded_at}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col items-start sm:items-end gap-1">
+                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 text-slate-600 border border-slate-200 text-[11px] font-semibold">
+                                                            <ShieldCheck className="size-3.5 text-emerald-600" />
+                                                            <span>Valid (Monitoring)</span>
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            disabled={remindingId === cert.certification_id}
+                                                            onClick={() => handleRemindCrewMember(cert)}
+                                                            className="text-[10.5px] text-blue-700 hover:underline font-semibold flex items-center gap-1 cursor-pointer pt-0.5"
+                                                        >
+                                                            <Bell className="size-3" />
+                                                            <span>Send Reminder</span>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* TECHNICIAN OWN CERTIFICATE ACTION: UPLOAD RENEWAL */}
+                                        {data.is_technician && !data.is_manager && (!data.is_head_technician || Number(cert.user_id) === Number(data.user_id)) && (
+                                            <div>
+                                                {isSubmitted ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 text-xs font-bold">
+                                                        <CheckCircle2 className="size-3.5 text-blue-600" />
+                                                        <span>Pending Manager Review</span>
+                                                    </span>
+                                                ) : isWithinOneWeek || isExpired ? (
                                                     <button
                                                         type="button"
-                                                        onClick={() =>
-                                                            openTechnicianSubmitModal(
-                                                                cert,
-                                                            )
-                                                        }
-                                                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-xs transition flex items-center gap-1.5"
+                                                        onClick={() => openTechnicianSubmitModal(cert)}
+                                                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
                                                     >
                                                         <Upload className="size-3.5" />
-                                                        <span>
-                                                            Submit Renewed Certificate (1/1)
-                                                        </span>
+                                                        <span>Upload Renewal</span>
                                                     </button>
                                                 ) : (
                                                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
                                                         <ShieldCheck className="size-3.5 text-emerald-600" />
-                                                        <span>
-                                                            Validated • Reminder at 7 Days Left
-                                                        </span>
+                                                        <span>Valid & Compliant</span>
                                                     </span>
                                                 )}
                                             </div>
                                         )}
 
-                                        {/* MANAGER ACTIONS: Verify & Enter New Expiration Date */}
+                                        {/* MANAGER ACTION */}
                                         {data.is_manager && (
-                                            <div className="flex items-center gap-2">
+                                            <div>
                                                 <button
                                                     type="button"
-                                                    onClick={() =>
-                                                        openManagerVerifyModal(
-                                                            cert,
-                                                        )
-                                                    }
-                                                    className={`px-4 py-2 rounded-xl text-xs font-extrabold transition shadow-xs flex items-center gap-1.5 ${
+                                                    onClick={() => openManagerVerifyModal(cert)}
+                                                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer ${
                                                         isSubmitted
                                                             ? "bg-indigo-600 hover:bg-indigo-700 text-white"
                                                             : "bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200"
@@ -1046,8 +1170,8 @@ export default function CertificateMonitoring({ addToast, onDataChanged }) {
                                                     <FileCheck2 className="size-3.5" />
                                                     <span>
                                                         {isSubmitted
-                                                            ? "Verify Submitted Cert & Set New Expiry"
-                                                            : "Verify & Set New Expiration"}
+                                                            ? "Review & Set Expiry"
+                                                            : "Update Expiry"}
                                                     </span>
                                                 </button>
                                             </div>

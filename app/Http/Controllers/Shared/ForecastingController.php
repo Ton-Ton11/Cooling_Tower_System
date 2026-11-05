@@ -68,6 +68,7 @@ class ForecastingController extends Controller
 
         return response()->json([
             'role_id'                 => $roleId,
+            'user_id'                 => $userId,
             'is_manager'              => in_array($roleId, [1, 2], true),
             'is_head_technician'      => $roleId === 7,
             'is_technician'           => in_array($roleId, [5, 7], true),
@@ -150,7 +151,7 @@ class ForecastingController extends Controller
         $cert = TechnicianCertification::findOrFail($certificationId);
         $roleId = (int) $user->role_id;
         $isManagerOrSuperAdmin = in_array($roleId, [1, 2], true);
-        $isOwnerOrHeadTech = ((int) $cert->user_id === (int) $user->user_id) || $roleId === 7;
+        $isOwner = ((int) $cert->user_id === (int) $user->user_id);
 
         $action = $request->input('action', $isManagerOrSuperAdmin ? 'update_dates' : 'submit_renewal');
 
@@ -158,7 +159,12 @@ class ForecastingController extends Controller
         // STEP 1: TECHNICIAN SUBMITS RENEWED CERTIFICATE (CAN ONLY SUBMIT ONCE)
         // ─────────────────────────────────────────────────────────────────────
         if ($action === 'submit_renewal') {
-            if (! $isOwnerOrHeadTech && ! $isManagerOrSuperAdmin) {
+            // Head technicians can only view and remind crew members; they cannot submit renewals for crew
+            if ($roleId === 7 && ! $isOwner) {
+                abort(403, 'Head Technicians can only view and remind crew members. Crew members must submit their own certificate renewals.');
+            }
+
+            if (! $isOwner && ! $isManagerOrSuperAdmin) {
                 abort(403, 'You can only submit a renewed certificate for your own certification record.');
             }
 
@@ -268,6 +274,64 @@ class ForecastingController extends Controller
         return response()->json([
             'message'        => "Certificate verified and renewed! Forecasting countdown has restarted until {$newExpiry->format('M d, Y')} ({$daysUntilNewExpiry} days).",
             'certifications' => $this->forecastingService->getTechnicianCertifications((int) $cert->user_id),
+        ]);
+    }
+
+    /**
+     * Send a reminder notification to a crew technician regarding their expiring or expired certificate.
+     */
+    public function remindTechnician(Request $request, int $certificationId): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            abort(401);
+        }
+
+        $roleId = (int) $user->role_id;
+        $isManager = in_array($roleId, [1, 2], true);
+        $isHeadTech = ($roleId === 7);
+
+        if (! $isManager && ! $isHeadTech) {
+            abort(403, 'Only Head Technicians and Managers can send reminders to crew members.');
+        }
+
+        $cert = TechnicianCertification::with('technician')->findOrFail($certificationId);
+        $tech = $cert->technician;
+        if (! $tech) {
+            abort(404, 'Associated technician profile not found.');
+        }
+
+        $cert->update([
+            'last_reminded_at' => now(),
+        ]);
+
+        $senderRole = $isHeadTech ? 'Head Technician' : 'Manager';
+        $senderName = trim(($user->given_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->name;
+        $title = "Certificate Renewal Reminder: {$cert->certification_name}";
+        $msg = "{$senderRole} {$senderName} sent you a reminder to renew your {$cert->certification_name} certificate ({$cert->issuing_body}). Please prepare your renewed certificate and upload it for manager verification.";
+
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('notifications')) {
+                $tech->notify(new \App\Notifications\ForecastReminderNotification(
+                    'tech_certification',
+                    $title,
+                    $msg,
+                    [
+                        'certification_id' => $cert->certification_id,
+                        'reminded_by'      => $senderName,
+                        'sender_role'      => $senderRole,
+                    ]
+                ));
+            }
+        } catch (\Throwable $e) {
+            // Continue gracefully
+        }
+
+        $formattedTime = now()->format('M d, Y h:i A');
+
+        return response()->json([
+            'message'          => "Reminder sent to {$tech->name} for {$cert->certification_name}.",
+            'last_reminded_at' => $formattedTime,
         ]);
     }
 
