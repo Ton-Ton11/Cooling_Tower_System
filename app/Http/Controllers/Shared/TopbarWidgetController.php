@@ -278,19 +278,25 @@ class TopbarWidgetController extends Controller
 
         if (! $isHeadTech && $roleId === 6) {
             // CUSTOMER NOTIFICATIONS:
-            // 1. Predictive Maintenance Forecasts (notify customer especially when close / Due Soon / Overdue)
+            // 1. 3-Month Maintenance Forecast Reminders (notify customer within 1-week due window or countdown)
             $forecasts = $this->forecastingService->getCustomerForecasts($userId);
             foreach (array_slice($forecasts, 0, 4) as $f) {
                 $createdAt = now()->subHours(2);
-                $isClose = in_array($f['urgency_level'], ['Overdue', 'Due Soon'], true);
+                $isDueWeek = ($f['urgency_level'] === 'Due This Week');
+                $badgeColor = match ($f['urgency_level']) {
+                    'Due This Week' => 'amber',
+                    'Due Soon'      => 'orange',
+                    'Scheduled'     => 'emerald',
+                    default         => 'indigo',
+                };
                 $items[] = [
                     'id'          => 'cust_forecast_' . ($f['forecast_id'] ?? 0),
                     'type'        => 'forecast',
-                    'badge'       => $isClose ? 'PM Reminder • ' . $f['urgency_level'] : $f['urgency_level'],
-                    'badge_color' => $f['urgency_level'] === 'Overdue' ? 'rose' : ($f['urgency_level'] === 'Due Soon' ? 'amber' : 'indigo'),
-                    'title'       => ($isClose ? 'Preventive Maintenance Due Soon: ' : 'Predictive Maintenance: ') . $f['recommended_service_name'],
-                    'message'     => "Suggested by {$f['predicted_due_date']} for {$f['unit_summary']} following your {$f['source_service_name']}.",
-                    'time_ago'    => 'Automated Forecast',
+                    'badge'       => $isDueWeek ? '3-Month Due This Week' : $f['urgency_level'],
+                    'badge_color' => $badgeColor,
+                    'title'       => ($isDueWeek ? 'Maintenance Due This Week: ' : 'Maintenance Countdown: ') . $f['recommended_service_name'],
+                    'message'     => "Suggested by {$f['predicted_due_date']} for {$f['unit_summary']} (following your {$f['source_service_name']}).",
+                    'time_ago'    => $f['days_remaining'] <= 0 ? 'Due this week' : "{$f['days_remaining']} days left",
                     'target_page' => 'book',
                     'unread'      => ! $lastReadAt || $createdAt->gt($lastReadAt),
                 ];

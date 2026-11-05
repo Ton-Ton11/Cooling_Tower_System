@@ -188,13 +188,14 @@ class ForecastingService
 
         $wearFactor = max(0.60, round($wearFactor, 2));
         $baseDays = $chain['base_days'];
-        $adjustedDays = max(21, (int) round($baseDays * $wearFactor));
+        // Standard count months: 3 months (90 days) for all core services
+        $adjustedDays = 90;
 
         $lastServiceDate = $booking->scheduled_date
             ? Carbon::parse($booking->scheduled_date)->startOfDay()
             : now()->startOfDay();
 
-        // If the completed booking was in the past, forecast from its completion/scheduled date
+        // Forecast exactly 3 months (90 days) from completed service date
         $predictedDueDate = (clone $lastServiceDate)->addDays($adjustedDays);
 
         $unitSummary = ! empty($unitSummaryParts)
@@ -354,7 +355,7 @@ class ForecastingService
                 'recommended_service_id'   => $cleaningService?->service_id,
                 'recommended_service_name' => $cleaningService?->service_name ?? 'Cleaning / Preventive Maintenance',
                 'base_days'                => 90,
-                'reason'                   => 'Post-installation 90-day break-in inspection, refrigerant pressure check, and initial coil sanitation.',
+                'reason'                   => 'Post-installation 3-month maintenance check, refrigerant pressure check, and initial coil sanitation.',
             ];
         }
 
@@ -362,8 +363,8 @@ class ForecastingService
             return [
                 'recommended_service_id'   => $cleaningService?->service_id,
                 'recommended_service_name' => $cleaningService?->service_name ?? 'Cleaning / Preventive Maintenance',
-                'base_days'                => 45,
-                'reason'                   => 'Post-repair diagnostic follow-up and preventive chemical cleaning to protect newly serviced components.',
+                'base_days'                => 90,
+                'reason'                   => 'Post-repair 3-month follow-up and preventive chemical cleaning to protect newly serviced components.',
             ];
         }
 
@@ -377,16 +378,16 @@ class ForecastingService
             return [
                 'recommended_service_id'   => $repairService->service_id,
                 'recommended_service_name' => $repairService->service_name,
-                'base_days'                => 120,
-                'reason'                   => 'Unit has completed multiple cleaning cycles; a comprehensive mechanical & electrical diagnostic check-up is forecasted next.',
+                'base_days'                => 90,
+                'reason'                   => 'Unit has completed multiple cleaning cycles; a comprehensive mechanical & electrical diagnostic check-up is forecasted next (3-month cycle).',
             ];
         }
 
         return [
             'recommended_service_id'   => $cleaningService?->service_id,
             'recommended_service_name' => $cleaningService?->service_name ?? 'Cleaning / Preventive Maintenance',
-            'base_days'                => 120,
-            'reason'                   => 'Routine quarterly cooling tower & evaporator coil sanitation to prevent scale buildup, bacterial growth, and high power draw.',
+            'base_days'                => 90,
+            'reason'                   => 'Routine quarterly 3-month cooling tower & coil sanitation to prevent scale buildup and high power draw.',
         ];
     }
 
@@ -401,14 +402,64 @@ class ForecastingService
 
         $daysRemaining = (int) now()->startOfDay()->diffInDays($predictedDueDate->copy()->startOfDay(), false);
 
-        if ($daysRemaining < 0) {
-            return 'Overdue';
+        if ($daysRemaining < -7) {
+            return 'Upcoming';
         }
-        if ($daysRemaining <= 14) {
+
+        if ($daysRemaining <= 0) {
+            return 'Due This Week';
+        }
+
+        if ($daysRemaining <= 7) {
             return 'Due Soon';
         }
 
         return 'Upcoming';
+    }
+
+    /**
+     * Check if a forecast\'s 1-week reminder window has passed without booking,
+     * and automatically restart another 3-month countdown cycle.
+     */
+    public function syncAndRolloverForecast(ServiceForecast $forecast): bool
+    {
+        $hasActiveBooking = Booking::where('client_id', $forecast->user_id)
+            ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
+            ->exists();
+
+        if ($hasActiveBooking) {
+            if ($forecast->urgency_level !== 'Scheduled') {
+                $forecast->update(['urgency_level' => 'Scheduled']);
+            }
+            return false;
+        }
+
+        $dueDate = Carbon::parse($forecast->predicted_due_date)->startOfDay();
+        $daysRemaining = (int) now()->startOfDay()->diffInDays($dueDate, false);
+
+        // If 1 week has passed since the due date (overdue by more than 7 days) and customer hasn't booked:
+        // Automatically start another 3 months to count!
+        if ($daysRemaining < -7) {
+            $newDueDate = now()->startOfDay()->addDays(90);
+
+            $forecast->update([
+                'predicted_due_date'    => $newDueDate->toDateString(),
+                'base_interval_days'    => 90,
+                'adjusted_interval_days'=> 90,
+                'urgency_level'         => 'Upcoming',
+                'reminder_sent_at'      => null, // Reset reminder flag so it notifies once when next 3-month due date arrives
+                'recommendation_reason' => '3-month maintenance countdown renewed after 1-week reminder window. Routine maintenance scheduled every 3 months.',
+            ]);
+
+            return true;
+        }
+
+        $urgency = $this->computeUrgencyLevel($dueDate, false);
+        if ($forecast->urgency_level !== $urgency && $forecast->urgency_level !== 'Dismissed') {
+            $forecast->update(['urgency_level' => $urgency]);
+        }
+
+        return false;
     }
 
     /**
@@ -435,6 +486,15 @@ class ForecastingService
         }
 
         // If the customer has no completed bookings or real service history yet, return an empty list for a fresh start
+        $forecasts = ServiceForecast::where('user_id', $userId)
+            ->where('urgency_level', '!=', 'Dismissed')
+            ->orderBy('predicted_due_date', 'asc')
+            ->get();
+
+        foreach ($forecasts as $f) {
+            $this->syncAndRolloverForecast($f);
+        }
+
         $forecasts = ServiceForecast::where('user_id', $userId)
             ->where('urgency_level', '!=', 'Dismissed')
             ->orderBy('predicted_due_date', 'asc')
@@ -480,6 +540,8 @@ class ForecastingService
                 'health_score'             => $healthScore,
                 'urgency_level'            => $urgency,
                 'recommendation_reason'    => $f->recommendation_reason,
+                'cycle_label'              => '3 Months',
+                'is_due_this_week'         => ($urgency === 'Due This Week'),
             ];
         })->values()->all();
     }
@@ -642,7 +704,17 @@ class ForecastingService
             $this->getTechnicianCertifications((int) $tech->user_id);
         }
 
-        // 1. Customer Maintenance Forecast Pipeline
+        // 1. Customer Maintenance Forecast Pipeline (Synchronize 3-Month Rollovers & Active Bookings)
+        $rawForecasts = ServiceForecast::with(['customer', 'recommendedService'])
+            ->where('urgency_level', '!=', 'Dismissed')
+            ->orderBy('predicted_due_date', 'asc')
+            ->limit(30)
+            ->get();
+
+        foreach ($rawForecasts as $rf) {
+            $this->syncAndRolloverForecast($rf);
+        }
+
         $customerForecasts = ServiceForecast::with(['customer', 'recommendedService'])
             ->where('urgency_level', '!=', 'Dismissed')
             ->orderBy('predicted_due_date', 'asc')
@@ -667,6 +739,7 @@ class ForecastingService
                     'urgency_level'            => $urgency,
                     'recommendation_reason'    => $f->recommendation_reason,
                     'reminder_sent'            => (bool) $f->reminder_sent_at,
+                    'cycle_label'              => '3 Months',
                 ];
             });
 
@@ -1521,45 +1594,62 @@ class ForecastingService
         $customerRemindersSent = 0;
         $techRemindersSent = 0;
 
-        // 1. Evaluate Customer Predictive Maintenance Forecasts due within 30 days (or all active forecasts)
+        // 1. Evaluate Customer Maintenance Forecasts (3-Month Standard Count & 1-Week Active Reminder Rule)
         $dueForecasts = ServiceForecast::with('customer')
-            ->whereNotIn('urgency_level', ['Dismissed', 'Scheduled'])
+            ->whereNotIn('urgency_level', ['Dismissed'])
             ->get();
 
         foreach ($dueForecasts as $forecast) {
+            // Check if 1-week reminder window has passed without booking; if so, automatically restarts another 3 months
+            $rolledOver = $this->syncAndRolloverForecast($forecast);
+            if ($rolledOver || $forecast->urgency_level === 'Scheduled') {
+                continue;
+            }
+
             $due = Carbon::parse($forecast->predicted_due_date)->startOfDay();
-            $lastDateFormatted = $forecast->last_service_date
-                ? Carbon::parse($forecast->last_service_date)->format('M d, Y')
-                : 'recent service';
             $daysLeft = (int) now()->startOfDay()->diffInDays($due, false);
-            $urgency = $this->computeUrgencyLevel($due);
 
-            $forecast->update([
-                'urgency_level'    => $urgency,
-                'reminder_sent_at' => now(),
-            ]);
+            // Active reminder window: 3-month countdown reached (daysLeft between 0 and -7)
+            $isInReminderWindow = ($daysLeft <= 0 && $daysLeft >= -7);
 
-            if ($forecast->customer) {
-                $title = $daysLeft < 0
-                    ? "Overdue Maintenance Alert: {$forecast->recommended_service_name}"
-                    : "Automated Maintenance Reminder: {$forecast->recommended_service_name} due in {$daysLeft} days";
-
-                $msg = "Based on your previous {$forecast->source_service_name} on {$lastDateFormatted} for {$forecast->unit_summary}, our predictive maintenance engine recommends scheduling {$forecast->recommended_service_name} by {$due->format('M d, Y')}.";
-
-                try {
-                    if (Schema::hasTable('notifications')) {
-                        $forecast->customer->notify(new ForecastReminderNotification(
-                            'customer_maintenance',
-                            $title,
-                            $msg,
-                            ['forecast_id' => $forecast->forecast_id, 'recommended_service_id' => $forecast->recommended_service_id]
-                        ));
-                    }
-                } catch (\Throwable $e) {
-                    // Continue gracefully if notifications table isn't migrated
+            // Rule: "The system's reminder should notify the customer one in week"
+            $alreadySentInWeek = false;
+            if ($forecast->reminder_sent_at) {
+                $daysSinceSent = (int) Carbon::parse($forecast->reminder_sent_at)->startOfDay()->diffInDays(now()->startOfDay(), false);
+                if ($daysSinceSent >= 0 && $daysSinceSent < 7) {
+                    $alreadySentInWeek = true;
                 }
+            }
 
-                $customerRemindersSent++;
+            if ($isInReminderWindow && ! $alreadySentInWeek) {
+                $forecast->update([
+                    'urgency_level'    => 'Due This Week',
+                    'reminder_sent_at' => now(),
+                ]);
+
+                if ($forecast->customer) {
+                    $title = "Maintenance Reminder: {$forecast->recommended_service_name} Due";
+                    $msg = "Your 3-month maintenance reminder for {$forecast->unit_summary} is active. Scheduling routine care helps prevent breakdowns and maintain peak cooling.";
+
+                    try {
+                        if (Schema::hasTable('notifications')) {
+                            $forecast->customer->notify(new ForecastReminderNotification(
+                                'customer_maintenance',
+                                $title,
+                                $msg,
+                                [
+                                    'forecast_id'            => $forecast->forecast_id,
+                                    'recommended_service_id' => $forecast->recommended_service_id,
+                                    'cycle'                  => '3_months',
+                                ]
+                            ));
+                        }
+                    } catch (\Throwable $e) {
+                        // Continue gracefully if notifications table isn't migrated
+                    }
+
+                    $customerRemindersSent++;
+                }
             }
         }
 

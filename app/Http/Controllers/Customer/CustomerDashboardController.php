@@ -189,14 +189,21 @@ class CustomerDashboardController extends Controller
 
         if (! empty($serviceForecasts)) {
             $primaryForecast = $serviceForecasts[0];
+            $isDueWeek = ($primaryForecast['urgency_level'] ?? '') === 'Due This Week';
+            $badgeColor = match ($primaryForecast['urgency_level'] ?? '') {
+                'Due This Week' => 'amber',
+                'Scheduled'     => 'emerald',
+                'Due Soon'      => 'orange',
+                default         => 'blue',
+            };
             array_unshift($toDoItems, [
                 'id' => 'forecast_' . ($primaryForecast['forecast_id'] ?? 0),
-                'title' => 'Forecasted: ' . $primaryForecast['recommended_service_name'] . ' (' . $primaryForecast['unit_summary'] . ')',
-                'sub' => 'Recommended by ' . $primaryForecast['predicted_due_date'] . ' • Following ' . $primaryForecast['source_service_name'],
+                'title' => 'Maintenance Reminder: ' . $primaryForecast['recommended_service_name'] . ' (' . $primaryForecast['unit_summary'] . ')',
+                'sub' => ($isDueWeek ? 'Due this week • ' : 'Next due on ') . $primaryForecast['predicted_due_date'] . ' (3-Month Cycle)',
                 'target' => 'book',
                 'recommended_service_id' => $primaryForecast['recommended_service_id'],
                 'badge' => $primaryForecast['urgency_level'],
-                'badge_color' => $primaryForecast['urgency_level'] === 'Overdue' ? 'rose' : 'amber',
+                'badge_color' => $badgeColor,
             ]);
         }
 

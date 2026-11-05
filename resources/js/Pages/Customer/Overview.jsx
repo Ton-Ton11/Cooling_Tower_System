@@ -493,16 +493,67 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                 <div className="p-3 rounded-2xl bg-slate-50 border border-slate-100 text-slate-500">
                                     No active appointment scheduled for this week.
                                 </div>
-                                <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-100 text-[11px] space-y-1">
-                                    <span className="font-extrabold text-emerald-900 block">Quarterly Cleaning Cycle</span>
-                                    <p className="text-emerald-700">Recommend booking your routine aircon check every 3 months.</p>
-                                    <button
-                                        onClick={() => onNavigate("book")}
-                                        className="text-emerald-800 font-bold underline pt-0.5 block"
-                                    >
-                                        Reserve Maintenance &rarr;
-                                    </button>
-                                </div>
+                                {dashboardData?.service_forecasts && dashboardData.service_forecasts.length > 0 ? (
+                                    (() => {
+                                        const f = dashboardData.service_forecasts[0];
+                                        const isDueWeek = f.urgency_level === "Due This Week";
+                                        const isScheduled = f.urgency_level === "Scheduled";
+                                        return (
+                                            <div className={`p-3.5 rounded-2xl border text-[11px] space-y-1.5 ${
+                                                isDueWeek
+                                                    ? "bg-amber-50/80 border-amber-200"
+                                                    : isScheduled
+                                                    ? "bg-blue-50/80 border-blue-200"
+                                                    : "bg-emerald-50/70 border-emerald-100"
+                                            }`}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-extrabold text-slate-900 block">3-Month Maintenance Cycle</span>
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                        isDueWeek
+                                                            ? "bg-amber-200 text-amber-900"
+                                                            : isScheduled
+                                                            ? "bg-blue-200 text-blue-900"
+                                                            : "bg-emerald-200 text-emerald-900"
+                                                    }`}>
+                                                        {f.urgency_level}
+                                                    </span>
+                                                </div>
+                                                <p className="text-slate-600 font-medium">
+                                                    {f.recommended_service_name} • Due <strong>{f.predicted_due_date}</strong>
+                                                </p>
+                                                <p className="text-[10px] text-slate-500">
+                                                    {f.unit_summary}
+                                                </p>
+                                                {!isScheduled && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (onSelectServiceToBook && f.recommended_service_id) {
+                                                                onSelectServiceToBook(f.recommended_service_id);
+                                                            }
+                                                            onNavigate("book");
+                                                        }}
+                                                        className={`font-bold underline pt-0.5 block ${
+                                                            isDueWeek ? "text-amber-900" : "text-emerald-800"
+                                                        }`}
+                                                    >
+                                                        Reserve Maintenance &rarr;
+                                                    </button>
+                                                )}
+                                            </div>
+                                        );
+                                    })()
+                                ) : (
+                                    <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-100 text-[11px] space-y-1">
+                                        <span className="font-extrabold text-emerald-900 block">3-Month Maintenance Cycle</span>
+                                        <p className="text-emerald-700">Recommend booking your routine aircon check every 3 months.</p>
+                                        <button
+                                            onClick={() => onNavigate("book")}
+                                            className="text-emerald-800 font-bold underline pt-0.5 block"
+                                        >
+                                            Reserve Maintenance &rarr;
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
