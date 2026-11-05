@@ -355,6 +355,8 @@ export default function GeospatialAddressAutocomplete({
     onStructuredChange = null,
     structuredErrors = {},
     isEmployee: propIsEmployee = undefined,
+    showAlerts = true,
+    showNotice = true,
 }) {
     let authUser = null;
     if (typeof window !== "undefined") {
@@ -604,7 +606,7 @@ export default function GeospatialAddressAutocomplete({
                         <span>Address Details</span>
                     </div>
 
-                    {hasLocationInput && (
+                    {showAlerts && hasLocationInput && (
                         activeEval.is_within_zamboanga_city ? (
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
                                 <CheckCircle2 className="size-3.5 text-emerald-600 shrink-0" />
@@ -782,7 +784,7 @@ export default function GeospatialAddressAutocomplete({
                 </div>
 
                 {/* Alert when outside Zamboanga City */}
-                {!isEmployee && hasLocationInput && !activeEval.is_within_zamboanga_city && (
+                {!isEmployee && showNotice && hasLocationInput && !activeEval.is_within_zamboanga_city && (
                     <div className="p-3 rounded-xl border text-xs flex items-start gap-2.5 bg-amber-50/90 border-amber-300 text-amber-950">
                         <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
@@ -806,30 +808,32 @@ export default function GeospatialAddressAutocomplete({
     // Standard single-input autocomplete mode (used in BookingWizard & Profile Settings)
     return (
         <div ref={containerRef} className="space-y-2 relative">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-                {!isEmployee && value.trim().length > 1 && (
-                    activeEval.is_within_zamboanga_city ? (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                            <CheckCircle2 className="size-3.5 text-emerald-600 shrink-0" />
-                            <span>Within Zamboanga City</span>
-                            {activeEval.lat && activeEval.lon && (
-                                <span className="text-[10px] font-mono text-emerald-700">
-                                    ({Number(activeEval.lat).toFixed(4)}°N, {Number(activeEval.lon).toFixed(4)}°E)
-                                </span>
-                            )}
-                        </span>
-                    ) : (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-rose-800 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full">
-                            <AlertTriangle className="size-3.5 text-rose-600 shrink-0" />
-                            <span>
-                                {activeEval.status === "outside"
-                                    ? `Outside Zamboanga City (${activeEval.detected_city || "Restricted"})`
-                                    : "Unverified — Select a Geospatial Suggestion"}
+            {showAlerts && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    {!isEmployee && value.trim().length > 1 && (
+                        activeEval.is_within_zamboanga_city ? (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                                <CheckCircle2 className="size-3.5 text-emerald-600 shrink-0" />
+                                <span>Within Zamboanga City</span>
+                                {activeEval.lat && activeEval.lon && (
+                                    <span className="text-[10px] font-mono text-emerald-700">
+                                        ({Number(activeEval.lat).toFixed(4)}°N, {Number(activeEval.lon).toFixed(4)}°E)
+                                    </span>
+                                )}
                             </span>
-                        </span>
-                    )
-                )}
-            </div>
+                        ) : (
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-rose-800 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full">
+                                <AlertTriangle className="size-3.5 text-rose-600 shrink-0" />
+                                <span>
+                                    {activeEval.status === "outside"
+                                        ? `Outside Zamboanga City (${activeEval.detected_city || "Restricted"})`
+                                        : "Unverified — Select a Geospatial Suggestion"}
+                                </span>
+                            </span>
+                        )
+                    )}
+                </div>
+            )}
 
             <div className="relative">
                 <MapPin className="absolute left-3.5 top-3 size-5 text-blue-600 pointer-events-none" />
@@ -896,7 +900,7 @@ export default function GeospatialAddressAutocomplete({
                 </div>
             )}
 
-            {!isEmployee && value.trim().length > 2 && !activeEval.is_within_zamboanga_city && (
+            {!isEmployee && showNotice && value.trim().length > 2 && !activeEval.is_within_zamboanga_city && (
                 <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
                     <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
                     <span>

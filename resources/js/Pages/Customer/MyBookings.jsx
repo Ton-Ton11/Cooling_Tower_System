@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
-import RescheduleModal from "./RescheduleModal";
 import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
@@ -13,6 +12,7 @@ export default function MyBookings({
     onSelectServiceToBook,
     onBookAgain,
     onViewOcularResults,
+    onRescheduleBooking,
     onScheduleOrderInstallation,
     navMeta = null,
     defaultTab = "All",
@@ -30,7 +30,6 @@ export default function MyBookings({
     const [searchTerm, setSearchTerm] = useState("");
 
     // Modals
-    const [rescheduleBooking, setRescheduleBooking] = useState(null);
     const [cancelBooking, setCancelBooking] = useState(null);
     const [feedbackBooking, setFeedbackBooking] = useState(null);
     const [viewDetailsBooking, setViewDetailsBooking] = useState(null);
@@ -375,7 +374,13 @@ export default function MyBookings({
 
                                         {canReschedule && (
                                             <button
-                                                onClick={() => setRescheduleBooking(b)}
+                                                onClick={() => {
+                                                    if (onRescheduleBooking) {
+                                                        onRescheduleBooking(b);
+                                                    } else if (onNavigate) {
+                                                        onNavigate("reschedule", { bookingId: b.booking_id, booking: b });
+                                                    }
+                                                }}
                                                 className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 ${
                                                     isRescheduleNotice
                                                         ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
@@ -625,7 +630,13 @@ export default function MyBookings({
                                         </div>
                                         <button
                                             type="button"
-                                            onClick={() => setRescheduleBooking(b)}
+                                            onClick={() => {
+                                                if (onRescheduleBooking) {
+                                                    onRescheduleBooking(b);
+                                                } else if (onNavigate) {
+                                                    onNavigate("reschedule", { bookingId: b.booking_id, booking: b });
+                                                }
+                                            }}
                                             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shrink-0"
                                         >
                                             Choose New Schedule (Free)
@@ -670,15 +681,6 @@ export default function MyBookings({
             )}
 
             {/* Modals */}
-            <RescheduleModal
-                booking={rescheduleBooking}
-                scheduleConfig={scheduleConfig}
-                isOpen={Boolean(rescheduleBooking)}
-                onClose={() => setRescheduleBooking(null)}
-                onSuccess={() => fetchBookings(false)}
-                addToast={addToast}
-            />
-
             <CancelModal
                 booking={cancelBooking}
                 isOpen={Boolean(cancelBooking)}

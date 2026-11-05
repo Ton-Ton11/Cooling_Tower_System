@@ -153,7 +153,7 @@ export default function BookingCalendarPicker({
         onChange(val);
     };
 
-    const cellHeightClass = compact ? "h-12 sm:h-14" : "h-16 sm:h-20";
+    const cellHeightClass = compact ? "h-14 sm:h-16" : "h-20 sm:h-24";
 
     return (
         <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs overflow-hidden transition">
@@ -169,7 +169,7 @@ export default function BookingCalendarPicker({
                         </svg>
                     </div>
                     <div>
-                        <h4 className="text-sm font-extrabold tracking-tight">{monthName}</h4>
+                        <h4 className="text-sm sm:text-base font-extrabold tracking-tight">{monthName}</h4>
                         <p className="text-[11px] text-slate-300">Click an available date with team slots</p>
                     </div>
                 </div>
@@ -179,7 +179,7 @@ export default function BookingCalendarPicker({
                         <button
                             type="button"
                             onClick={handleJumpEarliest}
-                            className="px-2 py-1 rounded-lg text-[10px] font-bold bg-white/10 hover:bg-white/20 text-slate-200 transition cursor-pointer"
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-slate-200 transition cursor-pointer"
                             title="Jump to current bookable month"
                         >
                             Earliest
@@ -214,7 +214,7 @@ export default function BookingCalendarPicker({
             </div>
 
             {/* Calendar Weekday Names */}
-            <div className="grid grid-cols-7 text-center text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider py-2 bg-slate-50 border-b border-gray-100 text-gray-500">
+            <div className="grid grid-cols-7 text-center text-xs font-extrabold uppercase tracking-wider py-2.5 bg-slate-50 border-b border-gray-100 text-gray-500">
                 <span className="text-red-500">Sun</span>
                 <span>Mon</span>
                 <span>Tue</span>
@@ -225,7 +225,7 @@ export default function BookingCalendarPicker({
             </div>
 
             {/* Calendar Day Grid */}
-            <div className="p-2 sm:p-3 grid grid-cols-7 gap-1 sm:gap-1.5">
+            <div className="p-2 sm:p-3.5 grid grid-cols-7 gap-1.5 sm:gap-2">
                 {calendarCells.map((cell, idx) => {
                     if (!cell) {
                         return <div key={`empty_${idx}`} className={`${cellHeightClass} rounded-xl bg-gray-50/40`} />;
@@ -241,7 +241,7 @@ export default function BookingCalendarPicker({
                             disabled={isDisabled}
                             onClick={() => handleDateClick(cell)}
                             title={cell.isDisabledDate ? (cell.disabledReason || "No operation / Occasion") : undefined}
-                            className={`${cellHeightClass} p-1 sm:p-1.5 rounded-xl border text-left transition flex flex-col justify-between relative group ${
+                            className={`${cellHeightClass} p-1.5 sm:p-2.5 rounded-xl border text-left transition flex flex-col justify-between relative group ${
                                 isSelected
                                     ? "border-blue-600 bg-blue-50/90 text-blue-950 ring-2 ring-blue-500/40 shadow-sm z-10"
                                     : (cell.isPast || cell.allSlotsPast)
@@ -258,7 +258,7 @@ export default function BookingCalendarPicker({
                             {/* Day Number and Today Indicator */}
                             <div className="flex items-center justify-between w-full">
                                 <span
-                                    className={`text-xs sm:text-sm font-bold ${
+                                    className={`text-xs sm:text-base font-extrabold ${
                                         isSelected
                                             ? "text-blue-700"
                                             : cell.isSunday
@@ -273,7 +273,7 @@ export default function BookingCalendarPicker({
                                     {cell.day}
                                 </span>
                                 {cell.isToday && (
-                                    <span className="text-[8px] sm:text-[9px] font-extrabold px-1 py-0.2 rounded bg-slate-200 text-slate-700">
+                                    <span className="text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
                                         Today
                                     </span>
                                 )}
@@ -282,22 +282,22 @@ export default function BookingCalendarPicker({
                             {/* Slot Badge Status */}
                             <div className="w-full">
                                 {(cell.isPast || cell.allSlotsPast) ? (
-                                    <span className="text-[9px] text-gray-300 block leading-tight">Passed</span>
+                                    <span className="text-[10px] sm:text-[11px] text-gray-300 block leading-tight font-medium">Passed</span>
                                 ) : cell.isSunday ? (
-                                    <span className="inline-block text-[8px] sm:text-[9px] font-bold px-1 sm:px-1.5 py-0.5 rounded bg-gray-200/90 text-gray-600 tracking-tight">
+                                    <span className="inline-block text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded bg-gray-200/90 text-gray-600 tracking-tight">
                                         Rest Day
                                     </span>
                                 ) : cell.isDisabledDate ? (
-                                    <span className="inline-block text-[8px] sm:text-[9px] font-bold px-1 sm:px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 tracking-tight truncate max-w-full" title={cell.disabledReason || "No Operation"}>
+                                    <span className="inline-block text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded bg-amber-100 text-amber-800 tracking-tight truncate max-w-full" title={cell.disabledReason || "No Operation"}>
                                         {cell.disabledReason ? "Closed" : "Closed"}
                                     </span>
                                 ) : cell.isFull ? (
-                                    <span className="inline-block text-[8px] sm:text-[9px] font-bold px-1 sm:px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 tracking-tight">
+                                    <span className="inline-block text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded bg-rose-100 text-rose-700 tracking-tight">
                                         Full
                                     </span>
                                 ) : (
                                     <span
-                                        className={`inline-block text-[8px] sm:text-[9px] font-bold px-1 sm:px-1.5 py-0.5 rounded tracking-tight transition ${
+                                        className={`inline-block text-[9px] sm:text-[11px] font-bold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md tracking-tight transition ${
                                             isSelected
                                                 ? "bg-blue-600 text-white"
                                                 : cell.remainingSlots <= 2

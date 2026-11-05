@@ -119,6 +119,11 @@ const PAGE_DETAILS = {
         description: "Complete ₱7,000 down payment & select unit fulfillment option",
         icon: "ocular_payment",
     },
+    reschedule: {
+        title: "Reschedule Service Booking",
+        description: "Select new appointment schedule date and arrival window",
+        icon: "bookings",
+    },
 };
 
 export function getOcularWorkspaceStorageKey(userId) {

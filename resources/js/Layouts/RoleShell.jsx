@@ -68,7 +68,9 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
                     const isActive =
                         activePage === item.id ||
                         (item.id === "bookings" &&
-                            (activePage === "ocular_results" || activePage === "ocular_payment"));
+                            (activePage === "ocular_results" ||
+                                activePage === "ocular_payment" ||
+                                activePage === "reschedule"));
                     const badgeCount  = Number(badges[item.id] ?? 0);
                     const hasBadge    = Number.isFinite(badgeCount) && badgeCount > 0;
                     const badgeLabel  = badgeCount > 99 ? "99+" : badgeCount;

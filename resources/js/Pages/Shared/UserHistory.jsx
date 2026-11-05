@@ -57,6 +57,7 @@ const ICON_MAP = {
     ocular: ClipboardCheck,
     ocular_results: ClipboardCheck,
     ocular_payment: DollarSign,
+    reschedule: Calendar,
 };
 
 export default function UserHistory({ onNavigate, currentUser, addToast }) {

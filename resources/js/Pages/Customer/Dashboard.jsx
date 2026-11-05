@@ -7,6 +7,7 @@ import ServiceHistory from "./ServiceHistory";
 import WarrantyTracking from "./WarrantyTracking";
 import Complaints from "./Complaints";
 import OcularInspectionPage from "./OcularInspectionPage";
+import ReschedulePage from "./ReschedulePage";
 import Announcements from "../Shared/Announcements";
 import { CUSTOMER_ENDPOINTS } from "../../utils/superAdmin";
 
@@ -37,6 +38,18 @@ export default function CustomerDashboard() {
     const [bookingInitialServiceDetails, setBookingInitialServiceDetails] = useState(null);
     const [ocularBooking, setOcularBooking] = useState(null);
     const [ocularSelectedRec, setOcularSelectedRec] = useState(null);
+    const [rescheduleBooking, setRescheduleBooking] = useState(null);
+
+    const handleRescheduleBooking = (booking, onNavigate) => {
+        if (booking) {
+            setRescheduleBooking(booking);
+        }
+        if (onNavigate) {
+            onNavigate("reschedule", {
+                bookingId: booking?.booking_id || null,
+            });
+        }
+    };
 
     const handleViewOcularResults = (booking, onNavigate) => {
         if (booking) {
@@ -171,9 +184,24 @@ export default function CustomerDashboard() {
                 }}
                 onBookAgain={(booking) => handleBookAgain(booking, onNavigate)}
                 onViewOcularResults={(booking) => handleViewOcularResults(booking, onNavigate)}
+                onRescheduleBooking={(booking) => handleRescheduleBooking(booking, onNavigate)}
                 onScheduleOrderInstallation={(order) => handleScheduleOrderInstallation(order, onNavigate)}
                 navMeta={navMeta}
                 defaultTab="All"
+            />
+        ),
+        reschedule: (
+            <ReschedulePage
+                key={`customer-reschedule-${rescheduleBooking?.booking_id || navMeta?.bookingId || 0}`}
+                initialBooking={rescheduleBooking}
+                navMeta={navMeta}
+                currentUser={currentUser}
+                addToast={addToast}
+                onNavigate={onNavigate}
+                onSuccess={() => {
+                    handleDataChanged();
+                }}
+                onDataChanged={handleDataChanged}
             />
         ),
         ocular_results: (

@@ -687,13 +687,15 @@ export default function UserProfileSettings({ addToast, initialPayload = null })
 
                             <div className="space-y-1.5">
                                 <label className="text-xs font-semibold text-slate-700" htmlFor="prof_address">
-                                    {isCustomer ? "Address & Geospatial Location Verification" : "Address"}
+                                    Address
                                 </label>
                                 <GeospatialAddressAutocomplete
                                     id="prof_address"
                                     value={form.address}
                                     allowOutsideSave={true}
                                     isEmployee={isEmployee}
+                                    showAlerts={false}
+                                    showNotice={false}
                                     placeholder={
                                         isCustomer
                                             ? "Search street, barangay, or city (e.g., Brgy. Canelar, Zamboanga City)..."
