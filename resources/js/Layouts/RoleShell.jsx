@@ -5,7 +5,7 @@
  * can be configured without duplicating layout logic.
  */
 import { router, usePage } from "@inertiajs/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../Components/Modal";
 import Toast from "../Components/Toast";
 import Topbar from "./Topbar";
@@ -65,7 +65,10 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
             {/* Nav */}
             <nav style={{ flex: 1, padding: "14px 10px", overflowY: "auto", overflowX: "hidden" }}>
                 {navItems.map((item) => {
-                    const isActive    = activePage === item.id;
+                    const isActive =
+                        activePage === item.id ||
+                        (item.id === "bookings" &&
+                            (activePage === "ocular_results" || activePage === "ocular_payment"));
                     const badgeCount  = Number(badges[item.id] ?? 0);
                     const hasBadge    = Number.isFinite(badgeCount) && badgeCount > 0;
                     const badgeLabel  = badgeCount > 99 ? "99+" : badgeCount;
@@ -156,7 +159,24 @@ function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, ba
 function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPage = "dashboard" }) {
     const pageProps = usePage()?.props || {};
     const currentUser = pageProps.auth?.user || null;
-    const [activePage, setActivePage]           = useState(defaultPage);
+    const sessionPageKey = useMemo(() => {
+        const uid = currentUser?.id || currentUser?.user_id || "guest";
+        const path = typeof window !== "undefined" ? window.location.pathname : "";
+        return `ct_active_page_u${uid}_${path}`;
+    }, [currentUser]);
+    const [activePage, setActivePage] = useState(() => {
+        if (typeof window !== "undefined") {
+            try {
+                const saved = sessionStorage.getItem(sessionPageKey);
+                if (saved) return saved;
+            } catch {
+                // ignore storage access errors
+            }
+        }
+        return defaultPage;
+    });
+    const [navMeta, setNavMeta]                 = useState(null);
+    const [navNonce, setNavNonce]               = useState(0);
     const [collapsed, setCollapsed]             = useState(false);
     const [showLogout, setShowLogout]           = useState(false);
     const [toasts, setToasts]                   = useState([]);
@@ -164,6 +184,7 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [dashboardData, setDashboardData]     = useState(null);
     const [dashboardLoading, setDashboardLoading] = useState(true);
+    const mainScrollRef                         = useRef(null);
 
     useEffect(() => {
         const onResize = () => {
@@ -206,17 +227,33 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
 
     useEffect(() => { refreshDashboardData(true); }, [refreshDashboardData]);
 
-    const onNavigate = useCallback((page) => {
+    const onNavigate = useCallback((page, meta = null) => {
+        setNavMeta(meta || null);
         setActivePage(page);
+        setNavNonce((n) => n + 1);
+        if (typeof window !== "undefined") {
+            try {
+                sessionStorage.setItem(sessionPageKey, page);
+            } catch {
+                // ignore storage access errors
+            }
+        }
         if (isMobile) setMobileSidebarOpen(false);
-    }, [isMobile]);
+    }, [isMobile, sessionPageKey]);
 
     const handleDataChanged = useCallback(() => { refreshDashboardData(false, false); }, [refreshDashboardData]);
 
     const handleLogout = useCallback(() => {
         setShowLogout(false);
+        if (typeof window !== "undefined") {
+            try {
+                sessionStorage.removeItem(sessionPageKey);
+            } catch {
+                // ignore storage access errors
+            }
+        }
         router.post("/logout", {}, { preserveScroll: true, onError: () => addToast("Unable to log out right now.", "error") });
-    }, [addToast]);
+    }, [addToast, sessionPageKey]);
 
     const sidebarBadges = useMemo(() => ({
         bookings:      dashboardData?.stats?.pending_bookings ?? 0,
@@ -236,7 +273,17 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
 
     const pageComponents = useMemo(
         () => ({
-            ...buildPageComponents({ addToast, handleDataChanged, dashboardData, dashboardLoading, onNavigate, refreshDashboardData, currentUser }),
+            ...buildPageComponents({
+                addToast,
+                handleDataChanged,
+                dashboardData,
+                dashboardLoading,
+                onNavigate,
+                refreshDashboardData,
+                currentUser,
+                navMeta,
+                navNonce,
+            }),
             history: (
                 <UserHistory
                     onNavigate={onNavigate}
@@ -247,18 +294,22 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
             profile: <UserProfileSettings addToast={addToast} />,
         }),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [addToast, handleDataChanged, dashboardData, dashboardLoading, onNavigate, refreshDashboardData, currentUser],
+        [addToast, handleDataChanged, dashboardData, dashboardLoading, onNavigate, refreshDashboardData, currentUser, navMeta, navNonce],
     );
 
     useEffect(() => {
+        if (mainScrollRef.current) {
+            mainScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+        }
         if (activePage && activePage !== "history") {
             const pageItem = effectiveNavItems.find((n) => n.id === activePage);
-            const label = pageItem?.label || activePage;
-            recordUserActivity(currentUser?.id || currentUser?.user_id, {
-                pageId: activePage,
-                title: label,
-                icon: activePage,
-            });
+            if (pageItem) {
+                recordUserActivity(currentUser?.id || currentUser?.user_id, {
+                    pageId: activePage,
+                    title: pageItem.label,
+                    icon: activePage,
+                });
+            }
         }
     }, [activePage, effectiveNavItems, currentUser]);
 
@@ -292,8 +343,8 @@ function RoleShell({ navItems, buildPageComponents, dashboardEndpoint, defaultPa
                         setCollapsed((c) => !c);
                     }}
                 />
-                <main className="role-shell-main" style={{ flex: 1, overflow: "auto", padding: isMobile ? 12 : 24 }}>
-                    {pageComponents[activePage]}
+                <main ref={mainScrollRef} className="role-shell-main" style={{ flex: 1, overflow: "auto", padding: isMobile ? 12 : 24 }}>
+                    {pageComponents[activePage] ?? pageComponents[defaultPage]}
                 </main>
             </div>
 

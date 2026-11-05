@@ -27,6 +27,7 @@ use App\Http\Controllers\AdminAssistant\AdminAssistantSparePartController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantSalesController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantAnnouncementController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantInventoryController;
+use App\Http\Controllers\AdminAssistant\AdminAssistantOcularController;
 
 use App\Http\Controllers\ToolsMan\ToolsManDashboardController;
 use App\Http\Controllers\ToolsMan\ToolsManInventoryController;
@@ -100,9 +101,10 @@ Route::prefix('super-admin')
         Route::controller(SuperAdminBookingController::class)->group(function () {
             Route::get('/bookings', 'bookingsIndex')->name('bookings.index');
             Route::patch('/bookings/{bookingId}/approve', 'approveBooking')->name('bookings.approve');
-            Route::patch('/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
+            Route::match(['post', 'patch'], '/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
             Route::patch('/bookings/{bookingId}/invalidate-turnover', 'invalidateTurnover')->name('bookings.invalidate-turnover');
             Route::post('/bookings/{bookingId}/report', 'reportBooking')->name('bookings.report');
+            Route::post('/unit-orders/{orderId}/confirm', 'confirmUnitOrder')->name('unit-orders.confirm');
         });
 
         // ─── Disabled Booking Dates ───
@@ -200,8 +202,20 @@ Route::prefix('super-admin')
         Route::controller(SuperAdminAcUnitController::class)->group(function () {
             Route::get('/ac-units', 'acUnitsIndex')->name('ac-units.index');
             Route::post('/ac-units', 'storeAcUnit')->name('ac-units.store');
-            Route::patch('/ac-units/{acUnitId}', 'updateAcUnit')->name('ac-units.update');
+            Route::match(['post', 'patch'], '/ac-units/{acUnitId}', 'updateAcUnit')->name('ac-units.update');
             Route::delete('/ac-units/{acUnitId}', 'destroyAcUnit')->name('ac-units.destroy');
+        });
+
+        // ─── Ocular Inspections & Unit Recommendations ───
+        Route::controller(AdminAssistantOcularController::class)->group(function () {
+            Route::get('/ocular-inspections', 'index')->name('ocular.index');
+            Route::post('/ocular-inspections/{bookingId}/rooms', 'storeRoom')->name('ocular.rooms.store');
+            Route::patch('/ocular-inspections/{bookingId}/rooms/{roomId}', 'updateRoom')->name('ocular.rooms.update');
+            Route::delete('/ocular-inspections/{bookingId}/rooms/{roomId}', 'destroyRoom')->name('ocular.rooms.destroy');
+            Route::post('/ocular-inspections/{bookingId}/recommendations', 'storeRecommendation')->name('ocular.recommendations.store');
+            Route::match(['post', 'patch'], '/ocular-inspections/{bookingId}/recommendations/{recommendationId}', 'updateRecommendation')->name('ocular.recommendations.update');
+            Route::delete('/ocular-inspections/{bookingId}/recommendations/{recommendationId}', 'destroyRecommendation')->name('ocular.recommendations.destroy');
+            Route::post('/ocular-inspections/{bookingId}/submit', 'submitToCustomer')->name('ocular.submit');
         });
 
         // ─── Spare Parts ───
@@ -288,9 +302,10 @@ Route::prefix('manager')
         Route::controller(ManagerBookingController::class)->group(function () {
             Route::get('/bookings', 'bookingsIndex')->name('bookings.index');
             Route::patch('/bookings/{bookingId}/approve', 'approveBooking')->name('bookings.approve');
-            Route::patch('/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
+            Route::match(['post', 'patch'], '/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
             Route::patch('/bookings/{bookingId}/invalidate-turnover', 'invalidateTurnover')->name('bookings.invalidate-turnover');
             Route::post('/bookings/{bookingId}/report', 'reportBooking')->name('bookings.report');
+            Route::post('/unit-orders/{orderId}/confirm', 'confirmUnitOrder')->name('unit-orders.confirm');
         });
 
         // ─── Disabled Booking Dates ───
@@ -443,8 +458,29 @@ Route::prefix('admin-assistant')
         Route::controller(AdminAssistantAcUnitController::class)->group(function () {
             Route::get('/ac-units', 'acUnitsIndex')->name('ac-units.index');
             Route::post('/ac-units', 'storeAcUnit')->name('ac-units.store');
-            Route::patch('/ac-units/{acUnitId}', 'updateAcUnit')->name('ac-units.update');
+            Route::match(['post', 'patch'], '/ac-units/{acUnitId}', 'updateAcUnit')->name('ac-units.update');
             Route::delete('/ac-units/{acUnitId}', 'destroyAcUnit')->name('ac-units.destroy');
+        });
+
+        // ─── Ocular Inspections & Tools-Only Checklists ───
+        Route::controller(AdminAssistantOcularController::class)->group(function () {
+            Route::get('/ocular-inspections', 'index')->name('ocular.index');
+            Route::post('/ocular-inspections/{bookingId}/rooms', 'storeRoom')->name('ocular.rooms.store');
+            Route::patch('/ocular-inspections/{bookingId}/rooms/{roomId}', 'updateRoom')->name('ocular.rooms.update');
+            Route::delete('/ocular-inspections/{bookingId}/rooms/{roomId}', 'destroyRoom')->name('ocular.rooms.destroy');
+            Route::post('/ocular-inspections/{bookingId}/recommendations', 'storeRecommendation')->name('ocular.recommendations.store');
+            Route::match(['post', 'patch'], '/ocular-inspections/{bookingId}/recommendations/{recommendationId}', 'updateRecommendation')->name('ocular.recommendations.update');
+            Route::delete('/ocular-inspections/{bookingId}/recommendations/{recommendationId}', 'destroyRecommendation')->name('ocular.recommendations.destroy');
+            Route::post('/ocular-inspections/{bookingId}/submit', 'submitToCustomer')->name('ocular.submit');
+        });
+
+        Route::controller(ToolChecklistController::class)->group(function () {
+            Route::get('/checklists', 'technicianIndex')->name('checklists.index');
+            Route::post('/checklists', 'store')->name('checklists.store');
+            Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
+            Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
+            Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
         Route::controller(AdminAssistantSparePartController::class)->group(function () {
@@ -647,6 +683,7 @@ Route::prefix('customer')
             Route::post('/bookings/{bookingId}/complete-payment', 'completePayment')->name('bookings.complete-payment');
             Route::patch('/bookings/{bookingId}/cancel', 'cancel')->name('bookings.cancel');
             Route::post('/bookings/{bookingId}/quotation-response', 'respondQuotation')->name('bookings.quotation-response');
+            Route::post('/bookings/{bookingId}/ac-unit-order', 'storeAcUnitOrder')->name('bookings.ac-unit-order');
         });
 
         Route::controller(CustomerFeedbackController::class)->group(function () {

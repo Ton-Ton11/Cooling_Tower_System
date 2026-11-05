@@ -78,6 +78,8 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
                     'reserved_spare_parts' => $reservedParts,
                     'status'               => $unit->status,
                     'expected_arrival'     => $unit->expected_arrival ?? null,
+                    'image_path'           => $unit->image_path ?? null,
+                    'image_url'            => ! empty($unit->image_path) ? asset('storage/' . ltrim((string) $unit->image_path, '/')) : null,
                     'created_at'           => $unit->created_at,
                     'updated_at'           => $unit->updated_at,
                     'sale_id'              => $sale?->sale_id ? (int) $sale->sale_id : null,
@@ -115,9 +117,15 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
             'warranty_period' => ['required', 'integer', 'min:0'],
             'status' => ['required', Rule::in(self::AC_STATUSES)],
             'expected_arrival' => ['nullable', 'date', 'after_or_equal:today'],
+            'unit_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
         ]);
 
-        $unitId = DB::table('ac_units_inventory')->insertGetId(array_merge($validated, [
+        $insertData = collect($validated)->except(['unit_image'])->all();
+        if ($request->hasFile('unit_image')) {
+            $insertData['image_path'] = $request->file('unit_image')->store('ac_units', 'public');
+        }
+
+        $unitId = DB::table('ac_units_inventory')->insertGetId(array_merge($insertData, [
             'created_at' => now(),
             'updated_at' => now(),
         ]), 'ac_unit_id');
@@ -174,6 +182,7 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
             'customer_address'     => ['sometimes', 'nullable', 'string', 'max:255'],
             'payment_method'       => ['sometimes', 'nullable', 'string', 'max:50'],
             'notes'                => ['sometimes', 'nullable', 'string', 'max:500'],
+            'unit_image'           => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
         ]);
 
         $unitColumns = [
@@ -183,6 +192,9 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
             'status', 'expected_arrival',
         ];
         $unitUpdate = array_intersect_key($validated, array_flip($unitColumns));
+        if ($request->hasFile('unit_image')) {
+            $unitUpdate['image_path'] = $request->file('unit_image')->store('ac_units', 'public');
+        }
 
         $isBeingSold = (($validated['status'] ?? null) === 'Sold' && $unit->status !== 'Sold')
             || (($validated['status'] ?? null) === 'Sold' && $request->hasAny(['customer_name', 'payment_method', 'client_id']));

@@ -46,7 +46,8 @@ class TechnicianBookingController extends TechnicianBaseController
             $query->where(function ($q) use ($userId, $myTeamIds) {
                 $q->where('bookings.lead_technician_id', $userId)
                     ->orWhere('bookings.assistant_technician_id', $userId)
-                    ->orWhere('bookings.assigned_tech_id', $userId);
+                    ->orWhere('bookings.assigned_tech_id', $userId)
+                    ->orWhere('bookings.service_details', 'like', '%"user_id":' . $userId . '%');
                 if (! empty($myTeamIds)) {
                     $q->orWhere(function ($teamQuery) use ($myTeamIds) {
                         $teamQuery->whereNull('bookings.lead_technician_id')
@@ -182,7 +183,47 @@ class TechnicianBookingController extends TechnicianBaseController
             ];
         })->groupBy('booking_id');
 
-        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking) {
+        $linkedOrdersByBooking = collect();
+        if (! empty($bookingIds) && \Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders')) {
+            $linkedOrdersByBooking = DB::table('ac_unit_orders')
+                ->leftJoin('ac_units_inventory', 'ac_units_inventory.ac_unit_id', '=', 'ac_unit_orders.ac_unit_id')
+                ->whereIn('ac_unit_orders.installation_booking_id', $bookingIds)
+                ->select([
+                    'ac_unit_orders.*',
+                    'ac_units_inventory.brand',
+                    'ac_units_inventory.model',
+                    'ac_units_inventory.serial_number',
+                    'ac_units_inventory.horsepower',
+                    'ac_units_inventory.ac_type',
+                    'ac_units_inventory.motor_type',
+                ])
+                ->get()
+                ->map(fn ($o) => [
+                    'order_id'                => (int) $o->order_id,
+                    'ocular_booking_id'       => $o->ocular_booking_id ? (int) $o->ocular_booking_id : null,
+                    'installation_booking_id' => $o->installation_booking_id ? (int) $o->installation_booking_id : null,
+                    'ac_unit_id'              => (int) $o->ac_unit_id,
+                    'brand'                   => $o->brand,
+                    'model'                   => $o->model,
+                    'serial_number'           => $o->serial_number,
+                    'horsepower'              => $o->horsepower !== null ? (float) $o->horsepower : null,
+                    'ac_type'                 => $o->ac_type,
+                    'motor_type'              => $o->motor_type,
+                    'quantity'                => (int) $o->quantity,
+                    'unit_price'              => (float) $o->unit_price,
+                    'total_unit_price'        => (float) $o->total_unit_price,
+                    'down_payment_amount'     => (float) $o->down_payment_amount,
+                    'remaining_unit_balance'  => (float) $o->remaining_unit_balance,
+                    'delivery_fee'            => (float) $o->delivery_fee,
+                    'installation_fee'        => (float) $o->installation_fee,
+                    'payment_method'          => $o->payment_method,
+                    'fulfillment_type'        => $o->fulfillment_type,
+                    'order_status'            => $o->order_status,
+                ])
+                ->keyBy('installation_booking_id');
+        }
+
+        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking, $linkedOrdersByBooking) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id;
             $leadName = ! empty($row->lead_tech_user_id)
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -228,9 +269,16 @@ class TechnicianBookingController extends TechnicianBaseController
                 || (in_array($row->booking_status, ['Approved', 'Dispatched'], true) && $autoStartEval['can_auto_start']);
 
             $bookingChecklists = collect($checklistsByBooking->get($row->booking_id, []))->values();
+            $isOcularInspection = ((int) $row->service_id === 4)
+                || str_contains(strtolower((string) ($row->service_name ?? '')), 'ocular')
+                || ! empty($serviceDetails['is_ocular_inspection']);
 
             return [
                 'booking_id' => (int) $row->booking_id,
+                'is_ocular_inspection' => $isOcularInspection,
+                'ocular_personnel' => $serviceDetails['ocular_personnel'] ?? [],
+                'inspection_status' => $serviceDetails['inspection_status'] ?? null,
+                'ac_unit_order' => $linkedOrdersByBooking->get((int) $row->booking_id) ?? null,
                 'client_id' => (int) $row->client_id,
                 'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
                 'client_address' => $row->client_address,
@@ -343,9 +391,16 @@ class TechnicianBookingController extends TechnicianBaseController
             ->pluck('team_id')
             ->all();
 
+        $serviceDetailsForAuth = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : [])
+            : [];
+        $inOcularPersonnel = collect($serviceDetailsForAuth['ocular_personnel'] ?? [])
+            ->contains(fn ($p) => (int) ($p['user_id'] ?? 0) === $userId);
+
         $isAssigned = ((int) $booking->assigned_tech_id === $userId)
             || ((int) $booking->lead_technician_id === $userId)
             || ((int) $booking->assistant_technician_id === $userId)
+            || $inOcularPersonnel
             || ($booking->assigned_team_id && in_array((int) $booking->assigned_team_id, $myTeamIds, true));
 
         if (in_array((int) $request->user()->role_id, [5, 7], true) && ! $isAssigned && ! $request->user()->isHeadTechnician()) {
@@ -473,14 +528,15 @@ class TechnicianBookingController extends TechnicianBaseController
             'ac_type' => ['nullable', 'string', 'max:100'],
             'unit_serial_number' => ['nullable', 'string', 'max:100'],
             'total_service_price' => ['required', 'numeric', 'min:300'],
-            'payment_method' => ['required', 'string', 'in:Cash,GCash'],
-            'reference_number' => ['nullable', 'string', 'max:13'],
+            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
+            'payment_method' => ['required', 'string', 'in:Cash,GCash,Bank Transfer'],
+            'reference_number' => ['nullable', 'string', 'max:40'],
             'proof_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
 
-        if ($validated['payment_method'] === 'GCash' && empty(trim((string) ($validated['reference_number'] ?? '')))) {
+        if (in_array($validated['payment_method'], ['GCash', 'Bank Transfer'], true) && empty(trim((string) ($validated['reference_number'] ?? '')))) {
             throw ValidationException::withMessages([
-                'reference_number' => ['Please enter the customer\'s GCash reference number (maximum 13 digits).'],
+                'reference_number' => ['Please enter the customer\'s payment reference number.'],
             ]);
         }
 
@@ -511,16 +567,42 @@ class TechnicianBookingController extends TechnicianBaseController
             ]);
         }
 
-        $totalServicePrice = (float) $validated['total_service_price'];
+        $linkedUnitOrder = null;
+        if (\Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders')) {
+            $linkedUnitOrder = DB::table('ac_unit_orders')
+                ->where('installation_booking_id', $bookingId)
+                ->first();
+            if (! $linkedUnitOrder && ! empty($serviceDetails['ac_unit_order_id'])) {
+                $linkedUnitOrder = DB::table('ac_unit_orders')
+                    ->where('order_id', (int) $serviceDetails['ac_unit_order_id'])
+                    ->first();
+            }
+        }
+
+        $installationFee = (float) $validated['total_service_price'];
         $downPayment = 300.00;
-        $netCollected = max(0.0, $totalServicePrice - $downPayment);
+        $remainingInstallationFee = max(0.0, $installationFee - $downPayment);
+        $unitRemainingBalance = $linkedUnitOrder ? (float) $linkedUnitOrder->remaining_unit_balance : 0.0;
+        $deliveryFee = $linkedUnitOrder
+            ? (isset($validated['delivery_fee']) && $validated['delivery_fee'] !== null && $validated['delivery_fee'] !== ''
+                ? (float) $validated['delivery_fee']
+                : (float) $linkedUnitOrder->delivery_fee)
+            : 0.0;
+
+        $totalServicePrice = round($installationFee + $deliveryFee + $unitRemainingBalance, 2);
+        $netCollected = round($remainingInstallationFee + $deliveryFee + $unitRemainingBalance, 2);
 
         $serviceDetails['payment_turnover'] = [
             'total_service_price' => $totalServicePrice,
+            'installation_fee' => $installationFee,
+            'remaining_installation_fee' => $remainingInstallationFee,
+            'unit_remaining_balance' => $unitRemainingBalance,
+            'delivery_fee' => $deliveryFee,
+            'ac_unit_order_id' => $linkedUnitOrder ? (int) $linkedUnitOrder->order_id : null,
             'reservation_down_payment' => $downPayment,
             'net_collected' => $netCollected,
             'payment_method' => $validated['payment_method'],
-            'reference_number' => $validated['payment_method'] === 'GCash' ? ($validated['reference_number'] ?? null) : null,
+            'reference_number' => in_array($validated['payment_method'], ['GCash', 'Bank Transfer'], true) ? ($validated['reference_number'] ?? null) : null,
             'diagnosis' => $validated['diagnosis'],
             'work_done' => $validated['work_done'],
             'ac_brand' => $validated['ac_brand'] ?? null,
@@ -535,7 +617,17 @@ class TechnicianBookingController extends TechnicianBaseController
             'invalid_reason' => null,
         ];
 
-        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected) {
+        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $installationFee, $deliveryFee) {
+            if ($linkedUnitOrder) {
+                DB::table('ac_unit_orders')
+                    ->where('order_id', (int) $linkedUnitOrder->order_id)
+                    ->update([
+                        'installation_fee' => $installationFee,
+                        'delivery_fee'     => $deliveryFee,
+                        'order_status'     => 'Awaiting Manager Confirmation',
+                        'updated_at'       => now(),
+                    ]);
+            }
             // Keep booking in In-Progress until Manager verifies payment turnover and declares Complete
             DB::table('bookings')->where('booking_id', $bookingId)->update([
                 'service_payment_method' => $validated['payment_method'],

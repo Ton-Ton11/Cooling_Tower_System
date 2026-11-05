@@ -104,7 +104,56 @@ const PAGE_DETAILS = {
         description: "User profile information and security settings",
         icon: "profile",
     },
+    ocular: {
+        title: "Ocular Inspections",
+        description: "Manage room thermal load assessments & AC unit recommendations",
+        icon: "ocular_results",
+    },
+    ocular_results: {
+        title: "Inspection Results & Recommended AC Units",
+        description: "Review inspected room thermal load & recommended AC units",
+        icon: "ocular_results",
+    },
+    ocular_payment: {
+        title: "AC Unit Down Payment & Fulfillment",
+        description: "Complete ₱7,000 down payment & select unit fulfillment option",
+        icon: "ocular_payment",
+    },
 };
+
+export function getOcularWorkspaceStorageKey(userId) {
+    return userId ? `ocular_workspace_state_u${userId}` : "ocular_workspace_state_guest";
+}
+
+export function getOcularWorkspaceState(userId) {
+    if (typeof window === "undefined") return null;
+    try {
+        const stored = localStorage.getItem(getOcularWorkspaceStorageKey(userId));
+        if (!stored) return null;
+        const parsed = JSON.parse(stored);
+        return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+export function saveOcularWorkspaceState(userId, partialState) {
+    if (typeof window === "undefined" || !partialState || typeof partialState !== "object") {
+        return null;
+    }
+    try {
+        const current = getOcularWorkspaceState(userId) || {};
+        const updated = {
+            ...current,
+            ...partialState,
+            updatedAt: new Date().toISOString(),
+        };
+        localStorage.setItem(getOcularWorkspaceStorageKey(userId), JSON.stringify(updated));
+        return updated;
+    } catch {
+        return null;
+    }
+}
 
 export function getUserActivityStorageKey(userId) {
     return userId ? `user_activity_history_u${userId}` : "user_activity_history_guest";
@@ -136,16 +185,19 @@ export function recordUserActivity(userId, activity) {
 
         const key = getUserActivityStorageKey(userId);
         const current = getUserActivityHistory(userId);
+        const dedupeKey = activity.dedupeKey ? String(activity.dedupeKey).trim() : pageId;
 
-        // Remove any existing entry for this pageId to bring it to top
-        const filtered = current.filter((item) => item.pageId !== pageId);
+        // Remove any existing entry matching dedupeKey (or pageId) to bring it to top
+        const filtered = current.filter((item) => (item.dedupeKey || item.pageId) !== dedupeKey);
 
         const newEntry = {
             id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
             pageId,
+            dedupeKey,
             title,
             description,
             icon,
+            meta: activity.meta && typeof activity.meta === "object" ? activity.meta : null,
             timestamp: new Date().toISOString(),
         };
 

@@ -6,6 +6,7 @@ import MyBookings from "./MyBookings";
 import ServiceHistory from "./ServiceHistory";
 import WarrantyTracking from "./WarrantyTracking";
 import Complaints from "./Complaints";
+import OcularInspectionPage from "./OcularInspectionPage";
 import Announcements from "../Shared/Announcements";
 import { CUSTOMER_ENDPOINTS } from "../../utils/superAdmin";
 
@@ -34,6 +35,21 @@ export default function CustomerDashboard() {
     const [bookingInitialStep, setBookingInitialStep] = useState(1);
     const [bookingInitialUnits, setBookingInitialUnits] = useState(null);
     const [bookingInitialServiceDetails, setBookingInitialServiceDetails] = useState(null);
+    const [ocularBooking, setOcularBooking] = useState(null);
+    const [ocularSelectedRec, setOcularSelectedRec] = useState(null);
+
+    const handleViewOcularResults = (booking, onNavigate) => {
+        if (booking) {
+            setOcularBooking(booking);
+            setOcularSelectedRec(null);
+        }
+        if (onNavigate) {
+            onNavigate("ocular_results", {
+                bookingId: booking?.booking_id || null,
+                step: "results",
+            });
+        }
+    };
 
     const handleBookAgain = (booking, onNavigate) => {
         const sName = (booking?.service_name || booking?.service || "").toLowerCase();
@@ -61,6 +77,44 @@ export default function CustomerDashboard() {
         }
     };
 
+    const handleScheduleOrderInstallation = (order, onNavigate) => {
+        if (!order) return;
+        const acTypeMap = {
+            Window: "Window Type",
+            "Window Type": "Window Type",
+            "Floor Standing": "Floor-Mounted",
+            "Floor Mounted": "Floor-Mounted",
+            Cassette: "Ceiling Cassette",
+        };
+        const mappedUnitType = acTypeMap[order.ac_type] || "Wall-Mounted Split Type";
+        const hpLabel = order.horsepower ? `${Number(order.horsepower)} HP` : "1.5 HP";
+
+        setSelectedServiceForBooking(1); // Installation
+        setBookingInitialUnits([
+            {
+                unit_type: mappedUnitType,
+                motor_type: order.motor_type === "Non-Inverter" ? "Non-Inverter" : "Inverter",
+                brand: order.brand || "Carrier",
+                model_number: order.model || "",
+                capacity_type: "hp",
+                capacity: hpLabel,
+                quantity: order.quantity || 1,
+                unit_notes: `Purchased Unit Order #${order.order_id}`,
+            },
+        ]);
+        setBookingInitialServiceDetails({
+            ac_unit_order_id: order.order_id,
+            ocular_booking_id: order.ocular_booking_id || null,
+            unit_available: "Yes",
+            company_supplied_unit: true,
+        });
+        setBookingInitialStep(3);
+
+        if (onNavigate) {
+            onNavigate("book");
+        }
+    };
+
     const buildPageComponents = ({
         addToast,
         handleDataChanged,
@@ -68,6 +122,9 @@ export default function CustomerDashboard() {
         dashboardLoading,
         onNavigate,
         refreshDashboardData,
+        currentUser,
+        navMeta,
+        navNonce,
     }) => ({
         dashboard: (
             <CustomerOverview
@@ -103,6 +160,7 @@ export default function CustomerDashboard() {
         ),
         bookings: (
             <MyBookings
+                key={`customer-bookings-${navNonce || 0}`}
                 addToast={addToast}
                 onNavigate={onNavigate}
                 onSelectServiceToBook={(serviceId) => {
@@ -112,7 +170,51 @@ export default function CustomerDashboard() {
                     setBookingInitialServiceDetails(null);
                 }}
                 onBookAgain={(booking) => handleBookAgain(booking, onNavigate)}
-                defaultTab="Pending"
+                onViewOcularResults={(booking) => handleViewOcularResults(booking, onNavigate)}
+                onScheduleOrderInstallation={(order) => handleScheduleOrderInstallation(order, onNavigate)}
+                navMeta={navMeta}
+                defaultTab="All"
+            />
+        ),
+        ocular_results: (
+            <OcularInspectionPage
+                mode="results"
+                initialBooking={ocularBooking}
+                initialSelectedRec={ocularSelectedRec}
+                navMeta={navMeta}
+                currentUser={currentUser}
+                addToast={addToast}
+                onNavigate={onNavigate}
+                onBookingSync={(updatedBooking) => setOcularBooking(updatedBooking)}
+                onSelectUnitForPayment={(booking, rec) => {
+                    setOcularBooking(booking);
+                    setOcularSelectedRec(rec);
+                    onNavigate("ocular_payment", {
+                        bookingId: booking?.booking_id || null,
+                        recommendationId: rec?.recommendation_id || null,
+                        step: "payment",
+                    });
+                }}
+                onScheduleOrderInstallation={(order) => handleScheduleOrderInstallation(order, onNavigate)}
+                onDataChanged={handleDataChanged}
+            />
+        ),
+        ocular_payment: (
+            <OcularInspectionPage
+                mode="payment"
+                initialBooking={ocularBooking}
+                initialSelectedRec={ocularSelectedRec}
+                navMeta={navMeta}
+                currentUser={currentUser}
+                addToast={addToast}
+                onNavigate={onNavigate}
+                onBookingSync={(updatedBooking) => setOcularBooking(updatedBooking)}
+                onSelectUnitForPayment={(booking, rec) => {
+                    setOcularBooking(booking);
+                    setOcularSelectedRec(rec);
+                }}
+                onScheduleOrderInstallation={(order) => handleScheduleOrderInstallation(order, onNavigate)}
+                onDataChanged={handleDataChanged}
             />
         ),
         service_history: (
@@ -126,6 +228,7 @@ export default function CustomerDashboard() {
                     setBookingInitialServiceDetails(null);
                 }}
                 onBookAgain={(booking) => handleBookAgain(booking, onNavigate)}
+                onViewOcularResults={(booking) => handleViewOcularResults(booking, onNavigate)}
             />
         ),
         warranty: (

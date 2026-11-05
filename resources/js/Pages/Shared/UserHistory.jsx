@@ -29,6 +29,7 @@ import {
     getUserActivityHistory,
     removeUserActivity,
     clearUserActivityHistory,
+    saveOcularWorkspaceState,
     formatTimeAgo,
 } from "../../utils/userActivityHistory";
 
@@ -53,6 +54,9 @@ const ICON_MAP = {
     performance: TrendingUp,
     tools: Wrench,
     profile: User,
+    ocular: ClipboardCheck,
+    ocular_results: ClipboardCheck,
+    ocular_payment: DollarSign,
 };
 
 export default function UserHistory({ onNavigate, currentUser, addToast }) {
@@ -81,9 +85,18 @@ export default function UserHistory({ onNavigate, currentUser, addToast }) {
         );
     }, [history, searchQuery]);
 
-    const handleReturnToActivity = (pageId) => {
-        if (!pageId || !onNavigate) return;
-        onNavigate(pageId);
+    const handleReturnToActivity = (itemOrPageId) => {
+        if (!itemOrPageId || !onNavigate) return;
+        if (typeof itemOrPageId === "string") {
+            onNavigate(itemOrPageId);
+            return;
+        }
+        const { pageId, meta } = itemOrPageId;
+        if (!pageId) return;
+        if (meta && (pageId === "ocular_results" || pageId === "ocular_payment")) {
+            saveOcularWorkspaceState(userId, meta);
+        }
+        onNavigate(pageId, meta || null);
     };
 
     const handleRemoveItem = (e, activityId) => {
@@ -230,7 +243,15 @@ export default function UserHistory({ onNavigate, currentUser, addToast }) {
                         return (
                             <div
                                 key={item.id}
-                                onClick={() => handleReturnToActivity(item.pageId)}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => handleReturnToActivity(item)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        handleReturnToActivity(item);
+                                    }
+                                }}
                                 className="group bg-white hover:bg-blue-50/30 rounded-2xl p-4 sm:p-5 border border-slate-200/80 hover:border-blue-400/80 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between gap-4"
                             >
                                 <div className="flex items-center gap-3.5 sm:gap-4 min-w-0">

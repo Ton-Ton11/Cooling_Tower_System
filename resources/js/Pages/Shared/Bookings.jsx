@@ -17,12 +17,12 @@ import {
 } from "../../utils/bookingSchedule";
 
 const tabs = [
+    "All",
     "Pending",
     "Approved",
     "In-Progress",
     "Completed",
     "Cancelled",
-    "All",
 ];
 
 const PhoneIcon = ({ size = 13, color = "currentColor" }) => (
@@ -87,25 +87,41 @@ const ReportFlagIcon = ({ size = 14, color = "currentColor" }) => (
     </svg>
 );
 
-function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
+function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMeta = null, defaultTab = "All" }) {
     const { auth } = usePage().props;
     const currentUser = auth?.user;
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
-    const [tab, setTab] = useState("Pending");
+    const initialTab = navMeta?.tab || defaultTab || "All";
+    const [tab, setTab] = useState(initialTab);
+
+    useEffect(() => {
+        const nextTab = navMeta?.tab || defaultTab || "All";
+        setTab(nextTab);
+    }, [navMeta?.tab, defaultTab]);
     const [bookings, setBookings] = useState([]);
     const [technicians, setTechnicians] = useState([]);
+    const [adminAssistants, setAdminAssistants] = useState([]);
+    const [unitOrders, setUnitOrders] = useState([]);
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [assigning, setAssigning] = useState(false);
     const [completing, setCompleting] = useState(false);
     const [approveModal, setApproveModal] = useState(null);
     const [completeModal, setCompleteModal] = useState(null);
+    const [purchaseReceiptFile, setPurchaseReceiptFile] = useState(null);
+    const [purchaseReceiptPreview, setPurchaseReceiptPreview] = useState("");
+    const [confirmOrderModal, setConfirmOrderModal] = useState(null);
+    const [confirmOrderForm, setConfirmOrderForm] = useState({ delivery_fee: "", notes: "" });
+    const [confirmOrderReceiptFile, setConfirmOrderReceiptFile] = useState(null);
+    const [confirmOrderReceiptPreview, setConfirmOrderReceiptPreview] = useState("");
+    const [confirmingOrder, setConfirmingOrder] = useState(false);
     const [assignment, setAssignment] = useState({
         booking_status: "Approved",
         assign_mode: "individual", // "individual" | "team"
         assigned_team_id: "",
         lead_technician_id: "",
         assistant_technician_id: "",
+        ocular_personnel_ids: [],
         manager_note: "",
     });
     const [completionForm, setCompletionForm] = useState({
@@ -191,6 +207,12 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                 setTechnicians(
                     Array.isArray(data?.technicians) ? data.technicians : [],
                 );
+                setAdminAssistants(
+                    Array.isArray(data?.admin_assistants) ? data.admin_assistants : [],
+                );
+                setUnitOrders(
+                    Array.isArray(data?.unit_orders) ? data.unit_orders : [],
+                );
                 if (Array.isArray(data?.teams)) {
                     setTeams(data.teams);
                 } else if (ep.teams) {
@@ -250,11 +272,17 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     }, [bookings, clientPanel]);
 
     const openAssignmentModal = (booking) => {
-        setApproveModal(booking);
+        const isOcular = Boolean(booking.is_ocular_inspection || Number(booking.service_id) === 4 || String(booking.service || "").toLowerCase().includes("ocular"));
+        const existingOcularIds = Array.isArray(booking.ocular_personnel)
+            ? booking.ocular_personnel.map((p) => Number(p.user_id)).filter(Boolean)
+            : [];
+        setApproveModal({ ...booking, is_ocular_inspection: isOcular });
         setAssignment({
-            booking_status: ["Payment Incomplete", "Reschedule Notice"].includes(booking.booking_status)
-                ? booking.booking_status
-                : "Approved",
+            booking_status: isOcular
+                ? (booking.booking_status === "Reschedule Notice" ? "Reschedule Notice" : "Approved")
+                : (["Payment Incomplete", "Reschedule Notice"].includes(booking.booking_status)
+                    ? booking.booking_status
+                    : "Approved"),
             assign_mode: booking.assigned_team_id ? "team" : "individual",
             assigned_team_id: booking.assigned_team_id ? String(booking.assigned_team_id) : "",
             lead_technician_id: booking.lead_technician_id
@@ -263,6 +291,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             assistant_technician_id: booking.assistant_technician_id
                 ? String(booking.assistant_technician_id)
                 : "",
+            ocular_personnel_ids: existingOcularIds,
             manager_note: "",
         });
     };
@@ -270,6 +299,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
     const openCompleteModal = (booking) => {
         const turnover = booking.payment_turnover || booking.service_details?.payment_turnover || {};
         setCompleteModal(booking);
+        setPurchaseReceiptFile(null);
+        setPurchaseReceiptPreview("");
         setInvalidModal(false);
         setInvalidReason("");
         setCompletionForm({
@@ -350,8 +381,16 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             return;
         }
 
+        const isOcular = Boolean(approveModal.is_ocular_inspection);
+
         if (assignment.booking_status === "Approved") {
-            if (assignment.assign_mode === "team") {
+            if (isOcular) {
+                const count = Array.isArray(assignment.ocular_personnel_ids) ? assignment.ocular_personnel_ids.length : 0;
+                if (count < 1 || count > 4) {
+                    addToast("Please assign between 1 and 4 personnel (Technician or Admin Assistant) for Ocular Inspection.", "error");
+                    return;
+                }
+            } else if (assignment.assign_mode === "team") {
                 if (!assignment.assigned_team_id && (!assignment.lead_technician_id || !assignment.assistant_technician_id)) {
                     addToast("Please select a formed team with at least two technicians.", "error");
                     return;
@@ -377,14 +416,18 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             };
 
             if (assignment.booking_status === "Approved") {
-                if (assignment.assign_mode === "team" && assignment.assigned_team_id) {
-                    payload.assigned_team_id = Number(assignment.assigned_team_id);
-                }
-                if (assignment.lead_technician_id) {
-                    payload.lead_technician_id = Number(assignment.lead_technician_id);
-                }
-                if (assignment.assistant_technician_id) {
-                    payload.assistant_technician_id = Number(assignment.assistant_technician_id);
+                if (isOcular) {
+                    payload.ocular_personnel_ids = assignment.ocular_personnel_ids.map(Number);
+                } else {
+                    if (assignment.assign_mode === "team" && assignment.assigned_team_id) {
+                        payload.assigned_team_id = Number(assignment.assigned_team_id);
+                    }
+                    if (assignment.lead_technician_id) {
+                        payload.lead_technician_id = Number(assignment.lead_technician_id);
+                    }
+                    if (assignment.assistant_technician_id) {
+                        payload.assistant_technician_id = Number(assignment.assistant_technician_id);
+                    }
                 }
             }
 
@@ -409,21 +452,47 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
 
     const handleCompleteBooking = async () => {
         if (completing || !completeModal) return;
+        const hasLinkedUnitOrder = Boolean(completeModal.ac_unit_order);
+        if (hasLinkedUnitOrder && !purchaseReceiptFile) {
+            addToast("Please upload a picture of the AC unit purchase receipt to confirm unit sale.", "error");
+            return;
+        }
         const turnover = completeModal.payment_turnover || completeModal.service_details?.payment_turnover || {};
         const reqByName = (completionForm.requested_by_name || completeModal.client_name || "Customer").trim();
+        const amountVal = completionForm.amount_turned_over !== ""
+            ? Number(completionForm.amount_turned_over)
+            : (turnover.net_collected !== undefined ? Number(turnover.net_collected) : null);
+
         setCompleting(true);
         try {
             const completeEndpoint = ep.completeBooking ? ep.completeBooking(completeModal.booking_id) : `/manager/bookings/${completeModal.booking_id}/complete`;
-            const { data } = await window.axios.patch(completeEndpoint, {
-                requested_by_name: reqByName,
-                payment_verified: 1,
-                amount_turned_over: completionForm.amount_turned_over !== ""
-                    ? Number(completionForm.amount_turned_over)
-                    : (turnover.net_collected !== undefined ? Number(turnover.net_collected) : null),
-                verification_notes: completionForm.verification_notes.trim() || null,
-            });
-            addToast(data?.message || `Booking #${completeModal.booking_id} confirmed and declared completed!`);
+            let res;
+            if (hasLinkedUnitOrder && purchaseReceiptFile) {
+                const fd = new FormData();
+                fd.append("requested_by_name", reqByName);
+                fd.append("payment_verified", "1");
+                if (amountVal !== null && Number.isFinite(amountVal)) {
+                    fd.append("amount_turned_over", String(amountVal));
+                }
+                if (completionForm.verification_notes.trim()) {
+                    fd.append("verification_notes", completionForm.verification_notes.trim());
+                }
+                fd.append("purchase_receipt_image", purchaseReceiptFile);
+                res = await window.axios.post(completeEndpoint, fd, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                });
+            } else {
+                res = await window.axios.patch(completeEndpoint, {
+                    requested_by_name: reqByName,
+                    payment_verified: 1,
+                    amount_turned_over: amountVal,
+                    verification_notes: completionForm.verification_notes.trim() || null,
+                });
+            }
+            addToast(res.data?.message || `Booking #${completeModal.booking_id} confirmed and declared completed!`);
             setCompleteModal(null);
+            setPurchaseReceiptFile(null);
+            setPurchaseReceiptPreview("");
             await fetchBookings(false);
             onDataChanged?.();
         } catch (error) {
@@ -433,6 +502,52 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
             );
         } finally {
             setCompleting(false);
+        }
+    };
+
+    const openConfirmOrderModal = (order) => {
+        setConfirmOrderModal(order);
+        setConfirmOrderForm({
+            delivery_fee: order.fulfillment_type === "delivery" ? String(order.delivery_fee || 500) : "0",
+            notes: "",
+        });
+        setConfirmOrderReceiptFile(null);
+        setConfirmOrderReceiptPreview("");
+    };
+
+    const handleConfirmStandaloneOrder = async (e) => {
+        e?.preventDefault();
+        if (confirmingOrder || !confirmOrderModal) return;
+        if (!confirmOrderReceiptFile) {
+            addToast("Please upload a picture of the unit purchase receipt.", "error");
+            return;
+        }
+        setConfirmingOrder(true);
+        try {
+            const fd = new FormData();
+            fd.append("purchase_receipt_image", confirmOrderReceiptFile);
+            if (confirmOrderModal.fulfillment_type === "delivery") {
+                fd.append("delivery_fee", String(Number(confirmOrderForm.delivery_fee || 0)));
+            }
+            if (confirmOrderForm.notes.trim()) {
+                fd.append("notes", confirmOrderForm.notes.trim());
+            }
+            const url = ep.confirmUnitOrder
+                ? ep.confirmUnitOrder(confirmOrderModal.order_id)
+                : `/manager/unit-orders/${confirmOrderModal.order_id}/confirm`;
+            const { data } = await window.axios.post(url, fd, {
+                headers: { "Content-Type": "multipart/form-data" },
+            });
+            addToast(data?.message || "AC unit purchase confirmed!");
+            setConfirmOrderModal(null);
+            setConfirmOrderReceiptFile(null);
+            setConfirmOrderReceiptPreview("");
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to confirm AC unit order."), "error");
+        } finally {
+            setConfirmingOrder(false);
         }
     };
 
@@ -530,6 +645,65 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                     );
                 })}
             </div>
+
+            {(() => {
+                const pendingStandaloneOrders = unitOrders.filter(
+                    (o) =>
+                        ["pickup", "delivery"].includes(o.fulfillment_type) &&
+                        !["Completed", "Cancelled"].includes(o.order_status),
+                );
+                if (pendingStandaloneOrders.length === 0) return null;
+                return (
+                    <div className="card" style={{ padding: 18, marginBottom: 16, borderLeft: "4px solid #2563EB" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                            <p className="section-label" style={{ margin: 0 }}>
+                                AC Unit Pick Up &amp; Delivery Orders ({pendingStandaloneOrders.length})
+                            </p>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {pendingStandaloneOrders.map((ord) => (
+                                <div
+                                    key={ord.order_id}
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        flexWrap: "wrap",
+                                        gap: 10,
+                                        padding: "10px 14px",
+                                        borderRadius: 10,
+                                        background: "#F8FAFC",
+                                        border: "1px solid #E2E8F0",
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    <div>
+                                        <span style={{ fontWeight: 700, color: "#1E2F5F" }}>
+                                            Order #{ord.order_id} · {ord.customer_name || "Customer"}
+                                        </span>
+                                        <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 6, background: "#EFF6FF", color: "#1D4ED8", fontWeight: 700, fontSize: 11 }}>
+                                            {ord.fulfillment_type === "pickup" ? "Store Pick Up" : "Delivery"}
+                                        </span>
+                                        <div style={{ color: "#475569", marginTop: 3 }}>
+                                            <strong>{ord.unit_brand} {ord.unit_model}</strong> ({ord.unit_horsepower} HP · {ord.unit_ac_type}) — Price: {formatCurrency(ord.unit_price)} · Down Paid: {formatCurrency(ord.down_payment)} · Balance: <strong>{formatCurrency(ord.remaining_balance)}</strong> ({ord.payment_method})
+                                        </div>
+                                    </div>
+                                    {!readOnly && (
+                                        <button
+                                            type="button"
+                                            className="btn-primary"
+                                            style={{ padding: "6px 12px", fontSize: 11 }}
+                                            onClick={() => openConfirmOrderModal(ord)}
+                                        >
+                                            Confirm Receipt &amp; Sale
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            })()}
 
             <div className="card" style={{ padding: 20, marginTop: 16 }}>
                 <p className="section-label" style={{ marginBottom: 12 }}>
@@ -674,7 +848,12 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {booking.service}
+                                                <div>{booking.service}</div>
+                                                {booking.ac_unit_order && (
+                                                    <span style={{ display: "inline-block", marginTop: 2, fontSize: 10, fontWeight: 700, background: "#EFF6FF", color: "#1D4ED8", padding: "1px 6px", borderRadius: 4 }}>
+                                                        Unit Order #{booking.ac_unit_order.order_id}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td
                                                 style={{
@@ -694,7 +873,27 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                     fontSize: 12,
                                                 }}
                                             >
-                                                {booking.lead_technician_name || booking.assigned_tech_name ? (
+                                                {booking.is_ocular_inspection && Array.isArray(booking.ocular_personnel) && booking.ocular_personnel.length > 0 ? (
+                                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                        {booking.ocular_personnel.map((person) => (
+                                                            <div key={person.user_id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: "#0E1A33" }}>
+                                                                <UserIcon size={12} color={Number(person.role_id) === 3 ? "#7C3AED" : "#2563EB"} />
+                                                                <span>{person.name}</span>
+                                                                <span style={{
+                                                                    fontSize: 9,
+                                                                    fontWeight: 800,
+                                                                    background: Number(person.role_id) === 3 ? "#F3E8FF" : "#EFF6FF",
+                                                                    color: Number(person.role_id) === 3 ? "#6D28D9" : "#1D4ED8",
+                                                                    padding: "1px 5px",
+                                                                    borderRadius: 4,
+                                                                    textTransform: "uppercase",
+                                                                }}>
+                                                                    {Number(person.role_id) === 3 ? "Admin Asst" : "Tech"}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : booking.lead_technician_name || booking.assigned_tech_name ? (
                                                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                                                         <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "#0E1A33" }}>
                                                             <UserIcon size={12} color="#2563EB" />
@@ -917,17 +1116,23 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                     }).length;
                 };
 
+                const isOcularModal = Boolean(approveModal?.is_ocular_inspection);
+                const selectedOcularIds = Array.isArray(assignment.ocular_personnel_ids) ? assignment.ocular_personnel_ids : [];
+                const ocularCountValid = selectedOcularIds.length >= 1 && selectedOcularIds.length <= 4;
+
                 const leadDailyCount = selectedLead ? getTechDailyCount(selectedLead.user_id) : 0;
                 const assistantDailyCount = selectedAssistant ? getTechDailyCount(selectedAssistant.user_id) : 0;
                 const exceedsDailyLimit =
                     isApproveSelected &&
-                    (leadDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
-                        assistantDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
-                        isDateSlotsFull ||
-                        isModalDateSunday);
+                    (isOcularModal
+                        ? (isDateSlotsFull || isModalDateSunday)
+                        : (leadDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
+                            assistantDailyCount >= MAX_JOBS_PER_TEAM_PER_DAY ||
+                            isDateSlotsFull ||
+                            isModalDateSunday));
 
                 const canConfirmManage = isApproveSelected
-                    ? isBothSelected && !exceedsDailyLimit
+                    ? (isOcularModal ? ocularCountValid && !exceedsDailyLimit : isBothSelected && !exceedsDailyLimit)
                     : true;
 
                 return (
@@ -1006,24 +1211,28 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 <label className="section-label" style={{ marginBottom: 6, display: "block", fontWeight: 700, color: "#1E2F5F", fontSize: 11 }}>
                                     Booking Status
                                 </label>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: isOcularModal ? "1fr 1fr" : "1fr 1fr 1fr", gap: 10 }}>
                                     {[
                                         {
                                             value: "Approved",
                                             title: "Approve",
-                                            subtitle: "Assign technicians to job",
+                                            subtitle: isOcularModal ? "Assign 1–4 personnel" : "Assign technicians to job",
                                             activeBg: "#EFF6FF",
                                             activeBorder: "#2563EB",
                                             activeText: "#1E40AF",
                                         },
-                                        {
-                                            value: "Payment Incomplete",
-                                            title: "Incomplete Payment",
-                                            subtitle: "10-min window to settle",
-                                            activeBg: "#FFFBEB",
-                                            activeBorder: "#D97706",
-                                            activeText: "#92400E",
-                                        },
+                                        ...(!isOcularModal
+                                            ? [
+                                                  {
+                                                      value: "Payment Incomplete",
+                                                      title: "Incomplete Payment",
+                                                      subtitle: "10-min window to settle",
+                                                      activeBg: "#FFFBEB",
+                                                      activeBorder: "#D97706",
+                                                      activeText: "#92400E",
+                                                  },
+                                              ]
+                                            : []),
                                         {
                                             value: "Reschedule Notice",
                                             title: "Reschedule Notice",
@@ -1066,8 +1275,103 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 </div>
                             </div>
 
+                            {/* IF STATUS == APPROVED: Ocular Inspection Personnel OR Standard Technician Assignment */}
+                            {isApproveSelected && isOcularModal && (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F1F5F9", padding: "8px 12px", borderRadius: 10 }}>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: "#334155" }}>
+                                            Assign Personnel (Technician / Admin Assistant) — Min 1, Max 4
+                                        </span>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: ocularCountValid ? "#16A34A" : "#D97706" }}>
+                                            {selectedOcularIds.length} / 4 Selected
+                                        </span>
+                                    </div>
+
+                                    {(isModalDateSunday || isDateSlotsFull) && (
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: "#DC2626" }}>
+                                            {isModalDateSunday
+                                                ? "⚠ Sunday is a rest day. Please send a Reschedule Notice."
+                                                : `⚠ All ${MAX_DAILY_SLOTS} slots on ${modalDateYmd} are already assigned.`}
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxHeight: 220, overflowY: "auto", padding: 2 }}>
+                                        {[
+                                            ...adminAssistants.map((a) => ({
+                                                user_id: Number(a.user_id),
+                                                full_name: a.full_name || a.name,
+                                                role_label: "Admin Assistant",
+                                                is_admin_asst: true,
+                                            })),
+                                            ...technicians.map((t) => ({
+                                                user_id: Number(t.user_id),
+                                                full_name: t.full_name || t.name,
+                                                role_label: "Technician",
+                                                is_admin_asst: false,
+                                            })),
+                                        ].map((person) => {
+                                            const isChecked = selectedOcularIds.includes(person.user_id);
+                                            const isMaxReached = !isChecked && selectedOcularIds.length >= 4;
+                                            const checkboxId = `ocular-person-${person.user_id}`;
+                                            return (
+                                                <label
+                                                    key={person.user_id}
+                                                    htmlFor={checkboxId}
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        justifyContent: "space-between",
+                                                        gap: 8,
+                                                        padding: "8px 10px",
+                                                        borderRadius: 9,
+                                                        border: `1.5px solid ${isChecked ? "#2563EB" : "#E2E8F0"}`,
+                                                        background: isChecked ? "#EFF6FF" : "#FFFFFF",
+                                                        cursor: isMaxReached ? "not-allowed" : "pointer",
+                                                        opacity: isMaxReached ? 0.55 : 1,
+                                                    }}
+                                                >
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                                        <input
+                                                            id={checkboxId}
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            disabled={isMaxReached}
+                                                            onChange={() => {
+                                                                setAssignment((prev) => {
+                                                                    const cur = Array.isArray(prev.ocular_personnel_ids) ? prev.ocular_personnel_ids : [];
+                                                                    if (cur.includes(person.user_id)) {
+                                                                        return { ...prev, ocular_personnel_ids: cur.filter((id) => id !== person.user_id) };
+                                                                    }
+                                                                    if (cur.length >= 4) return prev;
+                                                                    return { ...prev, ocular_personnel_ids: [...cur, person.user_id] };
+                                                                });
+                                                            }}
+                                                            style={{ accentColor: "#2563EB", width: 15, height: 15, cursor: isMaxReached ? "not-allowed" : "pointer" }}
+                                                        />
+                                                        <span style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                            {person.full_name}
+                                                        </span>
+                                                    </div>
+                                                    <span style={{
+                                                        fontSize: 10,
+                                                        fontWeight: 700,
+                                                        padding: "2px 6px",
+                                                        borderRadius: 5,
+                                                        background: person.is_admin_asst ? "#F3E8FF" : "#DBEAFE",
+                                                        color: person.is_admin_asst ? "#6D28D9" : "#1D4ED8",
+                                                        flexShrink: 0,
+                                                    }}>
+                                                        {person.is_admin_asst ? "Admin Asst" : "Tech"}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* IF STATUS == APPROVED: Show Technician / Formed Team Assignment Fields */}
-                            {isApproveSelected && (
+                            {isApproveSelected && !isOcularModal && (
                                 <>
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F1F5F9", padding: "8px 12px", borderRadius: 10 }}>
                                         <div>
@@ -1397,8 +1701,27 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                             <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "68vh", overflowY: "auto", paddingRight: 4 }}>
                                 {/* Payment Breakdown */}
                                 <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: 14 }}>
+                                    {completeModal.ac_unit_order && (
+                                        <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px dashed #86EFAC" }}>
+                                            <div style={{ fontSize: 11, fontWeight: 800, color: "#1E40AF", marginBottom: 4 }}>
+                                                AC Unit Purchase #{completeModal.ac_unit_order.order_id} · {completeModal.ac_unit_order.unit_brand} {completeModal.ac_unit_order.unit_model}
+                                            </div>
+                                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569", marginBottom: 3 }}>
+                                                <span>Unit Price (Less ₱7,000 Down Payment)</span>
+                                                <span style={{ fontWeight: 700, color: "#0F172A" }}>
+                                                    {formatCurrency(turnover.unit_remaining_balance ?? completeModal.ac_unit_order.remaining_balance ?? 0)}
+                                                </span>
+                                            </div>
+                                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569" }}>
+                                                <span>Delivery Fee</span>
+                                                <span style={{ fontWeight: 700, color: "#0F172A" }}>
+                                                    {formatCurrency(turnover.delivery_fee ?? completeModal.ac_unit_order.delivery_fee ?? 0)}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569", marginBottom: 4 }}>
-                                        <span>Total Service Fee</span>
+                                        <span>{completeModal.ac_unit_order ? "Installation Service Fee" : "Total Service Fee"}</span>
                                         <span style={{ fontWeight: 700, color: "#0F172A" }}>
                                             {formatCurrency(turnover.total_service_price || 0)}
                                         </span>
@@ -1417,7 +1740,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                     </div>
                                     {turnover.reference_number && (
                                         <div style={{ marginTop: 6, fontSize: 12, color: "#166534", fontWeight: 600 }}>
-                                            GCash Ref: {turnover.reference_number}
+                                            Ref: {turnover.reference_number}
                                         </div>
                                     )}
                                 </div>
@@ -1464,7 +1787,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                 {proofImageUrl && (
                                     <div>
                                         <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
-                                            Proof Picture
+                                            Technician Turnover Proof Picture
                                         </div>
                                         <div style={{ border: "1px solid #E2E8F0", borderRadius: 12, padding: 8, background: "#FFFFFF", textAlign: "center" }}>
                                             <a href={proofImageUrl} target="_blank" rel="noreferrer" title="Click to view full image">
@@ -1475,6 +1798,44 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                                                 />
                                             </a>
                                         </div>
+                                    </div>
+                                )}
+
+                                {/* Confirm AC Unit Purchase Receipt Upload */}
+                                {completeModal.ac_unit_order && (
+                                    <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 12, padding: 14 }}>
+                                        <label
+                                            htmlFor="manager-unit-receipt-upload"
+                                            style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#1E3A8A", marginBottom: 4 }}
+                                        >
+                                            Confirm Unit Purchase — Upload Receipt Picture *
+                                        </label>
+                                        <p style={{ margin: "0 0 8px", fontSize: 11, color: "#475569" }}>
+                                            Upload official receipt photo to mark <strong>{completeModal.ac_unit_order.unit_brand} {completeModal.ac_unit_order.unit_model}</strong> as Sold, reflect in Admin Assistant sales, and activate warranty &amp; spare parts forecasting.
+                                        </p>
+                                        <input
+                                            id="manager-unit-receipt-upload"
+                                            name="purchase_receipt_image"
+                                            type="file"
+                                            accept="image/*"
+                                            required
+                                            className="input-field"
+                                            style={{ background: "#FFFFFF", fontSize: 12, padding: "6px 10px" }}
+                                            onChange={(e) => {
+                                                const f = e.target.files?.[0] || null;
+                                                setPurchaseReceiptFile(f);
+                                                setPurchaseReceiptPreview(f ? URL.createObjectURL(f) : "");
+                                            }}
+                                        />
+                                        {purchaseReceiptPreview && (
+                                            <div style={{ marginTop: 8 }}>
+                                                <img
+                                                    src={purchaseReceiptPreview}
+                                                    alt="Purchase receipt preview"
+                                                    style={{ maxHeight: 140, borderRadius: 8, border: "1px solid #BFDBFE", objectFit: "contain", background: "#FFF" }}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -2138,6 +2499,119 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false }) {
                         )}
                     </div>
                 </div>
+            </Modal>
+            {/* Standalone Pick Up / Delivery AC Unit Order Confirmation Modal */}
+            <Modal
+                show={!!confirmOrderModal}
+                onClose={() => !confirmingOrder && setConfirmOrderModal(null)}
+                maxWidth="md"
+            >
+                {confirmOrderModal && (
+                    <form onSubmit={handleConfirmStandaloneOrder} style={{ padding: 24 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                            <div>
+                                <h3 style={{ fontSize: 16, fontWeight: 800, color: "#0F172A", margin: 0 }}>
+                                    Confirm AC Unit Purchase #{confirmOrderModal.order_id}
+                                </h3>
+                                <p style={{ fontSize: 12, color: "#64748B", margin: "4px 0 0" }}>
+                                    {confirmOrderModal.customer_name || "Customer"} · {confirmOrderModal.fulfillment_type === "pickup" ? "Store Pick Up" : "Delivery"}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => !confirmingOrder && setConfirmOrderModal(null)}
+                                style={{ background: "none", border: "none", fontSize: 18, color: "#94A3B8", cursor: "pointer" }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div style={{ background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 10, padding: 12, fontSize: 12, marginBottom: 14 }}>
+                            <div style={{ fontWeight: 700, color: "#1E2F5F", marginBottom: 4 }}>
+                                {confirmOrderModal.unit_brand} {confirmOrderModal.unit_model} ({confirmOrderModal.unit_horsepower} HP · {confirmOrderModal.unit_ac_type})
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", color: "#475569" }}>
+                                <span>Unit Price:</span>
+                                <strong>{formatCurrency(confirmOrderModal.unit_price)}</strong>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
+                                <span>Down Payment Paid:</span>
+                                <strong>- {formatCurrency(confirmOrderModal.down_payment)}</strong>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontWeight: 700, marginTop: 4, paddingTop: 4, borderTop: "1px dashed #CBD5E1" }}>
+                                <span>Remaining Unit Balance ({confirmOrderModal.payment_method}):</span>
+                                <span>{formatCurrency(confirmOrderModal.remaining_balance)}</span>
+                            </div>
+                        </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            {confirmOrderModal.fulfillment_type === "delivery" && (
+                                <div>
+                                    <label htmlFor="standalone-order-delivery-fee" style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                                        Delivery Fee (₱) *
+                                    </label>
+                                    <input
+                                        id="standalone-order-delivery-fee"
+                                        name="delivery_fee"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        required
+                                        className="input-field"
+                                        value={confirmOrderForm.delivery_fee}
+                                        onChange={(e) => setConfirmOrderForm((p) => ({ ...p, delivery_fee: e.target.value }))}
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label htmlFor="standalone-order-receipt" style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                                    Upload Official Receipt Picture *
+                                </label>
+                                <input
+                                    id="standalone-order-receipt"
+                                    name="purchase_receipt_image"
+                                    type="file"
+                                    accept="image/*"
+                                    required
+                                    className="input-field"
+                                    style={{ fontSize: 12, padding: "6px 10px" }}
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0] || null;
+                                        setConfirmOrderReceiptFile(f);
+                                        setConfirmOrderReceiptPreview(f ? URL.createObjectURL(f) : "");
+                                    }}
+                                />
+                                {confirmOrderReceiptPreview && (
+                                    <img
+                                        src={confirmOrderReceiptPreview}
+                                        alt="Receipt preview"
+                                        style={{ marginTop: 8, maxHeight: 130, borderRadius: 8, border: "1px solid #CBD5E1", objectFit: "contain" }}
+                                    />
+                                )}
+                            </div>
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                disabled={confirmingOrder}
+                                onClick={() => setConfirmOrderModal(null)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                className="btn-primary"
+                                style={{ background: "#16A34A" }}
+                                disabled={confirmingOrder}
+                            >
+                                {confirmingOrder ? "Confirming..." : "Confirm Purchase & Receipt"}
+                            </button>
+                        </div>
+                    </form>
+                )}
             </Modal>
         </div>
     );

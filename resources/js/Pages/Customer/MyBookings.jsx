@@ -5,10 +5,25 @@ import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
 
-const TABS = ["Pending", "Active", "Completed", "Cancelled", "All"];
+const TABS = ["All", "Pending", "Active", "Completed", "Cancelled"];
 
-export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook, onBookAgain, defaultTab = "Pending" }) {
-    const [tab, setTab] = useState(defaultTab);
+export default function MyBookings({
+    addToast,
+    onNavigate,
+    onSelectServiceToBook,
+    onBookAgain,
+    onViewOcularResults,
+    onScheduleOrderInstallation,
+    navMeta = null,
+    defaultTab = "All",
+}) {
+    const initialTab = navMeta?.tab || defaultTab || "All";
+    const [tab, setTab] = useState(initialTab);
+
+    useEffect(() => {
+        const nextTab = navMeta?.tab || defaultTab || "All";
+        setTab(nextTab);
+    }, [navMeta?.tab, defaultTab]);
     const [bookings, setBookings] = useState([]);
     const [scheduleConfig, setScheduleConfig] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -261,8 +276,10 @@ export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook
                         const isPartiallyCompleted = b.booking_status === "Partially Completed";
                         const isCompleted = b.booking_status === "Completed";
                         const isCancelled = b.booking_status === "Cancelled";
+                        const isOcular = Boolean(b.is_ocular_inspection) || Number(b.service_id) === 4;
+                        const hasOcularResults = isOcular && (b.inspection_status === "Submitted" || (Array.isArray(b.ocular_recommendations) && b.ocular_recommendations.length > 0));
                         const canReschedule = isPending || ["Approved"].includes(b.booking_status);
-                        const canCancel = isPending;
+                        const canCancel = isPending || (Boolean(b.ac_unit_order) && b.booking_status === "Approved");
 
                         let remainingSeconds = 0;
                         if (isPaymentIncomplete) {
@@ -317,9 +334,15 @@ export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook
                                             <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                                                 <span>Requested on {b.created_at_formatted}</span>
                                                 <span>•</span>
-                                                <span className="font-semibold text-gray-700">{unitsCount} Aircon Unit(s)</span>
+                                                <span className="font-semibold text-gray-700">
+                                                    {isOcular ? "Ocular Site Visit" : `${unitsCount} Aircon Unit(s)`}
+                                                </span>
                                                 <span>•</span>
-                                                <span className="text-emerald-700 font-semibold">Reservation Fee: ₱{Number(b.booking_fee_paid || 300).toFixed(2)}</span>
+                                                <span className="text-emerald-700 font-semibold">
+                                                    {isOcular
+                                                        ? "Booking Fee: Free (₱0.00)"
+                                                        : `Reservation Fee: ₱${Number(b.booking_fee_paid ?? 300).toFixed(2)}`}
+                                                </span>
                                             </p>
                                         </div>
                                     </div>
@@ -448,7 +471,18 @@ export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Assigned Service Team</span>
                                         <div className="text-xs mt-1">
-                                            {b.lead_technician_name || b.assistant_technician_name ? (
+                                            {isOcular && Array.isArray(b.ocular_personnel) && b.ocular_personnel.length > 0 ? (
+                                                <div className="space-y-1">
+                                                    {b.ocular_personnel.map((p, idx) => (
+                                                        <div key={p.user_id || idx} className="flex items-center gap-1.5 text-blue-800 font-semibold">
+                                                            <span>{p.name}</span>
+                                                            <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded">
+                                                                {p.role}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : b.lead_technician_name || b.assistant_technician_name ? (
                                                 <div className="space-y-1">
                                                     {b.lead_technician_name && (
                                                         <div className="flex items-center gap-1.5 text-blue-800 font-semibold">
@@ -492,7 +526,9 @@ export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Reservation Fee</span>
                                         <span className="text-xs font-mono font-bold text-emerald-700 mt-1 block">
-                                            ₱{Number(b.booking_fee_paid || 300).toFixed(2)} (Ref: {b.reference_number || "N/A"})
+                                            {isOcular
+                                                ? "Free (₱0.00)"
+                                                : `₱${Number(b.booking_fee_paid ?? 300).toFixed(2)} (Ref: ${b.reference_number || "N/A"})`}
                                         </span>
                                     </div>
 
@@ -503,6 +539,56 @@ export default function MyBookings({ addToast, onNavigate, onSelectServiceToBook
                                         </span>
                                     </div>
                                 </div>
+
+                                {hasOcularResults && (
+                                    <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-emerald-950">
+                                        <div>
+                                            <p className="font-extrabold text-emerald-900">
+                                                ✓ Ocular Inspection Results & AC Unit Recommendations Ready
+                                            </p>
+                                            <p className="text-emerald-800 mt-0.5">
+                                                {b.ocular_rooms?.length || 0} room(s) inspected • {b.ocular_recommendations?.length || 0} suitable AC unit(s) recommended for your space.
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (onViewOcularResults) {
+                                                    onViewOcularResults(b);
+                                                } else if (onNavigate) {
+                                                    onNavigate("ocular_results", { bookingId: b.booking_id, step: "results" });
+                                                }
+                                            }}
+                                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shrink-0"
+                                        >
+                                            View Results & Buy Unit
+                                        </button>
+                                    </div>
+                                )}
+
+                                {b.ac_unit_order && (
+                                    <div className="mt-3 bg-blue-50/80 border border-blue-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-blue-950">
+                                        <div>
+                                            <p className="font-extrabold text-blue-900">
+                                                Purchased AC Unit: {b.ac_unit_order.brand} {b.ac_unit_order.model || ""} ({b.ac_unit_order.horsepower} HP) — {b.ac_unit_order.order_status}
+                                            </p>
+                                            <p className="text-blue-800 mt-0.5">
+                                                Down Payment Paid: {formatCurrency(b.ac_unit_order.down_payment_amount)} • Remaining Unit Balance: {formatCurrency(b.ac_unit_order.remaining_unit_balance)}
+                                                {b.ac_unit_order.delivery_fee > 0 ? ` • Delivery Fee: ${formatCurrency(b.ac_unit_order.delivery_fee)}` : ""}
+                                            </p>
+                                        </div>
+                                        {b.ac_unit_order.manager_receipt_url && (
+                                            <a
+                                                href={b.ac_unit_order.manager_receipt_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shrink-0"
+                                            >
+                                                View Purchase Receipt
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
 
                                 {isPaymentIncomplete && (
                                     <div className="mt-3 bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950">

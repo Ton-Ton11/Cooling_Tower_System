@@ -3,7 +3,7 @@ import StatusBadge from "../../Components/StatusBadge";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
 
-export default function ServiceHistory({ addToast, onNavigate, onSelectServiceToBook, onBookAgain }) {
+export default function ServiceHistory({ addToast, onNavigate, onSelectServiceToBook, onBookAgain, onViewOcularResults }) {
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [feedbackBooking, setFeedbackBooking] = useState(null);
@@ -78,6 +78,27 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
                                 </div>
 
                                 <div className="flex items-center gap-2.5 flex-wrap">
+                                    {(Boolean(b.is_ocular_inspection) || Number(b.service_id) === 4) &&
+                                        (b.inspection_status === "Submitted" ||
+                                            (Array.isArray(b.ocular_recommendations) &&
+                                                b.ocular_recommendations.length > 0)) && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (onViewOcularResults) {
+                                                        onViewOcularResults(b);
+                                                    } else if (onNavigate) {
+                                                        onNavigate("ocular_results", {
+                                                            bookingId: b.booking_id,
+                                                            step: "results",
+                                                        });
+                                                    }
+                                                }}
+                                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition"
+                                            >
+                                                View Results & Buy Unit
+                                            </button>
+                                        )}
                                     <button
                                         type="button"
                                         onClick={() => {

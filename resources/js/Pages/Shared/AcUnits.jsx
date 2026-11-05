@@ -513,9 +513,13 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
     // AC Unit CRUD states
     const [addUnitModal, setAddUnitModal] = useState(false);
     const [unitForm, setUnitForm] = useState(createEmptyForm());
+    const [unitImageFile, setUnitImageFile] = useState(null);
+    const [unitImagePreview, setUnitImagePreview] = useState("");
     const [confirmAddUnit, setConfirmAddUnit] = useState(false);
     const [editUnitTarget, setEditUnitTarget] = useState(null);
     const [editUnitForm, setEditUnitForm] = useState(createEmptyForm());
+    const [editUnitImageFile, setEditUnitImageFile] = useState(null);
+    const [editUnitImagePreview, setEditUnitImagePreview] = useState("");
     const [confirmEditUnit, setConfirmEditUnit] = useState(false);
     const [deleteUnitTarget, setDeleteUnitTarget] = useState(null);
     const [deletingUnit, setDeletingUnit] = useState(false);
@@ -1172,6 +1176,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         const newForm = createEmptyForm(targetBrand, targetCategory, targetMotorType);
         newForm.status = defaultStatus;
         setUnitForm(newForm);
+        setUnitImageFile(null);
+        setUnitImagePreview("");
         setAddUnitModal(true);
     };
 
@@ -1192,11 +1198,22 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 warranty_period: parseInt(unitForm.warranty_period) || 12,
                 status: unitForm.status || 'Available',
             };
-            await window.axios.post(ep.acUnits, payload);
+            if (unitImageFile) {
+                const fd = new FormData();
+                Object.entries(payload).forEach(([k, v]) => {
+                    if (v !== null && v !== undefined) fd.append(k, String(v));
+                });
+                fd.append('unit_image', unitImageFile);
+                await window.axios.post(ep.acUnits, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            } else {
+                await window.axios.post(ep.acUnits, payload);
+            }
             addToast(`AC unit "${unitForm.brand} ${unitForm.model}" added successfully.`);
             setAddUnitModal(false);
             setConfirmAddUnit(false);
             setUnitForm(createEmptyForm());
+            setUnitImageFile(null);
+            setUnitImagePreview("");
             await fetchUnits(false);
             onDataChanged?.();
         } catch (error) {
@@ -1222,9 +1239,20 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 warranty_period: parseInt(editUnitForm.warranty_period) || 12,
                 status: editUnitForm.status || 'Available',
             };
-            await window.axios.patch(ep.updateAcUnit(editUnitTarget.ac_unit_id), payload);
+            if (editUnitImageFile) {
+                const fd = new FormData();
+                Object.entries(payload).forEach(([k, v]) => {
+                    if (v !== null && v !== undefined) fd.append(k, String(v));
+                });
+                fd.append('unit_image', editUnitImageFile);
+                await window.axios.post(ep.updateAcUnit(editUnitTarget.ac_unit_id), fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+            } else {
+                await window.axios.patch(ep.updateAcUnit(editUnitTarget.ac_unit_id), payload);
+            }
             addToast(`AC unit "${editUnitForm.brand} ${editUnitForm.model}" updated.`);
             setEditUnitTarget(null);
+            setEditUnitImageFile(null);
+            setEditUnitImagePreview("");
             setConfirmEditUnit(false);
             await fetchUnits(false);
             onDataChanged?.();
@@ -2434,7 +2462,18 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
                                                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                                                     <td style={{ ...tdStyle, fontSize: 12, fontWeight: 600, color: '#2563EB' }}>#AC{String(u.ac_unit_id).padStart(3, '0')}</td>
-                                                    <td style={{ ...tdStyle, fontWeight: 600, color: '#0F172A' }}>{u.model}</td>
+                                                    <td style={{ ...tdStyle, fontWeight: 600, color: '#0F172A' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                            {u.image_url && (
+                                                                <img
+                                                                    src={u.image_url}
+                                                                    alt={`${u.brand} ${u.model}`}
+                                                                    style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover', border: '1px solid #E2E8F0', flexShrink: 0 }}
+                                                                />
+                                                            )}
+                                                            <span>{u.model}</span>
+                                                        </div>
+                                                    </td>
                                                     <td style={{ ...tdStyle, fontSize: 12, fontFamily: 'monospace', color: '#475569' }}>{u.serial_number}</td>
                                                     <td style={{ ...tdStyle }}>
                                                         <span style={{
@@ -2519,6 +2558,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                                                 onClick={() => {
                                                                     trackRecentAc(u.ac_unit_id, 'unit');
                                                                     setEditUnitTarget(u);
+                                                                    setEditUnitImageFile(null);
+                                                                    setEditUnitImagePreview(u.image_url || "");
                                                                     setEditUnitForm({
                                                                         brand: u.brand ?? "",
                                                                         model: u.model ?? "",
@@ -3614,6 +3655,31 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                 ))}
                             </select>
                         </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label htmlFor="add-ac-unit-image" className="section-label" style={{ display: 'block', marginBottom: 5 }}>
+                                Unit Picture (Shown in Ocular Recommendations)
+                            </label>
+                            <input
+                                id="add-ac-unit-image"
+                                name="unit_image"
+                                type="file"
+                                accept="image/*"
+                                className="input-field"
+                                style={{ fontSize: 12, padding: '6px 10px' }}
+                                onChange={e => {
+                                    const f = e.target.files?.[0] || null;
+                                    setUnitImageFile(f);
+                                    setUnitImagePreview(f ? URL.createObjectURL(f) : "");
+                                }}
+                            />
+                            {unitImagePreview && (
+                                <img
+                                    src={unitImagePreview}
+                                    alt="AC unit preview"
+                                    style={{ marginTop: 8, maxHeight: 96, borderRadius: 8, border: '1px solid #E2E8F0', objectFit: 'contain' }}
+                                />
+                            )}
+                        </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                         <button className="btn-secondary" onClick={() => { setAddUnitModal(false); setNewBrandDraft(''); }}>Cancel</button>
@@ -3748,6 +3814,33 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                     <option key={opt} value={opt}>{opt}</option>
                                 ))}
                             </select>
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label htmlFor="edit-ac-unit-image" className="section-label" style={{ display: 'block', marginBottom: 5 }}>
+                                Unit Picture (Shown in Ocular Recommendations)
+                            </label>
+                            <input
+                                id="edit-ac-unit-image"
+                                name="unit_image"
+                                type="file"
+                                accept="image/*"
+                                className="input-field"
+                                style={{ fontSize: 12, padding: '6px 10px' }}
+                                onChange={e => {
+                                    const f = e.target.files?.[0] || null;
+                                    setEditUnitImageFile(f);
+                                    if (f) {
+                                        setEditUnitImagePreview(URL.createObjectURL(f));
+                                    }
+                                }}
+                            />
+                            {editUnitImagePreview && (
+                                <img
+                                    src={editUnitImagePreview}
+                                    alt="AC unit preview"
+                                    style={{ marginTop: 8, maxHeight: 96, borderRadius: 8, border: '1px solid #E2E8F0', objectFit: 'contain' }}
+                                />
+                            )}
                         </div>
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTop: '1px solid #F1F5F9' }}>

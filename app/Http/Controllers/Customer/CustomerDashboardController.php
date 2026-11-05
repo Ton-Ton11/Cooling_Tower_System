@@ -123,12 +123,32 @@ class CustomerDashboardController extends Controller
         if ($unratedBooking) {
             $toDoItems[] = [
                 'id' => 'feedback_' . $unratedBooking->booking_id,
-                'title' => 'Rate technician performance for ' . ($unratedBooking->service?->service_name ?? 'Service'),
-                'sub' => 'Help us recognize quality service',
-                'target' => 'history',
+                'title' => 'Booking #' . $unratedBooking->booking_id . ' (' . ($unratedBooking->service?->service_name ?? 'Service') . ') is complete — leave a rating & feedback',
+                'sub' => 'Your service is complete. Share your rating and feedback with our team.',
+                'target' => 'bookings',
                 'badge' => 'Rate Service',
                 'badge_color' => 'blue',
             ];
+        }
+
+        if (DB::getSchemaBuilder()->hasTable('ocular_inspection_recommendations')) {
+            $readyOcular = DB::table('ocular_inspection_recommendations as r')
+                ->join('bookings as b', 'b.booking_id', '=', 'r.booking_id')
+                ->where('b.client_id', $userId)
+                ->where('r.status', 'Submitted')
+                ->orderByDesc('r.booking_id')
+                ->first(['r.booking_id']);
+
+            if ($readyOcular) {
+                array_unshift($toDoItems, [
+                    'id' => 'ocular_ready_' . $readyOcular->booking_id,
+                    'title' => 'View Ocular Inspection Results & AC Recommendations (Booking #' . $readyOcular->booking_id . ')',
+                    'sub' => 'Select your preferred AC unit and proceed to payment & installation scheduling',
+                    'target' => 'bookings',
+                    'badge' => 'Recommendations Ready',
+                    'badge_color' => 'emerald',
+                ]);
+            }
         }
 
         if (empty($user->address) || empty($user->contact_number)) {
@@ -147,7 +167,8 @@ class CustomerDashboardController extends Controller
         $services = Service::whereIn('service_name', [
             'Installation',
             'Repair / Check-up',
-            'Cleaning / Preventive Maintenance'
+            'Cleaning / Preventive Maintenance',
+            'Ocular Inspection',
         ])
         ->orderBy('display_order')
         ->get()

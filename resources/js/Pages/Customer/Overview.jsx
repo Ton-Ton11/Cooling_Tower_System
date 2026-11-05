@@ -115,6 +115,13 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
             bgGradient: "from-emerald-600 via-teal-600 to-cyan-700",
             iconType: "cleaning",
         },
+        "Ocular Inspection": {
+            badge: "Free Inspection",
+            tagline: "Buy & Install AC Room Sizing",
+            progressLabel: "Free (₱0.00)",
+            bgGradient: "from-violet-600 via-purple-600 to-indigo-700",
+            iconType: "ocular",
+        },
     };
 
     const renderServiceBadgeIcon = (type) => {
@@ -405,7 +412,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
                         {/* TAB 1: CORE SERVICES GRID (LMS CARD DESIGN) */}
                         {activeTab === "services" && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {services.map((srv) => {
                                     const meta = serviceVisuals[srv.service_name] || {
                                         badge: "Certified",

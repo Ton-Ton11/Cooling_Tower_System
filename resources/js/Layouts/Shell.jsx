@@ -39,6 +39,7 @@ function Shell() {
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [dashboardData, setDashboardData] = useState(null);
     const [dashboardLoading, setDashboardLoading] = useState(true);
+    const [navNonce, setNavNonce] = useState(0);
 
     useEffect(() => {
         const onResize = () => {
@@ -105,6 +106,7 @@ function Shell() {
     const onNavigate = useCallback(
         (page) => {
             setActivePage(page);
+            setNavNonce((n) => n + 1);
 
             if (isMobile) {
                 setMobileSidebarOpen(false);
@@ -150,7 +152,12 @@ function Shell() {
             />
         ),
         bookings: (
-            <Bookings addToast={addToast} onDataChanged={handleDataChanged} />
+            <Bookings
+                key={`superadmin-bookings-${navNonce}`}
+                addToast={addToast}
+                onDataChanged={handleDataChanged}
+                defaultTab="All"
+            />
         ),
         catalog: (
             <ServiceCatalog

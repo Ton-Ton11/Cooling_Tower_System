@@ -29,7 +29,7 @@ const navItems = [
 ];
 
 export default function Dashboard() {
-    const buildPageComponents = ({ addToast, handleDataChanged, dashboardData, dashboardLoading, onNavigate, refreshDashboardData }) => ({
+    const buildPageComponents = ({ addToast, handleDataChanged, dashboardData, dashboardLoading, onNavigate, refreshDashboardData, currentUser, navMeta, navNonce }) => ({
         dashboard: (
             <Overview
                 addToast={addToast}
@@ -41,9 +41,12 @@ export default function Dashboard() {
         ),
         bookings: (
             <Bookings
+                key={`manager-bookings-${navNonce || 0}`}
                 addToast={addToast}
                 onDataChanged={handleDataChanged}
                 endpoints={MANAGER_ENDPOINTS}
+                navMeta={navMeta}
+                defaultTab="All"
             />
         ),
         certificates: (

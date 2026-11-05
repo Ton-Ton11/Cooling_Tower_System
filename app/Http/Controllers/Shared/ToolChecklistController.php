@@ -94,8 +94,41 @@ class ToolChecklistController extends Controller
         ]);
     }
 
+    protected function isOcularBooking(?Booking $booking): bool
+    {
+        if (! $booking) {
+            return false;
+        }
+        if ((int) $booking->service_id === 4) {
+            return true;
+        }
+        $svcName = $booking->service?->service_name ?? '';
+        if ($svcName && stripos((string) $svcName, 'ocular') !== false) {
+            return true;
+        }
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+
+        return ! empty($details['is_ocular_inspection']);
+    }
+
+    protected function isUserAssignedToOcular(?Booking $booking, int $userId): bool
+    {
+        if (! $booking) {
+            return false;
+        }
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        $personnel = is_array($details['ocular_personnel'] ?? null) ? $details['ocular_personnel'] : [];
+        foreach ($personnel as $p) {
+            if ((int) ($p['user_id'] ?? 0) === $userId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
-     * Technician checklists index (checklists for bookings assigned to technician or their team).
+     * Technician / Admin Assistant checklists index (checklists for bookings assigned to technician, team, or ocular personnel).
      */
     public function technicianIndex(Request $request): JsonResponse
     {
@@ -105,6 +138,7 @@ class ToolChecklistController extends Controller
         }
 
         $userId = (int) $user->user_id;
+        $isAdminAssistant = (int) $user->role_id === 3;
 
         // Get all team IDs the technician belongs to
         $myTeamIds = DB::table('technician_team_members')
@@ -113,7 +147,7 @@ class ToolChecklistController extends Controller
             ->all();
 
         $query = ToolChecklist::with([
-            'booking:booking_id,client_id,service_id,booking_status,scheduled_date,lead_technician_id,assistant_technician_id,assigned_tech_id,assigned_team_id',
+            'booking:booking_id,client_id,service_id,booking_status,scheduled_date,lead_technician_id,assistant_technician_id,assigned_tech_id,assigned_team_id,service_details',
             'booking.client:user_id,given_name,middle_name,last_name,contact_number,address',
             'booking.service:service_id,service_name',
             'booking.leadTechnician:user_id,given_name,middle_name,last_name',
@@ -124,12 +158,16 @@ class ToolChecklistController extends Controller
             'items',
             'items.inventoryItem:item_id,item_name,item_type,tool_subtype,serial_number,unit',
         ])
-            ->where(function ($q) use ($userId, $myTeamIds) {
+            ->where(function ($q) use ($userId, $myTeamIds, $isAdminAssistant) {
                 $q->where('technician_id', $userId)
-                    ->orWhereHas('booking', function ($bq) use ($userId, $myTeamIds) {
+                    ->orWhereHas('booking', function ($bq) use ($userId, $myTeamIds, $isAdminAssistant) {
                         $bq->where('assigned_tech_id', $userId)
                             ->orWhere('lead_technician_id', $userId)
-                            ->orWhere('assistant_technician_id', $userId);
+                            ->orWhere('assistant_technician_id', $userId)
+                            ->orWhere('service_id', 4);
+                        if ($isAdminAssistant) {
+                            $bq->orWhereNotNull('service_details');
+                        }
                         if (! empty($myTeamIds)) {
                             $bq->orWhere(function ($teamQuery) use ($myTeamIds) {
                                 $teamQuery->whereNull('lead_technician_id')
@@ -142,7 +180,32 @@ class ToolChecklistController extends Controller
             })
             ->orderByDesc('created_at');
 
-        $checklists = $query->get()->map(fn ($c) => $this->formatChecklist($c));
+        $rows = $query->get()->filter(function ($c) use ($userId, $myTeamIds, $isAdminAssistant) {
+            if ((int) $c->technician_id === $userId) {
+                return true;
+            }
+            $b = $c->booking;
+            if (! $b) {
+                return false;
+            }
+            if ((int) $b->assigned_tech_id === $userId
+                || (int) $b->lead_technician_id === $userId
+                || (int) $b->assistant_technician_id === $userId
+                || ($b->assigned_team_id && in_array((int) $b->assigned_team_id, $myTeamIds, true))
+            ) {
+                return true;
+            }
+            if ($this->isUserAssignedToOcular($b, $userId)) {
+                return true;
+            }
+            if ($isAdminAssistant && $this->isOcularBooking($b)) {
+                return true;
+            }
+
+            return false;
+        });
+
+        $checklists = $rows->values()->map(fn ($c) => $this->formatChecklist($c));
 
         return response()->json([
             'data' => $checklists,
@@ -150,13 +213,13 @@ class ToolChecklistController extends Controller
     }
 
     /**
-     * Technician creates a new checklist for an assigned task.
+     * Technician or Admin Assistant (for Ocular Inspection) creates a new checklist for an assigned task.
      */
     public function store(Request $request): JsonResponse
     {
         $user = $request->user();
-        if (! $user || ! in_array((int) $user->role_id, [5, 7], true)) {
-            abort(403, 'Only technicians and head technicians can create checklists.');
+        if (! $user || ! in_array((int) $user->role_id, [1, 3, 5, 7], true)) {
+            abort(403, 'Only technicians, head technicians, and admin assistants (for ocular inspections) can create checklists.');
         }
 
         $userId = (int) $user->user_id;
@@ -171,22 +234,33 @@ class ToolChecklistController extends Controller
         ]);
 
         // Verify booking assignment
-        $booking = Booking::findOrFail($validated['booking_id']);
+        $booking = Booking::with('service')->findOrFail($validated['booking_id']);
+        $isOcular = $this->isOcularBooking($booking);
+
+        if ((int) $user->role_id === 3 && ! $isOcular) {
+            throw ValidationException::withMessages([
+                'booking_id' => ['Admin Assistants can only create checklists for Ocular Inspection tasks.'],
+            ]);
+        }
+
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        $hasOcularPersonnel = ! empty($details['ocular_personnel']) && is_array($details['ocular_personnel']);
 
         $isAssignedBooking = ! empty($booking->lead_technician_id)
             || ! empty($booking->assistant_technician_id)
             || ! empty($booking->assigned_tech_id)
-            || ! empty($booking->assigned_team_id);
+            || ! empty($booking->assigned_team_id)
+            || $hasOcularPersonnel;
 
         if (! $isAssignedBooking) {
             throw ValidationException::withMessages([
-                'booking_id' => ['A checklist can only be created when there is a task assigned by the manager to your technician team.'],
+                'booking_id' => ['A checklist can only be created when personnel have been assigned by the manager.'],
             ]);
         }
 
         if (! in_array($booking->booking_status, ['Approved', 'Dispatched', 'In-Progress'], true)) {
             throw ValidationException::withMessages([
-                'booking_id' => ['A tools and materials checklist can only be created after the booking has been approved and assigned to you.'],
+                'booking_id' => ['A checklist can only be created after the booking has been approved and assigned.'],
             ]);
         }
 
@@ -196,7 +270,7 @@ class ToolChecklistController extends Controller
 
         if ($existingChecklist) {
             throw ValidationException::withMessages([
-                'booking_id' => ["Only one checklist can be created per team/pair for a booking. Checklist #{$existingChecklist->checklist_id} ({$existingChecklist->status}) already exists for Booking #{$booking->booking_id}."],
+                'booking_id' => ["Only one checklist can be created for a booking. Checklist #{$existingChecklist->checklist_id} ({$existingChecklist->status}) already exists for Booking #{$booking->booking_id}."],
             ]);
         }
 
@@ -210,25 +284,33 @@ class ToolChecklistController extends Controller
             ->where('leader_id', $userId)
             ->exists() : false;
 
-        $isAssignedTechnician = (int) $booking->lead_technician_id === $userId
+        $isAssignedStaff = (int) $booking->lead_technician_id === $userId
             || (int) $booking->assistant_technician_id === $userId
             || (int) $booking->assigned_tech_id === $userId
             || in_array((int) $booking->assigned_team_id, $myTeamIds, true)
             || $isLeader
+            || $this->isUserAssignedToOcular($booking, $userId)
             || (int) $user->role_id === 1;
 
-        if (! $isAssignedTechnician) {
+        if (! $isAssignedStaff) {
             throw ValidationException::withMessages([
-                'booking_id' => ['This task is not assigned to you or your technician team.'],
+                'booking_id' => ['This task is not assigned to you.'],
             ]);
         }
 
-        // Strict validation: tools must not be damaged/lost/in-use, and materials must not be out-of-stock
+        // Strict validation: tools must not be damaged/lost/in-use, materials excluded for Ocular Inspection
         foreach ($validated['items'] as $itemData) {
             $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->first();
             if (! $invItem) {
                 throw ValidationException::withMessages([
                     'items' => ["Item #{$itemData['item_id']} was not found in inventory."],
+                ]);
+            }
+
+            $isTool = strtolower($invItem->item_type) === 'tool';
+            if ($isOcular && ! $isTool) {
+                throw ValidationException::withMessages([
+                    'items' => ["Materials are excluded from checklists for Ocular Inspection tasks ('{$invItem->item_name}' is not a tool). Please select tools only."],
                 ]);
             }
 
@@ -340,7 +422,8 @@ class ToolChecklistController extends Controller
             abort(401);
         }
 
-        $checklist = ToolChecklist::findOrFail($checklistId);
+        $checklist = ToolChecklist::with('booking.service')->findOrFail($checklistId);
+        $isOcular = $this->isOcularBooking($checklist->booking);
 
         // Strict business rule: if approved, only Tools Man can update
         if ($checklist->status !== 'Pending') {
@@ -381,6 +464,11 @@ class ToolChecklistController extends Controller
             }
 
             $isTool = strtolower($invItem->item_type) === 'tool';
+            if ($isOcular && ! $isTool) {
+                throw ValidationException::withMessages([
+                    'items' => ["Materials are excluded from checklists for Ocular Inspection tasks ('{$invItem->item_name}' is not a tool). Please select tools only."],
+                ]);
+            }
             $statusLower = strtolower($invItem->status ?? 'available');
 
             if ($isTool && in_array($statusLower, ['lost/damaged', 'damaged', 'lost', 'broken'], true)) {
@@ -705,7 +793,8 @@ class ToolChecklistController extends Controller
             abort(403, 'Unauthorized.');
         }
 
-        $checklist = ToolChecklist::findOrFail($checklistId);
+        $checklist = ToolChecklist::with('booking.service')->findOrFail($checklistId);
+        $isOcular = $this->isOcularBooking($checklist->booking);
 
         $validated = $request->validate([
             'items' => ['required', 'array', 'min:1'],
@@ -732,6 +821,11 @@ class ToolChecklistController extends Controller
             }
 
             $isTool = strtolower($invItem->item_type) === 'tool';
+            if ($isOcular && ! $isTool) {
+                throw ValidationException::withMessages([
+                    'items' => ["Materials are excluded from checklists for Ocular Inspection tasks ('{$invItem->item_name}' is not a tool)."],
+                ]);
+            }
             $statusLower = strtolower($invItem->status ?? 'available');
 
             if ($isTool && in_array($statusLower, ['lost/damaged', 'damaged', 'lost', 'broken'], true)) {
@@ -888,7 +982,7 @@ class ToolChecklistController extends Controller
     public function updateToolStatus(Request $request, int $checklistId, int $itemId): JsonResponse
     {
         $user = $request->user();
-        if (! $user || ! in_array((int) $user->role_id, [1, 2, 4, 5, 7], true)) {
+        if (! $user || ! in_array((int) $user->role_id, [1, 2, 3, 4, 5, 7], true)) {
             abort(403, 'Unauthorized.');
         }
 
@@ -1077,7 +1171,7 @@ class ToolChecklistController extends Controller
     public function removeItems(Request $request, int $checklistId): JsonResponse
     {
         $user = $request->user();
-        if (! $user || ! in_array((int) $user->role_id, [1, 2, 4, 5, 7], true)) {
+        if (! $user || ! in_array((int) $user->role_id, [1, 2, 3, 4, 5, 7], true)) {
             abort(403, 'Unauthorized.');
         }
 
@@ -1218,6 +1312,21 @@ class ToolChecklistController extends Controller
 
             $bookingRow = DB::table('bookings')->where('booking_id', $freshChecklist->booking_id)->first();
             if ($bookingRow) {
+                $bDetails = ! empty($bookingRow->service_details)
+                    ? (is_string($bookingRow->service_details) ? (json_decode($bookingRow->service_details, true) ?: []) : (array) $bookingRow->service_details)
+                    : [];
+                $isOcularBooking = ((int) $bookingRow->service_id === 4) || ! empty($bDetails['is_ocular_inspection']);
+                if ($isOcularBooking && ($bDetails['inspection_status'] ?? '') === 'Submitted') {
+                    DB::table('bookings')
+                        ->where('booking_id', $bookingRow->booking_id)
+                        ->whereNotIn('booking_status', ['Cancelled', 'Completed'])
+                        ->update([
+                            'booking_status' => 'Completed',
+                            'service_order_status' => 'Completed',
+                            'updated_at' => now(),
+                        ]);
+                }
+
                 \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::syncAutoStartForTechnicians(
                     \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::getAssignedTechnicianIdsForBooking($bookingRow)
                 );
@@ -1287,15 +1396,21 @@ class ToolChecklistController extends Controller
     protected function formatChecklist(ToolChecklist $c): array
     {
         $hasUnresolved = $c->items->contains(fn ($i) => strtolower($i->item_type ?? '') === 'tool' && $i->status === 'assigned');
+        $isOcular = $this->isOcularBooking($c->booking);
+        $bDetails = is_array($c->booking?->service_details ?? null) ? $c->booking->service_details : [];
+        $ocularPersonnel = is_array($bDetails['ocular_personnel'] ?? null) ? $bDetails['ocular_personnel'] : [];
 
         $leadName = $c->booking?->leadTechnician ? $c->booking->leadTechnician->name : null;
         $assistantName = $c->booking?->assistantTechnician ? $c->booking->assistantTechnician->name : null;
-        $dynamicTeam = ($leadName && $assistantName) ? "{$leadName} & {$assistantName}" : ($leadName ?: ($assistantName ?: null));
+        $dynamicTeam = ! empty($ocularPersonnel)
+            ? collect($ocularPersonnel)->map(fn ($p) => ($p['full_name'] ?? 'Staff') . (! empty($p['role_name']) ? " ({$p['role_name']})" : ''))->implode(', ')
+            : (($leadName && $assistantName) ? "{$leadName} & {$assistantName}" : ($leadName ?: ($assistantName ?: null)));
         $teamName = $c->team ? $c->team->team_name : $dynamicTeam;
 
         return [
             'checklist_id' => (int) $c->checklist_id,
             'booking_id' => (int) $c->booking_id,
+            'is_ocular_inspection' => $isOcular,
             'client_name' => $c->booking?->client ? $c->booking->client->name : ($c->booking ? 'Customer' : '—'),
             'service_name' => $c->booking?->service?->service_name ?? ($c->booking ? 'Aircon Service' : '—'),
             'status' => $c->status,

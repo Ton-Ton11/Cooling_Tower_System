@@ -23,7 +23,7 @@ use Illuminate\Validation\ValidationException;
 class CustomerBookingController extends Controller
 {
     /**
-     * Ensure the 3 primary customer-facing services exist in the database.
+     * Ensure the 4 primary customer-facing services exist in the database.
      */
     public static function ensurePrimaryServicesExist(): void
     {
@@ -52,17 +52,28 @@ class CustomerBookingController extends Controller
                 'display_order' => 3,
                 'is_active' => true,
             ],
+            4 => [
+                'service_name' => 'Ocular Inspection',
+                'description' => 'Free site and room thermal load inspection with AC unit recommendations for customers planning to buy and install AC units.',
+                'base_price' => 0.00,
+                'category' => 'Ocular Inspection',
+                'display_order' => 4,
+                'is_active' => true,
+            ],
         ];
 
-        // 1. Re-map any bookings referencing legacy service IDs to 1, 2, 3
+        // 1. Re-map any bookings referencing legacy service IDs to 1, 2, 3 (preserving 4 = Ocular Inspection)
         DB::table('bookings')->whereIn('service_id', [6, 7, 14])->update(['service_id' => 1]);
-        DB::table('bookings')->whereIn('service_id', [4, 5, 8, 15])->update(['service_id' => 2]);
+        DB::table('bookings')->whereIn('service_id', [5, 8, 15])->update(['service_id' => 2]);
         DB::table('bookings')->whereIn('service_id', [16])->update(['service_id' => 3]);
 
-        // 2. Remove any services outside 1, 2, 3
-        DB::table('services')->whereNotIn('service_id', [1, 2, 3])->delete();
+        // 2. Remove any services outside 1, 2, 3, 4 (preserve internal AC Unit Sale service if present)
+        DB::table('services')
+            ->whereNotIn('service_id', [1, 2, 3, 4])
+            ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->delete();
 
-        // 3. Upsert IDs 1, 2, 3 with primary definitions
+        // 3. Upsert IDs 1, 2, 3, 4 with primary definitions
         foreach ($primaryServices as $id => $ps) {
             DB::table('services')->updateOrInsert(
                 ['service_id' => $id],
@@ -71,6 +82,29 @@ class CustomerBookingController extends Controller
                 ])
             );
         }
+    }
+
+    /**
+     * Determine whether a booking model or record represents an Ocular Inspection.
+     */
+    public static function isOcularBooking($booking, ?string $serviceName = null): bool
+    {
+        if (! $booking) {
+            return false;
+        }
+        $serviceId = (int) ($booking->service_id ?? 0);
+        if ($serviceId === 4) {
+            return true;
+        }
+        $resolvedName = $serviceName ?? ($booking->service_name ?? ($booking->service->service_name ?? ''));
+        if ($resolvedName && stripos((string) $resolvedName, 'ocular') !== false) {
+            return true;
+        }
+        $details = is_array($booking->service_details ?? null)
+            ? $booking->service_details
+            : (is_string($booking->service_details ?? null) ? (json_decode($booking->service_details, true) ?: []) : []);
+
+        return ! empty($details['is_ocular_inspection']);
     }
 
     /**
@@ -83,7 +117,8 @@ class CustomerBookingController extends Controller
         $services = Service::whereIn('service_name', [
             'Installation',
             'Repair / Check-up',
-            'Cleaning / Preventive Maintenance'
+            'Cleaning / Preventive Maintenance',
+            'Ocular Inspection',
         ])
         ->orderBy('display_order')
         ->get();
@@ -94,7 +129,7 @@ class CustomerBookingController extends Controller
     }
 
     /**
-     * Get dynamic customer catalog (3 customer services, 9 visual unit types, brands, capacities, and policy).
+     * Get dynamic customer catalog (4 customer services, 9 visual unit types, brands, capacities, and policy).
      */
     public function catalog(): JsonResponse
     {
@@ -103,7 +138,8 @@ class CustomerBookingController extends Controller
         $services = Service::whereIn('service_name', [
             'Installation',
             'Repair / Check-up',
-            'Cleaning / Preventive Maintenance'
+            'Cleaning / Preventive Maintenance',
+            'Ocular Inspection',
         ])
         ->orderBy('display_order')
         ->get();
@@ -214,9 +250,14 @@ class CustomerBookingController extends Controller
             'fee_name' => 'Appointment Reservation Fee',
             'amount' => 300.00,
             'reschedule_fee' => 150.00,
+            'unit_down_payment' => 7000.00,
+            'default_delivery_fee' => 500.00,
             'allowed_cancellation_hours' => 24,
             'gcash_account' => '0917-123-4567',
             'gcash_name' => 'Cooling Tower Airconditioning Services',
+            'bank_name' => 'BDO Unibank',
+            'bank_account_number' => '0042-8891-2045',
+            'bank_account_name' => 'Cooling Tower Airconditioning Services',
             'notice' => 'An appointment reservation fee is required to secure your requested service schedule. Your reservation fee is separate from the final service quotation.',
             'terms' => [
                 'Service Request Only: This booking is an initial service request and schedule reservation. Final service charges will be determined by assessment and an official quotation.',
@@ -313,7 +354,103 @@ class CustomerBookingController extends Controller
             ? DB::table('service_reports')->whereIn('booking_id', $bookingIds)->get()->keyBy('booking_id')
             : collect();
 
-        $bookings = $bookingModels->map(function ($b) use ($serviceReports) {
+        $ocularRoomsByBooking = (! empty($bookingIds) && DB::getSchemaBuilder()->hasTable('ocular_inspection_rooms'))
+            ? DB::table('ocular_inspection_rooms')
+                ->whereIn('booking_id', $bookingIds)
+                ->orderBy('room_id')
+                ->get()
+                ->groupBy('booking_id')
+            : collect();
+
+        $ocularRecsByBooking = (! empty($bookingIds) && DB::getSchemaBuilder()->hasTable('ocular_inspection_recommendations'))
+            ? DB::table('ocular_inspection_recommendations as r')
+                ->leftJoin('ac_units_inventory as u', 'u.ac_unit_id', '=', 'r.ac_unit_id')
+                ->whereIn('r.booking_id', $bookingIds)
+                ->whereIn('r.status', ['Submitted', 'Selected'])
+                ->select([
+                    'r.*',
+                    'u.brand as unit_brand',
+                    'u.model as unit_model',
+                    'u.horsepower as unit_horsepower',
+                    'u.ac_type as unit_ac_type',
+                    'u.motor_type as unit_motor_type',
+                    'u.selling_price as unit_selling_price',
+                    'u.purchase_price as unit_purchase_price',
+                    'u.status as unit_current_status',
+                    'u.image_path as unit_inventory_image_path',
+                    'u.warranty_period as unit_warranty_period',
+                ])
+                ->orderBy('r.recommendation_id')
+                ->get()
+                ->groupBy('booking_id')
+            : collect();
+
+        $customerOrders = DB::getSchemaBuilder()->hasTable('ac_unit_orders')
+            ? DB::table('ac_unit_orders as o')
+                ->leftJoin('ac_units_inventory as u', 'u.ac_unit_id', '=', 'o.ac_unit_id')
+                ->where('o.client_id', $userId)
+                ->select([
+                    'o.*',
+                    'u.brand as unit_brand',
+                    'u.model as unit_model',
+                    'u.serial_number as unit_serial_number',
+                    'u.horsepower as unit_horsepower',
+                    'u.ac_type as unit_ac_type',
+                    'u.motor_type as unit_motor_type',
+                    'u.image_path as unit_image_path',
+                    'u.status as unit_inventory_status',
+                    'u.warranty_period as unit_warranty_period',
+                ])
+                ->orderByDesc('o.order_id')
+                ->get()
+                ->map(function ($o) {
+                    return [
+                        'order_id' => (int) $o->order_id,
+                        'ocular_booking_id' => $o->ocular_booking_id ? (int) $o->ocular_booking_id : null,
+                        'installation_booking_id' => $o->installation_booking_id ? (int) $o->installation_booking_id : null,
+                        'recommendation_id' => $o->recommendation_id ? (int) $o->recommendation_id : null,
+                        'ac_unit_id' => (int) $o->ac_unit_id,
+                        'quantity' => (int) ($o->quantity ?? 1),
+                        'unit_price' => (float) ($o->unit_price ?? 0),
+                        'total_unit_price' => (float) ($o->total_unit_price ?? 0),
+                        'down_payment_amount' => (float) ($o->down_payment_amount ?? 7000),
+                        'remaining_unit_balance' => (float) ($o->remaining_unit_balance ?? 0),
+                        'delivery_fee' => (float) ($o->delivery_fee ?? 0),
+                        'installation_fee' => (float) ($o->installation_fee ?? 0),
+                        'payment_method' => $o->payment_method,
+                        'fulfillment_type' => $o->fulfillment_type,
+                        'reference_number' => $o->reference_number,
+                        'down_payment_receipt_url' => $o->down_payment_receipt_path ? asset('storage/' . $o->down_payment_receipt_path) : null,
+                        'manager_receipt_url' => $o->manager_receipt_path ? asset('storage/' . $o->manager_receipt_path) : null,
+                        'delivery_address' => $o->delivery_address,
+                        'contact_number' => $o->contact_number,
+                        'installation_fee_forfeited' => (bool) ($o->installation_fee_forfeited ?? false),
+                        'order_status' => $o->order_status,
+                        'confirmed_at' => $o->confirmed_at,
+                        'notes' => $o->notes,
+                        'brand' => $o->unit_brand,
+                        'model' => $o->unit_model,
+                        'serial_number' => $o->unit_serial_number,
+                        'horsepower' => (float) ($o->unit_horsepower ?? 0),
+                        'ac_type' => $o->unit_ac_type,
+                        'motor_type' => $o->unit_motor_type ?? 'Inverter',
+                        'unit_image_url' => $o->unit_image_path ? asset('storage/' . $o->unit_image_path) : null,
+                        'warranty_period' => (int) ($o->unit_warranty_period ?? 12),
+                        'created_at' => $o->created_at,
+                    ];
+                })
+            : collect();
+
+        $ordersByOcularBooking = $customerOrders->whereNotNull('ocular_booking_id')->groupBy('ocular_booking_id');
+        $ordersByInstallBooking = $customerOrders->whereNotNull('installation_booking_id')->keyBy('installation_booking_id');
+        $ordersById = $customerOrders->keyBy('order_id');
+
+        $bookings = $bookingModels->map(function ($b) use ($serviceReports, $ocularRoomsByBooking, $ocularRecsByBooking, $ordersByOcularBooking, $ordersByInstallBooking, $ordersById) {
+            $isOcular = static::isOcularBooking($b);
+            $details = is_array($b->service_details) ? $b->service_details : [];
+            $ocularPersonnel = is_array($details['ocular_personnel'] ?? null) ? $details['ocular_personnel'] : [];
+            $inspectionStatus = $details['inspection_status'] ?? ($isOcular ? 'Pending Inspection' : null);
+
             $latestPay = $b->payments->sortByDesc('payment_id')->first();
             $reservationPay = $b->payments->firstWhere('payment_type', 'Appointment Reservation Fee')
                 ?? $b->payments->sortBy('payment_id')->first();
@@ -334,7 +471,11 @@ class CustomerBookingController extends Controller
             $assistantName = $assistantUser ? trim("{$assistantUser->given_name} {$assistantUser->middle_name} {$assistantUser->last_name}") : null;
 
             $assignedTeamName = null;
-            if ($leadName && $assistantName) {
+            if (! empty($ocularPersonnel)) {
+                $assignedTeamName = collect($ocularPersonnel)
+                    ->map(fn ($p) => ($p['full_name'] ?? 'Staff') . (! empty($p['role_name']) ? " ({$p['role_name']})" : ''))
+                    ->implode(', ');
+            } elseif ($leadName && $assistantName) {
                 $assignedTeamName = "{$leadName} & {$assistantName}";
             } elseif ($leadName) {
                 $assignedTeamName = "{$leadName} (Lead)";
@@ -342,14 +483,68 @@ class CustomerBookingController extends Controller
                 $assignedTeamName = $b->team->team_name;
             }
 
+            $rooms = ($ocularRoomsByBooking->get($b->booking_id) ?? collect())->map(function ($rm) {
+                return [
+                    'room_id' => (int) $rm->room_id,
+                    'room_name' => $rm->room_name,
+                    'unit_of_measurement' => $rm->unit_of_measurement,
+                    'room_length' => (float) $rm->room_length,
+                    'room_width' => (float) $rm->room_width,
+                    'ceiling_height' => (float) $rm->ceiling_height,
+                    'room_category' => $rm->room_category,
+                    'sun_exposure_level' => $rm->sun_exposure_level,
+                    'maximum_occupancy' => (int) $rm->maximum_occupancy,
+                    'window_size_glazing' => $rm->window_size_glazing,
+                    'heat_generating_equipment' => (int) $rm->heat_generating_equipment,
+                    'estimated_btu' => $rm->estimated_btu !== null ? (float) $rm->estimated_btu : null,
+                    'estimated_hp' => $rm->estimated_hp !== null ? (float) $rm->estimated_hp : null,
+                ];
+            })->values()->all();
+
+            $recommendations = ($ocularRecsByBooking->get($b->booking_id) ?? collect())->map(function ($rec) {
+                $imgPath = $rec->unit_image_path ?: $rec->unit_inventory_image_path;
+                $resolvedPrice = $rec->unit_price !== null
+                    ? (float) $rec->unit_price
+                    : (float) ($rec->unit_selling_price ?? $rec->unit_purchase_price ?? 0);
+
+                return [
+                    'recommendation_id' => (int) $rec->recommendation_id,
+                    'room_id' => $rec->room_id ? (int) $rec->room_id : null,
+                    'ac_unit_id' => $rec->ac_unit_id ? (int) $rec->ac_unit_id : null,
+                    'recommended_capacity' => (float) $rec->recommended_capacity,
+                    'recommended_ac_type' => $rec->recommended_ac_type,
+                    'motor_type_recommendation' => $rec->motor_type_recommendation,
+                    'brand_recommendation' => $rec->brand_recommendation,
+                    'price_range_label' => $rec->price_range_label,
+                    'model' => $rec->model ?: $rec->unit_model,
+                    'inventory_status' => $rec->unit_current_status ?: $rec->inventory_status,
+                    'unit_price' => $resolvedPrice,
+                    'unit_image_url' => $imgPath ? asset('storage/' . $imgPath) : null,
+                    'warranty_period' => (int) ($rec->unit_warranty_period ?? 12),
+                    'notes' => $rec->notes,
+                    'status' => $rec->status,
+                ];
+            })->values()->all();
+
+            $linkedOrder = $ordersByInstallBooking->get($b->booking_id)
+                ?? (! empty($details['ac_unit_order_id']) ? $ordersById->get((int) $details['ac_unit_order_id']) : null);
+            $ocularOrders = ($ordersByOcularBooking->get($b->booking_id) ?? collect())->values()->all();
+
             return [
                 'booking_id' => $b->booking_id,
                 'client_id' => $b->client_id,
                 'service_id' => $b->service_id,
                 'service_name' => $b->service?->service_name ?? 'Aircon Service',
                 'service_description' => $b->service?->description,
+                'is_ocular_inspection' => $isOcular,
+                'inspection_status' => $inspectionStatus,
+                'ocular_personnel' => $ocularPersonnel,
+                'ocular_rooms' => $rooms,
+                'ocular_recommendations' => $recommendations,
+                'ocular_orders' => $ocularOrders,
+                'ac_unit_order' => $linkedOrder,
                 'assigned_tech_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
-                'assigned_tech_name' => $leadName,
+                'assigned_tech_name' => $leadName ?: (! empty($ocularPersonnel) ? ($ocularPersonnel[0]['full_name'] ?? null) : null),
                 'lead_technician_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
                 'lead_technician_name' => $leadName,
                 'assistant_technician_id' => $b->assistant_technician_id,
@@ -380,8 +575,8 @@ class CustomerBookingController extends Controller
                 'policy_acknowledged' => (bool) $b->policy_acknowledged,
                 'total_units_count' => $totalUnitsCount,
                 'units_data' => $unitsList,
-                'service_details' => $b->service_details ?? [],
-                'payment_turnover' => $b->service_details['payment_turnover'] ?? null,
+                'service_details' => $details,
+                'payment_turnover' => $details['payment_turnover'] ?? null,
                 'service_report' => $report ? [
                     'report_id' => $report->report_id,
                     'diagnosis' => $report->diagnosis,
@@ -390,17 +585,17 @@ class CustomerBookingController extends Controller
                     'ac_brand' => $report->ac_brand,
                     'ac_type' => $report->ac_type,
                 ] : null,
-                'preferred_arrival_time' => $b->scheduled_date ? $b->scheduled_date->format('h:i A') : ($b->service_details['preferred_arrival_time'] ?? null),
-                'rate_type' => $b->service_details['rate_type'] ?? null,
-                'is_differential' => (bool) ($b->service_details['is_differential'] ?? false),
+                'preferred_arrival_time' => $b->scheduled_date ? $b->scheduled_date->format('h:i A') : ($details['preferred_arrival_time'] ?? null),
+                'rate_type' => $details['rate_type'] ?? null,
+                'is_differential' => (bool) ($details['is_differential'] ?? false),
                 'service_payment_method' => $b->service_payment_method ?? 'Cash',
                 'cancellation_reason' => $b->cancellation_reason,
                 'notes' => $b->notes,
                 'created_at' => $b->created_at?->toISOString(),
                 'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
-                'payment_status' => $latestPay?->payment_status ?? 'Pending',
-                'payment_method' => $latestPay?->payment_method ?? 'GCash',
-                'booking_fee_paid' => (float) ($reservationPay?->amount_paid ?? 300),
+                'payment_status' => $latestPay?->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
+                'payment_method' => $latestPay?->payment_method ?? ($isOcular ? 'Free Service' : 'GCash'),
+                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? 300),
                 'reference_number' => $reservationPay?->reference_number ?? $latestPay?->reference_number,
                 'payments' => $b->payments->map(function ($p) {
                     return [
@@ -442,6 +637,7 @@ class CustomerBookingController extends Controller
 
         return response()->json([
             'data' => $bookings,
+            'unit_orders' => $customerOrders->values(),
             'schedule_config' => $this->getScheduleConfig(),
         ]);
     }
@@ -460,7 +656,7 @@ class CustomerBookingController extends Controller
 
         // Resolve or fallback service_id intelligently if missing or non-existent
         $reqServiceId = (int) $request->input('service_id');
-        if (! in_array($reqServiceId, [1, 2, 3], true) || ! Service::where('service_id', $reqServiceId)->exists()) {
+        if (! in_array($reqServiceId, [1, 2, 3, 4], true) || ! Service::where('service_id', $reqServiceId)->exists()) {
             $serviceDetails = $request->input('service_details');
             if (is_string($serviceDetails)) {
                 $serviceDetails = json_decode($serviceDetails, true) ?: [];
@@ -469,13 +665,15 @@ class CustomerBookingController extends Controller
 
             $resolvedId = match ($reqServiceId) {
                 1, 6, 7, 14 => 1,
-                2, 4, 5, 8, 15 => 2,
+                2, 5, 8, 15 => 2,
                 3, 16 => 3,
+                4 => 4,
                 default => null,
             };
 
             if (! $resolvedId && $category) {
                 $resolvedId = match (true) {
+                    str_contains(strtolower($category), 'ocular') => 4,
                     str_contains(strtolower($category), 'install') => 1,
                     str_contains(strtolower($category), 'repair') || str_contains(strtolower($category), 'check') => 2,
                     default => 3,
@@ -486,8 +684,13 @@ class CustomerBookingController extends Controller
             $request->merge(['service_id' => $resolvedId]);
         }
 
+        $targetService = Service::find((int) $request->input('service_id'));
+        $isOcularRequest = ((int) $request->input('service_id') === 4)
+            || ($targetService && stripos((string) $targetService->service_name, 'ocular') !== false);
+
         $validated = $request->validate([
             'service_id' => ['required', 'integer', 'exists:services,service_id'],
+            'ac_unit_order_id' => ['nullable', 'integer'],
             'units' => ['nullable'],
             'service_details' => ['nullable'],
             'aircon_brand' => ['nullable', 'string', 'max:100'],
@@ -512,9 +715,11 @@ class CustomerBookingController extends Controller
             'rate_type' => ['nullable', 'string', 'max:50'],
             'is_differential' => ['nullable'],
             'alternative_schedule' => ['nullable', 'string', 'max:150'],
-            'service_payment_method' => ['nullable', 'string', Rule::in(['Cash', 'GCash'])],
+            'service_payment_method' => ['nullable', 'string', Rule::in(['Cash', 'GCash', 'Bank Transfer', 'Free'])],
             'booking_fee' => ['nullable', 'numeric', 'min:0'],
-            'reference_number' => ['required', 'string', 'min:5', 'max:13'],
+            'reference_number' => $isOcularRequest
+                ? ['nullable', 'string', 'max:40']
+                : ['required', 'string', 'min:5', 'max:13'],
             'sender_name' => ['nullable', 'string', 'max:150'],
             'sender_number' => ['nullable', 'string', 'max:11'],
             'notes' => ['nullable', 'string', 'max:1500'],
@@ -552,9 +757,12 @@ class CustomerBookingController extends Controller
         }
 
         $service = Service::findOrFail($validated['service_id']);
-        $bookingFee = isset($validated['booking_fee']) && (float) $validated['booking_fee'] > 0
-            ? (float) $validated['booking_fee']
-            : 300.00;
+        $isOcularInspection = ((int) $service->service_id === 4) || stripos((string) $service->service_name, 'ocular') !== false;
+        $bookingFee = $isOcularInspection
+            ? 0.00
+            : (isset($validated['booking_fee']) && (float) $validated['booking_fee'] > 0
+                ? (float) $validated['booking_fee']
+                : 300.00);
 
         // Parse units data
         $units = $request->input('units');
@@ -695,6 +903,26 @@ class CustomerBookingController extends Controller
                 $serviceDetails['repair_media_path'] = $repairMediaPath;
                 $serviceDetails['repair_media_url'] = asset('storage/' . $repairMediaPath);
             }
+            if ($isOcularInspection) {
+                $serviceDetails['is_ocular_inspection'] = true;
+                $serviceDetails['inspection_status'] = 'Pending Inspection';
+            }
+
+            $linkedOrderId = (int) ($validated['ac_unit_order_id'] ?? ($serviceDetails['ac_unit_order_id'] ?? 0));
+            $linkedOrder = null;
+            if ($linkedOrderId > 0 && DB::getSchemaBuilder()->hasTable('ac_unit_orders')) {
+                $linkedOrder = DB::table('ac_unit_orders')
+                    ->where('order_id', $linkedOrderId)
+                    ->where('client_id', $userId)
+                    ->lockForUpdate()
+                    ->first();
+                if ($linkedOrder) {
+                    $serviceDetails['ac_unit_order_id'] = (int) $linkedOrder->order_id;
+                    $serviceDetails['company_supplied_unit'] = true;
+                    $serviceDetails['unit_available'] = 'Yes (Purchased from Cooling Tower)';
+                }
+            }
+
             if ((int) $service->service_id === 1 && ! array_key_exists('company_supplied_unit', $serviceDetails)) {
                 $serviceDetails['company_supplied_unit'] = (($serviceDetails['unit_available'] ?? 'Yes') === 'No');
             }
@@ -713,9 +941,9 @@ class CustomerBookingController extends Controller
                 'scheduled_date' => $scheduledDateTime,
                 'alternative_schedule' => $validated['alternative_schedule'] ?? null,
                 'booking_status' => 'Pending',
-                'quotation_status' => 'Pending Assessment',
-                'service_order_status' => 'Pending Quotation',
-                'service_payment_method' => $validated['service_payment_method'] ?? 'Cash',
+                'quotation_status' => $isOcularInspection ? 'Not Applicable' : 'Pending Assessment',
+                'service_order_status' => $isOcularInspection ? 'Pending Inspection' : 'Pending Quotation',
+                'service_payment_method' => $isOcularInspection ? 'Free' : ($validated['service_payment_method'] ?? 'Cash'),
                 'notes' => $bookingNotes,
                 'units_data' => $units,
                 'service_details' => $serviceDetails,
@@ -724,38 +952,50 @@ class CustomerBookingController extends Controller
                 'updated_at' => now(),
             ]);
 
-            // 3. Create Payment record for Appointment Reservation Fee
-            Payment::create([
-                'booking_id' => $booking->booking_id,
-                'booking_price' => 0.00,
-                'unit_price' => 0.00,
-                'spare_parts_price' => 0.00,
-                'amount_paid' => $bookingFee,
-                'payment_status' => 'Paid',
-                'payment_method' => 'GCash',
-                'payment_type' => 'Appointment Reservation Fee',
-                'reference_number' => $validated['reference_number'],
-                'sender_name' => $validated['sender_name'] ?? $user->name,
-                'sender_number' => $validated['sender_number'] ?? $user->contact_number,
-                'receipt_image' => $receiptPath,
-                'notes' => 'Appointment Reservation Fee (Schedule Security)',
-                'payment_date' => now(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            if ($linkedOrder) {
+                DB::table('ac_unit_orders')
+                    ->where('order_id', $linkedOrder->order_id)
+                    ->update([
+                        'installation_booking_id' => $booking->booking_id,
+                        'order_status' => 'Installation Scheduled',
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            // 3. Create Payment record for Appointment Reservation Fee (skip for Free Ocular Inspection)
+            if (! $isOcularInspection) {
+                Payment::create([
+                    'booking_id' => $booking->booking_id,
+                    'booking_price' => 0.00,
+                    'unit_price' => 0.00,
+                    'spare_parts_price' => 0.00,
+                    'amount_paid' => $bookingFee,
+                    'payment_status' => 'Paid',
+                    'payment_method' => 'GCash',
+                    'payment_type' => 'Appointment Reservation Fee',
+                    'reference_number' => $validated['reference_number'],
+                    'sender_name' => $validated['sender_name'] ?? $user->name,
+                    'sender_number' => $validated['sender_number'] ?? $user->contact_number,
+                    'receipt_image' => $receiptPath,
+                    'notes' => 'Appointment Reservation Fee (Schedule Security)',
+                    'payment_date' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
             // 4. Activity Log
             DB::table('activity_logs')->insert([
                 'user_id' => $userId,
                 'action_type' => 'BOOKING_CREATE',
                 'description' => sprintf(
-                    'Customer submitted service request #%d for %s with %d unit(s) scheduled on %s (%s). GCash Ref: %s.',
+                    'Customer submitted service request #%d for %s with %d unit(s) scheduled on %s (%s). %s',
                     $booking->booking_id,
                     $service->service_name,
                     $totalQuantity,
                     $scheduledDateTime->format('M d, Y h:i A'),
                     $rateType,
-                    $validated['reference_number']
+                    $isOcularInspection ? 'Free Ocular Inspection (No booking fee).' : ('GCash Ref: ' . ($validated['reference_number'] ?? 'N/A') . '.')
                 ),
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -764,7 +1004,9 @@ class CustomerBookingController extends Controller
             DB::commit();
 
             return response()->json([
-                'message' => 'Your service request and appointment reservation have been received! Our staff will review your request and prepare an official quotation.',
+                'message' => $isOcularInspection
+                    ? 'Your free Ocular Inspection request has been submitted! Status is set to Pending for Manager scheduling and personnel assignment.'
+                    : 'Your service request and appointment reservation have been received! Our staff will review your request and prepare an official quotation.',
                 'booking_id' => $booking->booking_id,
                 'booking' => $booking->fresh(['service']),
             ], 201);
@@ -1152,7 +1394,7 @@ class CustomerBookingController extends Controller
     }
 
     /**
-     * Cancel a pending or active booking.
+     * Cancel a pending or active booking (including fulfillment switches for linked AC unit installation bookings).
      */
     public function cancel(Request $request, int $bookingId): JsonResponse
     {
@@ -1170,30 +1412,342 @@ class CustomerBookingController extends Controller
 
         $validated = $request->validate([
             'cancellation_reason' => ['required', 'string', 'min:5', 'max:1000'],
+            'fulfillment_switch' => ['nullable', 'string', Rule::in(['delivery', 'pickup'])],
         ]);
 
-        $booking->update([
-            'booking_status' => 'Cancelled',
-            'cancellation_reason' => $validated['cancellation_reason'],
-            'updated_at' => now(),
-        ]);
+        $details = is_array($booking->service_details) ? $booking->service_details : [];
+        $fulfillmentSwitch = $validated['fulfillment_switch'] ?? null;
+        $linkedOrder = null;
 
-        DB::table('activity_logs')->insert([
-            'user_id' => $userId,
-            'action_type' => 'BOOKING_CANCEL',
-            'description' => sprintf(
-                'Customer cancelled booking #%d. Reason: %s',
-                $booking->booking_id,
-                $validated['cancellation_reason']
-            ),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        if (DB::getSchemaBuilder()->hasTable('ac_unit_orders')) {
+            $linkedOrder = DB::table('ac_unit_orders')
+                ->where('client_id', $userId)
+                ->where(function ($q) use ($booking, $details) {
+                    $q->where('installation_booking_id', $booking->booking_id);
+                    if (! empty($details['ac_unit_order_id'])) {
+                        $q->orWhere('order_id', (int) $details['ac_unit_order_id']);
+                    }
+                })
+                ->first();
+        }
+
+        $responseMsg = 'Booking has been cancelled.';
+
+        DB::transaction(function () use ($booking, $userId, $validated, $fulfillmentSwitch, $linkedOrder, &$details, &$responseMsg) {
+            if ($linkedOrder && $fulfillmentSwitch === 'delivery') {
+                $details['cancelled_for_fulfillment_switch'] = 'delivery';
+                $deliveryFee = max(500.00, (float) ($linkedOrder->delivery_fee ?? 0));
+
+                DB::table('ac_unit_orders')
+                    ->where('order_id', $linkedOrder->order_id)
+                    ->update([
+                        'fulfillment_type' => 'delivery',
+                        'order_status' => 'Awaiting Delivery',
+                        'delivery_fee' => $deliveryFee,
+                        'installation_booking_id' => null,
+                        'notes' => trim(($linkedOrder->notes ? $linkedOrder->notes . "\n" : '') . "[Switch to Delivery]: Installation Booking #{$booking->booking_id} cancelled; customer will pay remaining unit balance + delivery fee upon delivery."),
+                        'updated_at' => now(),
+                    ]);
+
+                $responseMsg = 'Installation booking cancelled. Your AC unit order has been switched to Delivery — remaining unit balance and delivery fee will be collected upon delivery.';
+            } elseif ($linkedOrder && $fulfillmentSwitch === 'pickup') {
+                $details['cancelled_for_fulfillment_switch'] = 'pickup';
+                $details['booking_fee_non_refundable'] = true;
+
+                DB::table('ac_unit_orders')
+                    ->where('order_id', $linkedOrder->order_id)
+                    ->update([
+                        'fulfillment_type' => 'pickup',
+                        'order_status' => 'Awaiting Pickup',
+                        'delivery_fee' => 0.00,
+                        'installation_fee_forfeited' => true,
+                        'installation_booking_id' => null,
+                        'notes' => trim(($linkedOrder->notes ? $linkedOrder->notes . "\n" : '') . "[Switch to Pick Up]: Delivery & Installation Booking #{$booking->booking_id} cancelled; installation booking fee is non-refundable."),
+                        'updated_at' => now(),
+                    ]);
+
+                DB::table('payment')
+                    ->where('booking_id', $booking->booking_id)
+                    ->where('payment_type', 'like', '%Reservation%')
+                    ->update([
+                        'payment_status' => 'Non-Refundable',
+                        'notes' => 'Delivery & installation cancelled for Pick Up switch — installation booking fee is non-refundable.',
+                        'updated_at' => now(),
+                    ]);
+
+                $responseMsg = 'Delivery and installation booking cancelled and switched to Pick Up. Please note that the installation booking fee is non-refundable.';
+            }
+
+            $booking->update([
+                'booking_status' => 'Cancelled',
+                'cancellation_reason' => $validated['cancellation_reason'],
+                'service_details' => $details,
+                'updated_at' => now(),
+            ]);
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'BOOKING_CANCEL',
+                'description' => sprintf(
+                    'Customer cancelled booking #%d%s. Reason: %s',
+                    $booking->booking_id,
+                    $fulfillmentSwitch ? " (switched AC unit fulfillment to {$fulfillmentSwitch})" : '',
+                    $validated['cancellation_reason']
+                ),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        });
 
         return response()->json([
-            'message' => 'Booking has been cancelled.',
+            'message' => $responseMsg,
             'booking' => $booking->fresh(['service', 'technician']),
         ]);
+    }
+
+    /**
+     * Customer selects a recommended AC unit from an Ocular Inspection and submits ₱7,000 down payment + fulfillment choice.
+     */
+    public function storeAcUnitOrder(Request $request, int $bookingId): JsonResponse
+    {
+        $user = $request->user();
+        $userId = (int) $user->user_id;
+
+        $ocularBooking = Booking::with('service')
+            ->where('booking_id', $bookingId)
+            ->where('client_id', $userId)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'recommendation_id' => ['nullable', 'integer'],
+            'ac_unit_id' => ['nullable', 'integer'],
+            'payment_method' => ['required', 'string', Rule::in(['Cash', 'Bank Transfer', 'GCash'])],
+            'fulfillment_type' => ['required', 'string', Rule::in(['pickup', 'delivery', 'delivery_installation'])],
+            'reference_number' => [
+                Rule::requiredIf(fn () => in_array($request->input('payment_method'), ['Bank Transfer', 'GCash'], true)),
+                'nullable',
+                'string',
+                'min:4',
+                'max:60',
+            ],
+            'sender_name' => ['nullable', 'string', 'max:150'],
+            'sender_number' => ['nullable', 'string', 'max:30'],
+            'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
+            'delivery_address' => ['nullable', 'string', 'max:1000'],
+            'contact_number' => ['nullable', 'string', 'max:50'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $receiptPath = null;
+        if ($request->hasFile('receipt_image')) {
+            $receiptPath = $request->file('receipt_image')->store('receipts/down_payments', 'public');
+        }
+
+        DB::beginTransaction();
+        try {
+            $rec = null;
+            if (! empty($validated['recommendation_id'])) {
+                $rec = DB::table('ocular_inspection_recommendations')
+                    ->where('recommendation_id', (int) $validated['recommendation_id'])
+                    ->where('booking_id', $ocularBooking->booking_id)
+                    ->first();
+            }
+
+            $targetAcUnitId = (int) (($validated['ac_unit_id'] ?? null) ?: ($rec->ac_unit_id ?? 0));
+            $acUnit = $targetAcUnitId > 0
+                ? DB::table('ac_units_inventory')->where('ac_unit_id', $targetAcUnitId)->lockForUpdate()->first()
+                : null;
+
+            if ($acUnit && $acUnit->status === 'Sold') {
+                // Attempt to find another Available or Order Base unit with identical brand & model
+                $fallback = DB::table('ac_units_inventory')
+                    ->where('brand', $acUnit->brand)
+                    ->where('model', $acUnit->model)
+                    ->whereIn('status', ['Available', 'Order Base'])
+                    ->lockForUpdate()
+                    ->first();
+                if ($fallback) {
+                    $acUnit = $fallback;
+                } else {
+                    throw ValidationException::withMessages([
+                        'ac_unit_id' => ['This recommended AC unit has already been sold. Please choose another recommended unit or contact our Admin Assistant.'],
+                    ]);
+                }
+            }
+
+            if (! $acUnit && $rec) {
+                $acUnit = DB::table('ac_units_inventory')
+                    ->where('brand', $rec->brand_recommendation)
+                    ->whereIn('status', ['Available', 'Order Base'])
+                    ->orderByRaw("CASE WHEN status = 'Available' THEN 0 ELSE 1 END")
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            if (! $acUnit) {
+                throw ValidationException::withMessages([
+                    'ac_unit_id' => ['Please select a valid AC unit from the inspection recommendations.'],
+                ]);
+            }
+
+            $unitPrice = $rec && $rec->unit_price !== null && (float) $rec->unit_price > 0
+                ? (float) $rec->unit_price
+                : (float) ($acUnit->selling_price ?: $acUnit->purchase_price ?: 0);
+
+            $downPayment = 7000.00;
+            $remainingBalance = max(0.0, round($unitPrice - $downPayment, 2));
+            $fulfillment = $validated['fulfillment_type'];
+            $deliveryFee = in_array($fulfillment, ['delivery', 'delivery_installation'], true) ? 500.00 : 0.00;
+
+            $deliveryAddress = !empty($validated['delivery_address'])
+                ? $validated['delivery_address']
+                : ($user->address ?? $ocularBooking->client_address ?? '');
+            $contactNumber = !empty($validated['contact_number'])
+                ? $validated['contact_number']
+                : ($user->contact_number ?? $ocularBooking->client_contact_number ?? '');
+            $notes = $validated['notes'] ?? null;
+            $senderName = !empty($validated['sender_name']) ? $validated['sender_name'] : $user->name;
+            $senderNumber = !empty($validated['sender_number']) ? $validated['sender_number'] : ($user->contact_number ?? '');
+            $referenceNumber = $validated['reference_number'] ?? null;
+
+            $orderStatus = match ($fulfillment) {
+                'pickup' => 'Awaiting Pickup',
+                'delivery' => 'Awaiting Delivery',
+                default => 'Pending Installation Schedule',
+            };
+
+            $orderId = DB::table('ac_unit_orders')->insertGetId([
+                'ocular_booking_id' => $ocularBooking->booking_id,
+                'installation_booking_id' => null,
+                'client_id' => $userId,
+                'recommendation_id' => $rec?->recommendation_id,
+                'ac_unit_id' => $acUnit->ac_unit_id,
+                'quantity' => 1,
+                'unit_price' => $unitPrice,
+                'total_unit_price' => $unitPrice,
+                'down_payment_amount' => $downPayment,
+                'remaining_unit_balance' => $remainingBalance,
+                'delivery_fee' => $deliveryFee,
+                'installation_fee' => 0.00,
+                'payment_method' => $validated['payment_method'],
+                'fulfillment_type' => $fulfillment,
+                'reference_number' => $referenceNumber,
+                'sender_name' => $senderName,
+                'sender_number' => $senderNumber,
+                'down_payment_receipt_path' => $receiptPath,
+                'delivery_address' => $deliveryAddress,
+                'contact_number' => $contactNumber,
+                'installation_fee_forfeited' => false,
+                'order_status' => $orderStatus,
+                'notes' => $notes,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($acUnit->status === 'Available') {
+                DB::table('ac_units_inventory')
+                    ->where('ac_unit_id', $acUnit->ac_unit_id)
+                    ->update([
+                        'status' => 'Reserved',
+                        'customer_name' => $user->name,
+                        'customer_contact' => $contactNumber,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            if ($rec) {
+                DB::table('ocular_inspection_recommendations')
+                    ->where('recommendation_id', $rec->recommendation_id)
+                    ->update([
+                        'status' => 'Selected',
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            Payment::create([
+                'booking_id' => $ocularBooking->booking_id,
+                'booking_price' => 0.00,
+                'unit_price' => $unitPrice,
+                'spare_parts_price' => 0.00,
+                'amount_paid' => $downPayment,
+                'payment_status' => $validated['payment_method'] === 'Cash' ? 'Down Payment (Cash)' : 'Paid',
+                'payment_method' => $validated['payment_method'],
+                'payment_type' => 'AC Unit Down Payment',
+                'reference_number' => $referenceNumber ?? ('CASH-DP-' . $orderId),
+                'sender_name' => $senderName,
+                'sender_number' => $senderNumber,
+                'receipt_image' => $receiptPath,
+                'notes' => sprintf(
+                    '₱7,000.00 down payment for %s %s (%s HP %s) — Fulfillment: %s',
+                    $acUnit->brand,
+                    $acUnit->model,
+                    $acUnit->horsepower,
+                    $acUnit->ac_type,
+                    str_replace('_', ' & ', ucfirst($fulfillment))
+                ),
+                'payment_date' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::table('activity_logs')->insert([
+                'user_id' => $userId,
+                'action_type' => 'AC_UNIT_ORDER_CREATED',
+                'description' => sprintf(
+                    'Customer placed AC Unit Order #%d from Ocular Inspection #%d for %s %s (₱%s, ₱7,000 down payment via %s, fulfillment: %s).',
+                    $orderId,
+                    $ocularBooking->booking_id,
+                    $acUnit->brand,
+                    $acUnit->model,
+                    number_format($unitPrice, 2),
+                    $validated['payment_method'],
+                    $fulfillment
+                ),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::commit();
+
+            $imgPath = ($rec?->unit_image_path) ?: ($acUnit->image_path ?? null);
+
+            $orderPayload = [
+                'order_id' => (int) $orderId,
+                'ocular_booking_id' => (int) $ocularBooking->booking_id,
+                'ac_unit_id' => (int) $acUnit->ac_unit_id,
+                'brand' => $acUnit->brand,
+                'model' => $acUnit->model,
+                'horsepower' => (float) $acUnit->horsepower,
+                'ac_type' => $acUnit->ac_type,
+                'motor_type' => $acUnit->motor_type ?? 'Inverter',
+                'unit_price' => $unitPrice,
+                'down_payment_amount' => $downPayment,
+                'remaining_unit_balance' => $remainingBalance,
+                'delivery_fee' => $deliveryFee,
+                'payment_method' => $validated['payment_method'],
+                'fulfillment_type' => $fulfillment,
+                'delivery_address' => $deliveryAddress,
+                'contact_number' => $contactNumber,
+                'order_status' => $orderStatus,
+                'unit_image_url' => $imgPath ? asset('storage/' . $imgPath) : null,
+            ];
+
+            return response()->json([
+                'message' => $fulfillment === 'delivery_installation'
+                    ? '₱7,000.00 down payment recorded! Proceeding to Installation schedule selection.'
+                    : ($fulfillment === 'delivery'
+                        ? '₱7,000.00 down payment recorded! Remaining unit balance and delivery fee will be paid upon delivery.'
+                        : '₱7,000.00 down payment recorded! Remaining full balance will be paid upon unit pick up.'),
+                'order' => $orderPayload,
+                'data' => $orderPayload,
+            ], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            if ($receiptPath) {
+                Storage::disk('public')->delete($receiptPath);
+            }
+            throw $e;
+        }
     }
 
     /**

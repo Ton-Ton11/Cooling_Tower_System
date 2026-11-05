@@ -390,11 +390,103 @@ abstract class SuperAdminBaseController extends Controller
             ->map(function ($tech) {
                 return [
                     'user_id' => (int) $tech->user_id,
+                    'role_id' => (int) $tech->role_id,
+                    'role_name' => $tech->role_name ?? 'Technician',
                     'given_name' => $tech->given_name,
                     'middle_name' => $tech->middle_name,
                     'last_name' => $tech->last_name,
                     'full_name' => $this->formatName($tech->given_name, $tech->middle_name, $tech->last_name),
                     'certificate_expiry' => $tech->certificate_expiry,
+                ];
+            })
+            ->values();
+    }
+
+    protected function adminAssistantsCollection(): Collection
+    {
+        return $this->staffBaseQuery()
+            ->where('users.role_id', 3)
+            ->where(function ($query) {
+                $query->whereNull('users.is_active')->orWhere('users.is_active', 1);
+            })
+            ->orderBy('users.last_name')
+            ->get()
+            ->map(function ($staff) {
+                return [
+                    'user_id' => (int) $staff->user_id,
+                    'role_id' => (int) $staff->role_id,
+                    'role_name' => $staff->role_name ?? 'Admin Assistant',
+                    'given_name' => $staff->given_name,
+                    'middle_name' => $staff->middle_name,
+                    'last_name' => $staff->last_name,
+                    'full_name' => $this->formatName($staff->given_name, $staff->middle_name, $staff->last_name),
+                ];
+            })
+            ->values();
+    }
+
+    protected function unitOrdersCollection(): Collection
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders')) {
+            return collect();
+        }
+
+        return DB::table('ac_unit_orders as o')
+            ->join('users as c', 'c.user_id', '=', 'o.client_id')
+            ->join('ac_units_inventory as u', 'u.ac_unit_id', '=', 'o.ac_unit_id')
+            ->select([
+                'o.*',
+                'c.given_name as client_given_name',
+                'c.middle_name as client_middle_name',
+                'c.last_name as client_last_name',
+                'c.contact_number as client_contact_number',
+                'c.address as client_address',
+                'u.brand as unit_brand',
+                'u.model as unit_model',
+                'u.serial_number as unit_serial_number',
+                'u.horsepower as unit_horsepower',
+                'u.ac_type as unit_ac_type',
+                'u.motor_type as unit_motor_type',
+                'u.image_path as unit_image_path',
+                'u.warranty_period as unit_warranty_period',
+            ])
+            ->orderByDesc('o.order_id')
+            ->get()
+            ->map(function ($o) {
+                return [
+                    'order_id' => (int) $o->order_id,
+                    'ocular_booking_id' => $o->ocular_booking_id ? (int) $o->ocular_booking_id : null,
+                    'installation_booking_id' => $o->installation_booking_id ? (int) $o->installation_booking_id : null,
+                    'client_id' => (int) $o->client_id,
+                    'client_name' => $this->formatName($o->client_given_name, $o->client_middle_name, $o->client_last_name),
+                    'client_contact_number' => $o->contact_number ?: $o->client_contact_number,
+                    'delivery_address' => $o->delivery_address ?: $o->client_address,
+                    'ac_unit_id' => (int) $o->ac_unit_id,
+                    'brand' => $o->unit_brand,
+                    'model' => $o->unit_model,
+                    'serial_number' => $o->unit_serial_number,
+                    'horsepower' => (float) ($o->unit_horsepower ?? 0),
+                    'ac_type' => $o->unit_ac_type,
+                    'motor_type' => $o->unit_motor_type ?? 'Inverter',
+                    'unit_image_url' => $o->unit_image_path ? asset('storage/' . $o->unit_image_path) : null,
+                    'warranty_period' => (int) ($o->unit_warranty_period ?? 12),
+                    'quantity' => (int) ($o->quantity ?? 1),
+                    'unit_price' => (float) ($o->unit_price ?? 0),
+                    'total_unit_price' => (float) ($o->total_unit_price ?? 0),
+                    'down_payment_amount' => (float) ($o->down_payment_amount ?? 7000),
+                    'remaining_unit_balance' => (float) ($o->remaining_unit_balance ?? 0),
+                    'delivery_fee' => (float) ($o->delivery_fee ?? 0),
+                    'installation_fee' => (float) ($o->installation_fee ?? 0),
+                    'payment_method' => $o->payment_method,
+                    'fulfillment_type' => $o->fulfillment_type,
+                    'reference_number' => $o->reference_number,
+                    'down_payment_receipt_url' => $o->down_payment_receipt_path ? asset('storage/' . $o->down_payment_receipt_path) : null,
+                    'manager_receipt_url' => $o->manager_receipt_path ? asset('storage/' . $o->manager_receipt_path) : null,
+                    'installation_fee_forfeited' => (bool) ($o->installation_fee_forfeited ?? false),
+                    'order_status' => $o->order_status,
+                    'confirmed_at' => $o->confirmed_at,
+                    'notes' => $o->notes,
+                    'created_at' => $o->created_at,
                 ];
             })
             ->values();
@@ -505,7 +597,15 @@ abstract class SuperAdminBaseController extends Controller
                 ->map(fn ($items) => $items->first());
         }
 
-        return $rows->map(function ($row) use ($latestChecklistByBooking) {
+        $unitOrdersByInstall = collect();
+        $unitOrdersById = collect();
+        if (! empty($bookingIds) && \Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders')) {
+            $allOrders = $this->unitOrdersCollection();
+            $unitOrdersByInstall = $allOrders->whereNotNull('installation_booking_id')->keyBy('installation_booking_id');
+            $unitOrdersById = $allOrders->keyBy('order_id');
+        }
+
+        return $rows->map(function ($row) use ($latestChecklistByBooking, $unitOrdersByInstall, $unitOrdersById) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id ?? null;
             $leadName = $row->lead_tech_user_id
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -516,21 +616,30 @@ abstract class SuperAdminBaseController extends Controller
                 ? $this->formatName($row->assistant_tech_given_name, $row->assistant_tech_middle_name, $row->assistant_tech_last_name)
                 : null;
 
-            // Generate dynamic team name representing the two-person assigned team
-            $teamName = null;
-            if ($leadName && $assistantName) {
-                $teamName = "{$leadName} & {$assistantName}";
-            } elseif ($leadName) {
-                $teamName = "{$leadName} (Lead)";
-            } elseif (! empty($row->assigned_team_name)) {
-                $teamName = $row->assigned_team_name;
-            }
-
             $serviceDetails = [];
             if (! empty($row->service_details)) {
                 $serviceDetails = is_string($row->service_details)
                     ? (json_decode($row->service_details, true) ?: [])
                     : (is_array($row->service_details) ? $row->service_details : []);
+            }
+
+            $isOcular = ((int) $row->service_id === 4)
+                || stripos((string) ($row->service_name ?? ''), 'ocular') !== false
+                || ! empty($serviceDetails['is_ocular_inspection']);
+            $ocularPersonnel = is_array($serviceDetails['ocular_personnel'] ?? null) ? $serviceDetails['ocular_personnel'] : [];
+
+            // Generate dynamic team name representing the assigned team or ocular inspection personnel
+            $teamName = null;
+            if (! empty($ocularPersonnel)) {
+                $teamName = collect($ocularPersonnel)
+                    ->map(fn ($p) => ($p['full_name'] ?? 'Staff') . (! empty($p['role_name']) ? " ({$p['role_name']})" : ''))
+                    ->implode(', ');
+            } elseif ($leadName && $assistantName) {
+                $teamName = "{$leadName} & {$assistantName}";
+            } elseif ($leadName) {
+                $teamName = "{$leadName} (Lead)";
+            } elseif (! empty($row->assigned_team_name)) {
+                $teamName = $row->assigned_team_name;
             }
 
             $unitsData = [];
@@ -548,6 +657,8 @@ abstract class SuperAdminBaseController extends Controller
             }
 
             $latestChecklist = $latestChecklistByBooking->get($row->booking_id);
+            $linkedUnitOrder = $unitOrdersByInstall->get((int) $row->booking_id)
+                ?? (! empty($serviceDetails['ac_unit_order_id']) ? $unitOrdersById->get((int) $serviceDetails['ac_unit_order_id']) : null);
 
             return [
                 'booking_id' => (int) $row->booking_id,
@@ -560,8 +671,12 @@ abstract class SuperAdminBaseController extends Controller
                 'service' => $row->service_name,
                 'service_name' => $row->service_name,
                 'service_base_price' => (float) $row->base_price,
+                'is_ocular_inspection' => $isOcular,
+                'ocular_personnel' => $ocularPersonnel,
+                'inspection_status' => $serviceDetails['inspection_status'] ?? ($isOcular ? 'Pending Inspection' : null),
+                'ac_unit_order' => $linkedUnitOrder,
                 'assigned_tech_id' => $leadId ? (int) $leadId : null,
-                'assigned_tech_name' => $leadName,
+                'assigned_tech_name' => $leadName ?: (! empty($ocularPersonnel) ? ($ocularPersonnel[0]['full_name'] ?? null) : null),
                 'lead_technician_id' => $leadId ? (int) $leadId : null,
                 'lead_technician_name' => $leadName,
                 'assistant_technician_id' => $assistantId ? (int) $assistantId : null,
@@ -589,17 +704,17 @@ abstract class SuperAdminBaseController extends Controller
                 'rate_type' => $serviceDetails['rate_type'] ?? null,
                 'is_differential' => (bool) ($serviceDetails['is_differential'] ?? false),
                 'booking_status' => $row->booking_status,
-                'service_payment_method' => $row->service_payment_method ?? 'Cash',
+                'service_payment_method' => $row->service_payment_method ?? ($isOcular ? 'Free' : 'Cash'),
                 'service_details' => $serviceDetails,
                 'units_data' => $unitsData,
                 'quotation_data' => $quotationData,
                 'notes' => $row->notes ?? null,
                 'cancellation_reason' => $row->cancellation_reason ?? null,
                 'created_at' => $row->created_at,
-                'payment_status' => $row->payment_status ?? 'Pending',
-                'payment_method' => $row->payment_method,
+                'payment_status' => $row->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
+                'payment_method' => $row->payment_method ?? ($isOcular ? 'Free Service' : null),
                 'reference_number' => $row->payment_reference_number ?? null,
-                'amount_paid' => $row->amount_paid !== null ? (float) $row->amount_paid : null,
+                'amount_paid' => $row->amount_paid !== null ? (float) $row->amount_paid : ($isOcular ? 0.0 : null),
                 'payment_date' => $row->payment_date,
                 'checklist_id' => $latestChecklist ? (int) $latestChecklist->checklist_id : null,
                 'checklist_status' => $latestChecklist->status ?? null,
@@ -1314,6 +1429,17 @@ abstract class SuperAdminBaseController extends Controller
                 : (is_array($booking->service_details) ? $booking->service_details : []);
         }
 
+        $serviceRow = DB::table('services')->where('service_id', $booking->service_id)->first(['service_name']);
+        $isOcularInspection = ((int) $booking->service_id === 4)
+            || ($serviceRow && stripos((string) $serviceRow->service_name, 'ocular') !== false)
+            || ! empty($serviceDetails['is_ocular_inspection']);
+
+        if ($isOcularInspection && ! in_array($targetStatus, ['Approved', 'Reschedule Notice'], true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'booking_status' => ['For Ocular Inspection bookings, only Reschedule Notice and Approve can be declared.'],
+            ]);
+        }
+
         // CASE 1: Payment Incomplete (Return Payment) — 10-minute timer
         if ($targetStatus === 'Payment Incomplete') {
             $dueAt = now()->addMinutes(10);
@@ -1384,6 +1510,127 @@ abstract class SuperAdminBaseController extends Controller
 
             return [
                 'message' => "Reschedule Notice sent to customer (no fee; {$periodLabel} slots on {$originalDateYmd} marked unavailable).",
+                'data' => $this->mapBookings(collect([$updated]))->first(),
+            ];
+        }
+
+        // CASE 2B: Ocular Inspection Approval — Assign 1 to 4 personnel (Technician and/or Admin Assistant)
+        if ($isOcularInspection) {
+            $rawPersonnelIds = $request->input('ocular_personnel_ids');
+            if (is_string($rawPersonnelIds)) {
+                $rawPersonnelIds = json_decode($rawPersonnelIds, true) ?: [];
+            }
+            if (! is_array($rawPersonnelIds) || empty($rawPersonnelIds)) {
+                $rawPersonnelIds = array_filter([
+                    $payload['lead_technician_id'] ?? null,
+                    $payload['assistant_technician_id'] ?? null,
+                ]);
+            }
+
+            $personnelIds = array_values(array_unique(array_filter(array_map('intval', $rawPersonnelIds))));
+            if (count($personnelIds) < 1 || count($personnelIds) > 4) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'ocular_personnel_ids' => ['Please assign a minimum of 1 and a maximum of 4 personnel (Technician and/or Admin Assistant) for the Ocular Inspection.'],
+                ]);
+            }
+
+            $staffRows = DB::table('users')
+                ->leftJoin('roles', 'roles.role_id', '=', 'users.role_id')
+                ->whereIn('users.user_id', $personnelIds)
+                ->whereIn('users.role_id', [3, 5, 7])
+                ->where(function ($q) {
+                    $q->whereNull('users.is_active')->orWhere('users.is_active', 1);
+                })
+                ->get([
+                    'users.user_id',
+                    'users.role_id',
+                    'users.given_name',
+                    'users.middle_name',
+                    'users.last_name',
+                    'roles.role_name',
+                ])
+                ->keyBy('user_id');
+
+            if ($staffRows->count() !== count($personnelIds)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'ocular_personnel_ids' => ['One or more selected personnel are invalid or inactive. Only active Technicians and Admin Assistants can be assigned.'],
+                ]);
+            }
+
+            $schedCarbon = $booking->scheduled_date ? Carbon::parse($booking->scheduled_date) : now();
+            $targetDateYmd = $schedCarbon->format('Y-m-d');
+            if ($schedCarbon->isSunday()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'booking_status' => ["Booking #{$bookingId} is scheduled on a Sunday ({$targetDateYmd}), which is a worker rest day. Please send a Reschedule Notice instead."],
+                ]);
+            }
+
+            $ocularPersonnel = [];
+            $assignedTechIds = [];
+            foreach ($personnelIds as $pid) {
+                $st = $staffRows->get($pid);
+                $roleId = (int) $st->role_id;
+                $roleLabel = $roleId === 3 ? 'Admin Assistant' : ($st->role_name ?: 'Technician');
+                $ocularPersonnel[] = [
+                    'user_id' => (int) $st->user_id,
+                    'full_name' => $this->formatName($st->given_name, $st->middle_name, $st->last_name),
+                    'role_id' => $roleId,
+                    'role_name' => $roleLabel,
+                ];
+                if (in_array($roleId, [5, 7], true)) {
+                    $assignedTechIds[] = (int) $st->user_id;
+                }
+            }
+
+            $leadTechId = $assignedTechIds[0] ?? null;
+            $assistantTechId = $assignedTechIds[1] ?? null;
+
+            unset(
+                $serviceDetails['payment_due_at'],
+                $serviceDetails['reschedule_notice_by_manager'],
+                $serviceDetails['reschedule_notice_original_date'],
+                $serviceDetails['reschedule_notice_blocked_period'],
+                $serviceDetails['job_started_by_tech'],
+                $serviceDetails['job_started_at']
+            );
+            $serviceDetails['is_ocular_inspection'] = true;
+            $serviceDetails['ocular_personnel'] = $ocularPersonnel;
+            if (empty($serviceDetails['inspection_status'])) {
+                $serviceDetails['inspection_status'] = 'Pending Inspection';
+            }
+
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'lead_technician_id' => $leadTechId,
+                    'assistant_technician_id' => $assistantTechId,
+                    'assigned_tech_id' => $leadTechId,
+                    'assigned_team_id' => null,
+                    'assigned_by' => $currentUserId,
+                    'assigned_at' => now(),
+                    'booking_status' => 'Approved',
+                    'service_details' => json_encode($serviceDetails),
+                    'updated_at' => now(),
+                ]);
+
+            if (! empty($assignedTechIds)) {
+                self::syncAutoStartForTechnicians($assignedTechIds);
+            }
+
+            $personnelSummary = collect($ocularPersonnel)
+                ->map(fn ($p) => "{$p['full_name']} ({$p['role_name']})")
+                ->implode(', ');
+
+            $this->logActivity(
+                $currentUserId,
+                'APPROVE_OCULAR_INSPECTION',
+                sprintf('Approved Ocular Inspection #%d and assigned %d personnel: %s.', $bookingId, count($ocularPersonnel), $personnelSummary)
+            );
+
+            $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+            return [
+                'message' => 'Ocular Inspection approved and personnel assigned! Assigned Technician / Admin Assistant can now create a tools-only checklist.',
                 'data' => $this->mapBookings(collect([$updated]))->first(),
             ];
         }
@@ -1592,14 +1839,41 @@ abstract class SuperAdminBaseController extends Controller
             ]);
         }
 
+        $linkedOrder = null;
+        if (\Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders')) {
+            $linkedOrder = DB::table('ac_unit_orders')
+                ->where('installation_booking_id', $bookingId)
+                ->orWhere(function ($q) use ($serviceDetails) {
+                    if (! empty($serviceDetails['ac_unit_order_id'])) {
+                        $q->where('order_id', (int) $serviceDetails['ac_unit_order_id']);
+                    }
+                })
+                ->first();
+        }
+
         $validated = $request->validate([
             'requested_by_name' => ['nullable', 'string', 'max:255'],
             'payment_verified' => ['nullable'],
             'amount_turned_over' => ['nullable', 'numeric', 'min:0'],
+            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
+            'installation_fee' => ['nullable', 'numeric', 'min:0'],
             'verification_notes' => ['nullable', 'string', 'max:1000'],
+            'purchase_receipt_image' => [
+                $linkedOrder && empty($linkedOrder->manager_receipt_path) ? 'required' : 'nullable',
+                'image',
+                'mimes:jpeg,png,jpg,webp',
+                'max:8192',
+            ],
+        ], [
+            'purchase_receipt_image.required' => 'Please upload a picture of the purchase receipt to confirm that the customer successfully bought the AC unit.',
         ]);
 
-        $clientUser = DB::table('users')->where('user_id', $booking->client_id)->first(['given_name', 'middle_name', 'last_name']);
+        $receiptPath = null;
+        if ($request->hasFile('purchase_receipt_image')) {
+            $receiptPath = $request->file('purchase_receipt_image')->store('receipts/unit_purchases', 'public');
+        }
+
+        $clientUser = DB::table('users')->where('user_id', $booking->client_id)->first(['given_name', 'middle_name', 'last_name', 'contact_number', 'address']);
         $defaultClientName = $clientUser ? $this->formatName($clientUser->given_name, $clientUser->middle_name, $clientUser->last_name) : 'Customer';
         $requestedByName = ! empty(trim((string) ($validated['requested_by_name'] ?? '')))
             ? trim((string) $validated['requested_by_name'])
@@ -1622,25 +1896,39 @@ abstract class SuperAdminBaseController extends Controller
             ? (float) $validated['amount_turned_over']
             : (isset($turnover['net_collected']) ? (float) $turnover['net_collected'] : null);
 
-        $totalServicePrice = (float) ($turnover['total_service_price'] ?? ($booking->base_price ?? 0.0));
+        $totalServicePrice = (float) ($validated['installation_fee'] ?? ($turnover['total_service_price'] ?? ($booking->base_price ?? 0.0)));
         $downPayment = (float) ($turnover['reservation_down_payment'] ?? 300.00);
+        $deliveryFee = (float) ($validated['delivery_fee'] ?? ($turnover['delivery_fee'] ?? ($linkedOrder->delivery_fee ?? 0.0)));
 
         if ($turnedOverAmount === null) {
-            $turnedOverAmount = max(0.0, $totalServicePrice - $downPayment);
+            $unitRem = $linkedOrder ? (float) ($turnover['unit_remaining_balance'] ?? $linkedOrder->remaining_unit_balance ?? 0.0) : 0.0;
+            $turnedOverAmount = max(0.0, ($totalServicePrice - $downPayment) + $unitRem + $deliveryFee);
         }
 
         $turnover['amount_turned_over'] = $turnedOverAmount;
+        $turnover['delivery_fee'] = $deliveryFee;
         $turnover['status'] = 'Turnover Verified & Booking Completed';
         $turnoverMethod = $turnover['payment_method'] ?? ($booking->service_payment_method ?? 'Cash');
         $turnoverRef = $turnover['reference_number'] ?? null;
-        if ($totalServicePrice <= 0 && $turnedOverAmount > 0) {
+        if ($totalServicePrice <= 0 && $turnedOverAmount > 0 && ! $linkedOrder) {
             $totalServicePrice = $turnedOverAmount + $downPayment;
             $turnover['total_service_price'] = $totalServicePrice;
+        }
+
+        if ($receiptPath) {
+            $serviceDetails['unit_purchase_receipt_path'] = $receiptPath;
+            $serviceDetails['unit_purchase_receipt_url'] = asset('storage/' . $receiptPath);
+        }
+        if ($linkedOrder) {
+            $serviceDetails['company_supplied_unit'] = true;
+            $serviceDetails['unit_purchase_confirmed_at'] = now()->toISOString();
         }
 
         $serviceDetails['payment_turnover'] = $turnover;
         $serviceDetails['requested_by_name'] = $requestedByName;
         $serviceDetails['completed_by_manager_at'] = now()->toISOString();
+
+        $finalBookingStatus = $linkedOrder ? 'Completed' : 'Partially Completed';
 
         DB::transaction(function () use (
             $bookingId,
@@ -1651,18 +1939,26 @@ abstract class SuperAdminBaseController extends Controller
             $turnedOverAmount,
             $totalServicePrice,
             $downPayment,
+            $deliveryFee,
             $turnoverMethod,
-            $turnoverRef
+            $turnoverRef,
+            $linkedOrder,
+            $receiptPath,
+            $finalBookingStatus,
+            $clientUser,
+            $defaultClientName
         ) {
             DB::table('bookings')
                 ->where('booking_id', $bookingId)
                 ->update([
-                    'booking_status' => 'Partially Completed',
+                    'booking_status' => $finalBookingStatus,
+                    'service_order_status' => $linkedOrder ? 'Completed' : ($booking->service_order_status ?? 'Completed'),
                     'service_details' => json_encode($serviceDetails),
                     'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
-                        '[Manager Completion]: Payment turnover verified (₱%.2f via %s). Service requested by: %s.',
+                        '[Manager Completion]: Payment turnover verified (₱%.2f via %s)%s. Service requested by: %s.',
                         (float) $turnedOverAmount,
                         $turnoverMethod,
+                        $linkedOrder ? ' & AC Unit Purchase confirmed with receipt' : '',
                         $requestedByName
                     )),
                     'updated_at' => now(),
@@ -1684,7 +1980,6 @@ abstract class SuperAdminBaseController extends Controller
                 return str_contains($type, 'reservation') || str_contains($type, 'appointment');
             });
 
-            // If no reservation payment row exists in DB, record the full totalServicePrice so Sales & Records reflects exact total revenue
             $effectivePaymentAmount = $hasReservationRow ? (float) $turnedOverAmount : (float) max($totalServicePrice, $turnedOverAmount + $downPayment);
 
             $turnoverPayment = $existingPayments->first(function ($p) {
@@ -1698,9 +1993,11 @@ abstract class SuperAdminBaseController extends Controller
                     ->update([
                         'amount_paid' => $effectivePaymentAmount,
                         'booking_price' => $totalServicePrice,
+                        'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : (float) ($turnoverPayment->unit_price ?? 0),
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
                         'reference_number' => $turnoverRef ?: $turnoverPayment->reference_number,
+                        'receipt_image' => $receiptPath ?: $turnoverPayment->receipt_image,
                         'payment_type' => 'Service Balance Turnover Payment',
                         'notes' => trim(($turnoverPayment->notes ? $turnoverPayment->notes . "\n" : '') . sprintf(
                             '[Manager Verified Turnover]: Verified and received by Manager %s.',
@@ -1720,9 +2017,11 @@ abstract class SuperAdminBaseController extends Controller
                         ->update([
                             'amount_paid' => $effectivePaymentAmount,
                             'booking_price' => $totalServicePrice,
+                            'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
                             'payment_status' => 'Paid',
                             'payment_method' => $turnoverMethod,
                             'reference_number' => $turnoverRef ?: $zeroOrPendingPayment->reference_number,
+                            'receipt_image' => $receiptPath ?: $zeroOrPendingPayment->receipt_image,
                             'payment_type' => 'Service Balance Turnover Payment',
                             'notes' => 'Post-service payment turnover verified and received by Manager.',
                             'payment_date' => now(),
@@ -1732,13 +2031,14 @@ abstract class SuperAdminBaseController extends Controller
                     DB::table('payment')->insert([
                         'booking_id' => $bookingId,
                         'booking_price' => $totalServicePrice,
-                        'unit_price' => 0.00,
+                        'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
                         'spare_parts_price' => 0.00,
                         'amount_paid' => $effectivePaymentAmount,
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
                         'payment_type' => 'Service Balance Turnover Payment',
                         'reference_number' => $turnoverRef,
+                        'receipt_image' => $receiptPath,
                         'notes' => 'Post-service payment turnover verified and received by Manager upon completion.',
                         'payment_date' => now(),
                         'created_at' => now(),
@@ -1748,13 +2048,14 @@ abstract class SuperAdminBaseController extends Controller
                     DB::table('payment')->insert([
                         'booking_id' => $bookingId,
                         'booking_price' => $totalServicePrice,
-                        'unit_price' => 0.00,
+                        'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
                         'spare_parts_price' => 0.00,
                         'amount_paid' => $totalServicePrice,
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
                         'payment_type' => 'Service Payment',
                         'reference_number' => $turnoverRef,
+                        'receipt_image' => $receiptPath,
                         'notes' => 'Payment recorded upon completion and verified by Manager.',
                         'payment_date' => now(),
                         'created_at' => now(),
@@ -1765,26 +2066,51 @@ abstract class SuperAdminBaseController extends Controller
 
             DB::table('payment')
                 ->where('booking_id', $bookingId)
-                ->where('payment_status', '!=', 'Returned')
+                ->whereNotIn('payment_status', ['Returned', 'Non-Refundable'])
                 ->update([
                     'payment_status' => 'Paid',
                     'updated_at' => now(),
                 ]);
 
+            if ($linkedOrder) {
+                $this->finalizeAcUnitPurchaseSale(
+                    $linkedOrder,
+                    $bookingId,
+                    (int) $request->user()->user_id,
+                    $this->formatName($request->user()->given_name ?? '', $request->user()->middle_name ?? '', $request->user()->last_name ?? '') ?: 'Manager',
+                    $receiptPath ?: $linkedOrder->manager_receipt_path,
+                    $deliveryFee,
+                    $totalServicePrice,
+                    $turnoverMethod,
+                    $defaultClientName,
+                    $clientUser->contact_number ?? $linkedOrder->contact_number,
+                    $linkedOrder->delivery_address ?: ($clientUser->address ?? null)
+                );
+            }
+
             $this->logActivity(
                 (int) $request->user()->user_id,
                 'COMPLETE_BOOKING',
                 sprintf(
-                    'Verified payment turnover (₱%.2f via %s) and declared Booking #%d as Completed (Requested by: %s).',
+                    'Verified payment turnover (₱%.2f via %s)%s and declared Booking #%d as Completed (Requested by: %s).',
                     (float) $turnedOverAmount,
                     $turnoverMethod,
+                    $linkedOrder ? ' + confirmed AC unit purchase with receipt' : '',
                     $bookingId,
                     $requestedByName
                 )
             );
         });
 
-        app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking($bookingId);
+        $forecasting = app(\App\Services\ForecastingService::class);
+        if ($linkedOrder) {
+            $forecasting->activateAcUnitWarrantyForecast((int) $linkedOrder->ac_unit_id, [
+                'customer_name' => $defaultClientName,
+                'customer_contact' => $clientUser->contact_number ?? $linkedOrder->contact_number,
+                'warranty_start_date' => now()->toDateString(),
+            ]);
+        }
+        $forecasting->generateCustomerForecastForBooking($bookingId);
 
         // Once this booking is completed (checklist completed + payment turned over + booking completed),
         // automatically start the next eligible present scheduled booking for the assigned technicians.
@@ -1793,8 +2119,233 @@ abstract class SuperAdminBaseController extends Controller
         $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
 
         return [
-            'message' => 'Payment turnover verified, recorded to Sales & Records, and booking declared Completed!',
+            'message' => $linkedOrder
+                ? 'AC unit purchase confirmed with receipt, reflected to Admin Assistant, warranty & spare parts reservation activated, and booking declared Completed!'
+                : 'Payment turnover verified, recorded to Sales & Records, and booking declared Completed!',
             'data' => $this->mapBookings(collect([$updated]))->first(),
+        ];
+    }
+
+    /**
+     * Finalize an AC Unit Order sale so it marks ac_units_inventory as Sold and inserts/updates inventory_sales
+     * (immediately reflecting to Admin Assistant Sold Units & Sales Records).
+     */
+    protected function finalizeAcUnitPurchaseSale(
+        object $order,
+        ?int $bookingId,
+        int $managerId,
+        string $managerName,
+        ?string $receiptPath,
+        float $deliveryFee,
+        float $installationFee,
+        string $paymentMethod,
+        string $customerName,
+        ?string $customerContact,
+        ?string $customerAddress
+    ): void {
+        $acUnit = DB::table('ac_units_inventory')->where('ac_unit_id', $order->ac_unit_id)->first();
+        if (! $acUnit) {
+            return;
+        }
+
+        $unitPrice = (float) ($order->unit_price ?: ($acUnit->selling_price ?: $acUnit->purchase_price));
+        $costPrice = (float) ($acUnit->purchase_price ?? 0);
+        $profit = round($unitPrice - $costPrice, 2);
+
+        DB::table('ac_unit_orders')
+            ->where('order_id', $order->order_id)
+            ->update([
+                'manager_receipt_path' => $receiptPath,
+                'delivery_fee' => $deliveryFee,
+                'installation_fee' => $installationFee,
+                'remaining_unit_balance' => 0.00,
+                'order_status' => 'Completed',
+                'confirmed_by' => $managerId,
+                'confirmed_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        DB::table('ac_units_inventory')
+            ->where('ac_unit_id', $acUnit->ac_unit_id)
+            ->update([
+                'status' => 'Sold',
+                'selling_price' => $unitPrice,
+                'customer_name' => $customerName,
+                'customer_contact' => $customerContact,
+                'sold_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
+            $existingSale = DB::table('inventory_sales')
+                ->where('sale_type', 'ac_unit')
+                ->where('ac_unit_id', $acUnit->ac_unit_id)
+                ->first();
+
+            $salePayload = [
+                'booking_id' => $bookingId ?: $order->ocular_booking_id,
+                'sale_type' => 'ac_unit',
+                'ac_unit_id' => $acUnit->ac_unit_id,
+                'item_name' => trim("{$acUnit->brand} {$acUnit->model}"),
+                'brand' => $acUnit->brand,
+                'model' => $acUnit->model,
+                'serial_number' => $acUnit->serial_number,
+                'sub_category' => $acUnit->ac_type,
+                'motor_type' => $acUnit->motor_type ?? 'Inverter',
+                'item_type' => 'AC Unit',
+                'horsepower' => (string) $acUnit->horsepower,
+                'quantity' => 1,
+                'unit' => 'unit',
+                'cost_price' => $costPrice,
+                'unit_price' => $unitPrice,
+                'total_amount' => $unitPrice,
+                'profit' => $profit,
+                'payment_method' => $paymentMethod ?: ($order->payment_method ?: 'Cash'),
+                'payment_status' => 'Paid',
+                'client_id' => (int) $order->client_id,
+                'customer_name' => $customerName,
+                'customer_contact' => $customerContact,
+                'customer_address' => $customerAddress,
+                'warranty_period' => max(1, (int) ($acUnit->warranty_period ?: 12)),
+                'sold_by' => $managerId,
+                'sold_by_name' => $managerName,
+                'notes' => sprintf(
+                    'Confirmed AC Unit Purchase (Order #%d, Fulfillment: %s%s)',
+                    $order->order_id,
+                    str_replace('_', ' & ', ucfirst((string) $order->fulfillment_type)),
+                    $deliveryFee > 0 ? sprintf(', Delivery Fee: ₱%.2f', $deliveryFee) : ''
+                ),
+                'sold_at' => now(),
+                'updated_at' => now(),
+            ];
+
+            if ($existingSale) {
+                DB::table('inventory_sales')->where('sale_id', $existingSale->sale_id)->update($salePayload);
+            } else {
+                $salePayload['created_at'] = now();
+                DB::table('inventory_sales')->insert($salePayload);
+            }
+        }
+    }
+
+    /**
+     * Confirm a standalone Pick Up or Delivery AC Unit Order with Manager receipt upload.
+     */
+    protected function handleConfirmUnitOrderAction(Request $request, int $orderId): array
+    {
+        $order = DB::table('ac_unit_orders')->where('order_id', $orderId)->first();
+        if (! $order) {
+            abort(404);
+        }
+
+        if ($order->order_status === 'Completed') {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'order_id' => ['This AC unit order has already been confirmed and completed.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'delivery_fee' => ['nullable', 'numeric', 'min:0'],
+            'verification_notes' => ['nullable', 'string', 'max:1000'],
+            'purchase_receipt_image' => ['required', 'image', 'mimes:jpeg,png,jpg,webp', 'max:8192'],
+        ], [
+            'purchase_receipt_image.required' => 'Please upload a picture of the receipt to confirm that the customer successfully bought the AC unit.',
+        ]);
+
+        $receiptPath = $request->file('purchase_receipt_image')->store('receipts/unit_purchases', 'public');
+        $clientUser = DB::table('users')->where('user_id', $order->client_id)->first(['given_name', 'middle_name', 'last_name', 'contact_number', 'address']);
+        $clientName = $clientUser ? $this->formatName($clientUser->given_name, $clientUser->middle_name, $clientUser->last_name) : 'Customer';
+        $managerId = (int) $request->user()->user_id;
+        $managerName = $this->formatName($request->user()->given_name ?? '', $request->user()->middle_name ?? '', $request->user()->last_name ?? '') ?: 'Manager';
+        $deliveryFee = $order->fulfillment_type === 'delivery'
+            ? (float) ($validated['delivery_fee'] ?? ($order->delivery_fee ?? 0.0))
+            : 0.0;
+
+        DB::transaction(function () use (
+            $order,
+            $managerId,
+            $managerName,
+            $receiptPath,
+            $deliveryFee,
+            $clientName,
+            $clientUser,
+            $validated
+        ) {
+            $this->finalizeAcUnitPurchaseSale(
+                $order,
+                $order->ocular_booking_id ? (int) $order->ocular_booking_id : null,
+                $managerId,
+                $managerName,
+                $receiptPath,
+                $deliveryFee,
+                0.00,
+                $order->payment_method ?: 'Cash',
+                $clientName,
+                $order->contact_number ?: ($clientUser->contact_number ?? null),
+                $order->delivery_address ?: ($clientUser->address ?? null)
+            );
+
+            if ($order->ocular_booking_id) {
+                $remPaid = (float) ($order->remaining_unit_balance ?? 0) + $deliveryFee;
+                DB::table('payment')->insert([
+                    'booking_id' => (int) $order->ocular_booking_id,
+                    'booking_price' => $deliveryFee,
+                    'unit_price' => (float) $order->unit_price,
+                    'spare_parts_price' => 0.00,
+                    'amount_paid' => $remPaid,
+                    'payment_status' => 'Paid',
+                    'payment_method' => $order->payment_method ?: 'Cash',
+                    'payment_type' => $order->fulfillment_type === 'delivery'
+                        ? 'AC Unit Full Balance & Delivery Fee'
+                        : 'AC Unit Full Balance (Pick Up)',
+                    'receipt_image' => $receiptPath,
+                    'notes' => trim(($validated['verification_notes'] ?? '') . " Confirmed by {$managerName}."),
+                    'payment_date' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                DB::table('payment')
+                    ->where('booking_id', (int) $order->ocular_booking_id)
+                    ->whereNotIn('payment_status', ['Returned', 'Non-Refundable'])
+                    ->update(['payment_status' => 'Paid', 'updated_at' => now()]);
+
+                DB::table('bookings')
+                    ->where('booking_id', (int) $order->ocular_booking_id)
+                    ->whereNotIn('booking_status', ['Cancelled'])
+                    ->update([
+                        'booking_status' => 'Completed',
+                        'service_order_status' => 'Completed',
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            $this->logActivity(
+                $managerId,
+                'CONFIRM_UNIT_ORDER_PURCHASE',
+                sprintf(
+                    'Confirmed AC Unit Order #%d (%s) for %s with uploaded receipt (Delivery fee: ₱%.2f).',
+                    $order->order_id,
+                    $order->fulfillment_type,
+                    $clientName,
+                    $deliveryFee
+                )
+            );
+        });
+
+        $forecasting = app(\App\Services\ForecastingService::class);
+        $forecasting->activateAcUnitWarrantyForecast((int) $order->ac_unit_id, [
+            'customer_name' => $clientName,
+            'customer_contact' => $order->contact_number ?: ($clientUser->contact_number ?? null),
+            'warranty_start_date' => now()->toDateString(),
+        ]);
+        if ($order->ocular_booking_id) {
+            $forecasting->generateCustomerForecastForBooking((int) $order->ocular_booking_id);
+        }
+
+        return [
+            'message' => 'AC unit purchase confirmed with receipt! Unit reflected as Sold to Admin Assistant, customer notified, and warranty + spare parts reservation activated.',
+            'unit_orders' => $this->unitOrdersCollection(),
         ];
     }
 

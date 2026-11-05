@@ -115,6 +115,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
         unit_serial_number: "",
         payment_method: "Cash",
         total_service_price: "",
+        delivery_fee: "",
         reference_number: "",
         proof_image: null,
         proof_image_preview: "",
@@ -448,7 +449,10 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             if (reportForm.unit_serial_number?.trim()) fd.append("unit_serial_number", reportForm.unit_serial_number.trim());
             fd.append("payment_method", reportForm.payment_method);
             fd.append("total_service_price", String(totalSvcPrice));
-            if (reportForm.payment_method === "GCash" && reportForm.reference_number?.trim()) {
+            if (completeModal.ac_unit_order) {
+                fd.append("delivery_fee", String(Math.max(0, Number(reportForm.delivery_fee || 0))));
+            }
+            if ((reportForm.payment_method === "GCash" || reportForm.payment_method === "Bank Transfer") && reportForm.reference_number?.trim()) {
                 fd.append("reference_number", reportForm.reference_number.trim());
             }
             if (reportForm.proof_image) {
@@ -471,6 +475,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                 unit_serial_number: "",
                 payment_method: "Cash",
                 total_service_price: "",
+                delivery_fee: "",
                 reference_number: "",
                 proof_image: null,
                 proof_image_preview: "",
@@ -488,6 +493,11 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
     // CHECKLIST BUILDER VIEW (Integrated inside My Jobs and Checklist)
     // ══════════════════════════════════════════════════════════════════
     if (builderOpen && builderBooking) {
+        const isBuilderOcular = Boolean(
+            builderBooking.is_ocular_inspection ||
+                Number(builderBooking.service_id) === 4 ||
+                String(builderBooking.service || "").toLowerCase().includes("ocular")
+        );
         const activeCategoryItems = categorizedCatalog[activeCategoryTab] || [];
 
         return (
@@ -507,6 +517,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                         </h1>
                         <p className="page-subtitle" style={{ marginTop: 2 }}>
                             Booking #{builderBooking.booking_id} · {builderBooking.client_name} — {builderBooking.service}
+                            {isBuilderOcular && " (Tools Only — Materials Excluded)"}
                         </p>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -551,14 +562,18 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         badgeBg: "#EDE9FE",
                                         badgeColor: "#6D28D9",
                                     },
-                                    {
-                                        key: "materials",
-                                        label: "Materials",
-                                        count: categorizedCatalog.materials.length,
-                                        selectedCount: groupedSelectedItems.materials.length,
-                                        badgeBg: "#FEF3C7",
-                                        badgeColor: "#B45309",
-                                    },
+                                    ...(!isBuilderOcular
+                                        ? [
+                                              {
+                                                  key: "materials",
+                                                  label: "Materials",
+                                                  count: categorizedCatalog.materials.length,
+                                                  selectedCount: groupedSelectedItems.materials.length,
+                                                  badgeBg: "#FEF3C7",
+                                                  badgeColor: "#B45309",
+                                              },
+                                          ]
+                                        : []),
                                 ].map((cat) => {
                                     const isActive = activeCategoryTab === cat.key;
                                     return (
@@ -704,14 +719,18 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
 
                         {selectedFullItems.length === 0 ? (
                             <div style={{ padding: "18px 12px", textAlign: "center", background: "#F8FAFC", borderRadius: 8, color: "#94A3B8", fontSize: 12 }}>
-                                Select Hand Tools, Power Tools, or Materials from the list.
+                                {isBuilderOcular
+                                    ? "Select Hand Tools or Power Tools from the list (Materials excluded for Ocular Inspection)."
+                                    : "Select Hand Tools, Power Tools, or Materials from the list."}
                             </div>
                         ) : (
                             <div style={{ maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
                                 {[
                                     { key: "hand_tools", label: "Hand Tools", color: "#1D4ED8", bg: "#EFF6FF" },
                                     { key: "power_tools", label: "Power Tools", color: "#6D28D9", bg: "#F5F3FF" },
-                                    { key: "materials", label: "Materials", color: "#B45309", bg: "#FFFBEB" },
+                                    ...(!isBuilderOcular
+                                        ? [{ key: "materials", label: "Materials", color: "#B45309", bg: "#FFFBEB" }]
+                                        : []),
                                 ].map((group) => {
                                     const list = groupedSelectedItems[group.key] || [];
                                     if (list.length === 0) return null;
@@ -796,7 +815,9 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                         {[
                             { key: "hand_tools", label: "Hand Tools", color: "#1D4ED8", bg: "#EFF6FF", border: "#BFDBFE" },
                             { key: "power_tools", label: "Power Tools", color: "#6D28D9", bg: "#F5F3FF", border: "#DDD6FE" },
-                            { key: "materials", label: "Materials", color: "#B45309", bg: "#FFFBEB", border: "#FDE68A" },
+                            ...(!isBuilderOcular
+                                ? [{ key: "materials", label: "Materials", color: "#B45309", bg: "#FFFBEB", border: "#FDE68A" }]
+                                : []),
                         ].map((sec) => {
                             const items = groupedSelectedItems[sec.key] || [];
                             return (
@@ -931,6 +952,11 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     ? job.checklists[0]
                                     : job.checklist) || null;
                             const isChecklistCompleted = latestChecklist?.status === "Completed";
+                            const isOcularJob = Boolean(
+                                job.is_ocular_inspection ||
+                                    Number(job.service_id) === 4 ||
+                                    String(job.service || "").toLowerCase().includes("ocular")
+                            );
 
                             const clItems = Array.isArray(latestChecklist?.items) ? latestChecklist.items : [];
                             const handToolsCount = clItems.filter((i) => getItemCategoryGroup(i) === "hand_tool").length;
@@ -967,7 +993,30 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                             </div>
                                             <p style={{ margin: "4px 0 0", fontSize: 13, color: "#4B5563" }}>
                                                 <strong>Service:</strong> {job.service}
+                                                {isOcularJob && (
+                                                    <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#059669", background: "#ECFDF5", padding: "2px 8px", borderRadius: 6 }}>
+                                                        FREE Ocular Inspection
+                                                    </span>
+                                                )}
                                             </p>
+                                            {isOcularJob && Array.isArray(job.ocular_personnel) && job.ocular_personnel.length > 0 && (
+                                                <p style={{ margin: "3px 0 0", fontSize: 12, color: "#475569" }}>
+                                                    <strong>Ocular Personnel:</strong>{" "}
+                                                    {job.ocular_personnel
+                                                        .map((p) => `${p.name} (${p.personnel_role === "admin_assistant" ? "Admin Asst" : "Tech"})`)
+                                                        .join(", ")}
+                                                </p>
+                                            )}
+                                            {job.ac_unit_order && (
+                                                <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: "#EFF6FF", border: "1px solid #BFDBFE", fontSize: 12, color: "#1E3A8A" }}>
+                                                    <strong>Purchased AC Unit Order #{job.ac_unit_order.order_id}:</strong>{" "}
+                                                    {job.ac_unit_order.brand} {job.ac_unit_order.model} ({job.ac_unit_order.horsepower} HP) ·{" "}
+                                                    Remaining Unit Balance:{" "}
+                                                    <strong>₱{Number(job.ac_unit_order.remaining_unit_balance || 0).toLocaleString()}</strong> ·{" "}
+                                                    Delivery Fee:{" "}
+                                                    <strong>₱{Number(job.ac_unit_order.delivery_fee ?? 500).toLocaleString()}</strong>
+                                                </div>
+                                            )}
                                             {Array.isArray(job.units_data) && job.units_data.length > 0 && (
                                                 <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748B" }}>
                                                     <strong>Unit:</strong>{" "}
@@ -1042,7 +1091,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                 </>
                                             )}
 
-                                            {isInProgress && !hasPaymentTurnedOver && (
+                                            {isInProgress && !isOcularJob && !hasPaymentTurnedOver && (
                                                 <button
                                                     className="btn-primary"
                                                     disabled={!isChecklistCompleted}
@@ -1082,7 +1131,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                             diagnosis: prevTurnover.diagnosis || prevReport.diagnosis || "",
                                                             work_done: prevTurnover.work_done || prevReport.work_done || "",
                                                             parts_replaced: prevTurnover.parts_replaced || prevReport.parts_replaced || "",
-                                                            ac_brand: prevTurnover.ac_brand || prevReport.ac_brand || "",
+                                                            ac_brand: prevTurnover.ac_brand || prevReport.ac_brand || job.ac_unit_order?.brand || "",
                                                             ac_type: prevTurnover.ac_type || prevReport.ac_type || "Split",
                                                             unit_serial_number: prevReport.unit_serial_number || "",
                                                             total_service_price: String(
@@ -1091,6 +1140,11 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                                     job.total_price ||
                                                                     job.base_price ||
                                                                     1500
+                                                            ),
+                                                            delivery_fee: String(
+                                                                prevTurnover.delivery_fee ??
+                                                                    job.ac_unit_order?.delivery_fee ??
+                                                                    (job.ac_unit_order ? 500 : 0)
                                                             ),
                                                             payment_method: prevTurnover.payment_method || "Cash",
                                                             reference_number: prevTurnover.reference_number || "",
@@ -1456,7 +1510,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                             )}
 
                             <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: completeModal.ac_unit_order ? "1fr 1fr 1fr" : "1fr 1fr", gap: 12 }}>
                                     <div>
                                         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
                                             Total Service Fee (₱) *
@@ -1470,6 +1524,21 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                             onChange={(e) => setReportForm({ ...reportForm, total_service_price: e.target.value })}
                                         />
                                     </div>
+                                    {completeModal.ac_unit_order && (
+                                        <div>
+                                            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
+                                                Delivery Fee (₱)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                className="input-field"
+                                                value={reportForm.delivery_fee}
+                                                onChange={(e) => setReportForm({ ...reportForm, delivery_fee: e.target.value })}
+                                            />
+                                        </div>
+                                    )}
                                     <div>
                                         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
                                             Payment Method *
@@ -1481,21 +1550,22 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         >
                                             <option value="Cash">Cash</option>
                                             <option value="GCash">GCash</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
                                         </select>
                                     </div>
                                 </div>
 
-                                {reportForm.payment_method === "GCash" && (
+                                {(reportForm.payment_method === "GCash" || reportForm.payment_method === "Bank Transfer") && (
                                     <div>
                                         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
-                                            GCash Reference Number (Max 13 Digits) *
+                                            {reportForm.payment_method} Reference Number (Max 13 Digits) *
                                         </label>
                                         <input
                                             type="text"
                                             inputMode="numeric"
                                             maxLength={13}
                                             className="input-field"
-                                            placeholder="Enter GCash reference number"
+                                            placeholder={`Enter ${reportForm.payment_method} reference number`}
                                             value={reportForm.reference_number}
                                             onChange={(e) => setReportForm({ ...reportForm, reference_number: e.target.value.replace(/\D/g, "").slice(0, 13) })}
                                         />
@@ -1503,6 +1573,18 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                 )}
 
                                 <div style={{ background: "#FFFFFF", border: "1px solid #DCFCE7", borderRadius: 8, padding: "10px 12px", fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {completeModal.ac_unit_order && (
+                                        <>
+                                            <div style={{ display: "flex", justifyContent: "space-between", color: "#1E3A8A" }}>
+                                                <span>AC Unit Remaining Balance ({completeModal.ac_unit_order.brand} {completeModal.ac_unit_order.model}):</span>
+                                                <strong>₱{Number(completeModal.ac_unit_order.remaining_unit_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div style={{ display: "flex", justifyContent: "space-between", color: "#4B5563" }}>
+                                                <span>Delivery Fee:</span>
+                                                <strong>₱{Math.max(0, Number(reportForm.delivery_fee || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                            </div>
+                                        </>
+                                    )}
                                     <div style={{ display: "flex", justifyContent: "space-between", color: "#4B5563" }}>
                                         <span>Total Service Price:</span>
                                         <strong>₱{Number(reportForm.total_service_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
@@ -1513,7 +1595,12 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
                                         <span>Net Balance to Turn Over:</span>
-                                        <span>₱{Math.max(0, Number(reportForm.total_service_price || 0) - 300).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})</span>
+                                        <span>
+                                            ₱{(
+                                                Math.max(0, Number(reportForm.total_service_price || 0) - 300) +
+                                                (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0)
+                                            ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})
+                                        </span>
                                     </div>
                                 </div>
                             </div>

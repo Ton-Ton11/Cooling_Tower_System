@@ -39,6 +39,14 @@ const DEFAULT_PRIMARY_SERVICES = [
         description: "For regular cleaning, deep cleaning, and preventive maintenance of your air-conditioning unit.",
         icon: "cleaning",
     },
+    {
+        service_id: 4,
+        service_name: "Ocular Inspection",
+        category: "Ocular Inspection",
+        description: "Free site and room thermal load inspection for customers planning to buy and install AC units.",
+        icon: "ocular",
+        is_free: true,
+    },
 ];
 
 // Fallback 9 visual aircon unit types
@@ -308,6 +316,13 @@ export default function BookingWizard({
         notes: initialServiceDetails?.notes || "",
     }));
 
+    // Ocular Inspection Specifics
+    const [ocularDetails, setOcularDetails] = useState({
+        property_type: "Residential",
+        rooms_to_inspect: 1,
+        site_notes: "",
+    });
+
     // Location & Contact
     const [serviceAddress, setServiceAddress] = useState(dashboardData?.user?.address || "");
     const [serviceCoords, setServiceCoords] = useState({
@@ -461,10 +476,14 @@ export default function BookingWizard({
 
     const serviceCategory = useMemo(() => {
         const name = (currentService?.service_name || "").toLowerCase();
+        if (Number(currentService?.service_id) === 4 || name.includes("ocular")) return "ocular";
         if (name.includes("install")) return "installation";
         if (name.includes("repair") || name.includes("check")) return "repair";
         return "cleaning";
     }, [currentService]);
+
+    const isOcularInspection = serviceCategory === "ocular";
+    const effectiveBookingFee = isOcularInspection ? 0.0 : BOOKING_FEE;
 
     const handleCopyGCash = () => {
         navigator.clipboard.writeText((gcashAccount || "0917 877 7670").replace(/\s+/g, ''));
@@ -553,7 +572,7 @@ export default function BookingWizard({
 
     const canProceedStep1 = Boolean(selectedServiceId);
     const canProceedStep2 = Boolean(
-        units.length > 0 &&
+        (isOcularInspection || units.length > 0) &&
         serviceAddress.trim().length >= 5 &&
         isAddressInZamboanga &&
         contactNumber.trim().length >= 7
@@ -565,11 +584,13 @@ export default function BookingWizard({
         selectedDateSlotInfo.isAvailable &&
         !isSelectedTimePast
     );
-    const canProceedStep4 = Boolean(
-        refNumber.trim().length >= 5 &&
-        refNumber.trim().length <= 13 &&
-        policyAccepted
-    );
+    const canProceedStep4 = isOcularInspection
+        ? true
+        : Boolean(
+            refNumber.trim().length >= 5 &&
+            refNumber.trim().length <= 13 &&
+            policyAccepted
+        );
     const canSubmit = canProceedStep1 && canProceedStep2 && canProceedStep3 && canProceedStep4 && finalAcknowledged;
 
     const handleNext = () => {
@@ -587,7 +608,7 @@ export default function BookingWizard({
             }
         }
         if (step === 2) {
-            if (units.length === 0) {
+            if (!isOcularInspection && units.length === 0) {
                 addToast("Please add at least one aircon unit to your request.", "error");
                 return;
             }
@@ -621,7 +642,7 @@ export default function BookingWizard({
             }
             return;
         }
-        if (step === 4) {
+        if (step === 4 && !isOcularInspection) {
             if (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13) {
                 addToast("Please enter a valid GCash reference number (maximum 13 digits).", "error");
                 return;
@@ -665,13 +686,23 @@ export default function BookingWizard({
 
         // Compile service-specific questionnaire
         let serviceQuestions = {};
-        if (serviceCategory === "installation") {
+        if (serviceCategory === "ocular") {
+            serviceQuestions = {
+                ...ocularDetails,
+                is_ocular_inspection: true,
+                category: "Ocular Inspection",
+            };
+        } else if (serviceCategory === "installation") {
             const { area_photo, area_photo_preview, ...restInstall } = installDetails;
             serviceQuestions = {
                 ...restInstall,
-                company_supplied_unit: restInstall.unit_available === "No",
+                company_supplied_unit: Boolean(initialServiceDetails?.company_supplied_unit) || restInstall.unit_available === "No",
                 category: "Installation",
             };
+            if (initialServiceDetails?.ac_unit_order_id) {
+                serviceQuestions.ac_unit_order_id = initialServiceDetails.ac_unit_order_id;
+                serviceQuestions.ocular_booking_id = initialServiceDetails.ocular_booking_id || null;
+            }
         } else if (serviceCategory === "repair") {
             const { media_file, media_preview, ...restRepair } = repairDetails;
             serviceQuestions = { ...restRepair, category: "Repair / Check-up" };
@@ -686,19 +717,35 @@ export default function BookingWizard({
         serviceQuestions.is_differential = isDifferential;
 
         // Clean units array for JSON payload
-        const cleanUnits = units.map(u => ({
-            unit_type: u.unit_type,
-            motor_type: u.motor_type || "Not Sure",
-            brand: u.brand === "Other" ? u.other_brand : u.brand,
-            other_brand: u.other_brand || null,
-            model_number: u.model_number || null,
-            capacity_type: u.capacity_type,
-            capacity: u.capacity,
-            quantity: u.quantity || 1,
-            issue: u.issue || null,
-            unit_notes: u.unit_notes || null,
-            not_sure_description: u.not_sure_description || null,
-        }));
+        const cleanUnits = isOcularInspection
+            ? [
+                {
+                    unit_type: "Ocular Site Assessment",
+                    motor_type: "Not Sure",
+                    brand: "To Be Recommended",
+                    other_brand: null,
+                    model_number: null,
+                    capacity_type: "hp",
+                    capacity: "TBD",
+                    quantity: parseInt(ocularDetails.rooms_to_inspect, 10) || 1,
+                    issue: ocularDetails.site_notes || "Ocular Inspection for AC Purchase & Installation",
+                    unit_notes: ocularDetails.property_type || "Residential",
+                    not_sure_description: null,
+                },
+            ]
+            : units.map(u => ({
+                unit_type: u.unit_type,
+                motor_type: u.motor_type || "Not Sure",
+                brand: u.brand === "Other" ? u.other_brand : u.brand,
+                other_brand: u.other_brand || null,
+                model_number: u.model_number || null,
+                capacity_type: u.capacity_type,
+                capacity: u.capacity,
+                quantity: u.quantity || 1,
+                issue: u.issue || null,
+                unit_notes: u.unit_notes || null,
+                not_sure_description: u.not_sure_description || null,
+            }));
 
         const effectiveServiceId = selectedServiceId || currentService?.service_id || services[0]?.service_id;
         if (!effectiveServiceId) {
@@ -714,10 +761,15 @@ export default function BookingWizard({
         formData.append("rate_type", rateTypeLabel);
         formData.append("is_differential", isDifferential ? "1" : "0");
         formData.append("service_payment_method", servicePaymentMethod);
-        formData.append("booking_fee", BOOKING_FEE);
-        formData.append("reference_number", refNumber.trim());
-        if (senderName.trim()) formData.append("sender_name", senderName.trim());
-        if (senderNumber.trim()) formData.append("sender_number", senderNumber.trim());
+        formData.append("booking_fee", effectiveBookingFee);
+        if (!isOcularInspection) {
+            formData.append("reference_number", refNumber.trim());
+            if (senderName.trim()) formData.append("sender_name", senderName.trim());
+            if (senderNumber.trim()) formData.append("sender_number", senderNumber.trim());
+        }
+        if (initialServiceDetails?.ac_unit_order_id) {
+            formData.append("ac_unit_order_id", initialServiceDetails.ac_unit_order_id);
+        }
         formData.append("service_address", serviceAddress.trim());
         if (addressGeoCheck?.lat) formData.append("service_latitude", addressGeoCheck.lat);
         if (addressGeoCheck?.lon) formData.append("service_longitude", addressGeoCheck.lon);
@@ -757,8 +809,9 @@ export default function BookingWizard({
                 is_differential: isDifferential,
                 units_count: totalUnitQuantity,
                 units: cleanUnits,
-                ref_number: refNumber.trim(),
-                booking_fee: BOOKING_FEE,
+                ref_number: isOcularInspection ? "FREE" : refNumber.trim(),
+                booking_fee: effectiveBookingFee,
+                is_ocular: isOcularInspection,
             });
 
             if (onBookingCreated) {
@@ -838,7 +891,11 @@ export default function BookingWizard({
                             </div>
                             <div>
                                 <span className="font-semibold text-gray-400 uppercase text-[10px]">Reservation Fee Status</span>
-                                <p className="font-bold text-emerald-700 mt-0.5">₱300.00 Paid (Ref: {submittedBooking.ref_number})</p>
+                                <p className="font-bold text-emerald-700 mt-0.5">
+                                    {submittedBooking.is_ocular
+                                        ? "Free (₱0.00) — No Booking Fee"
+                                        : `₱300.00 Paid (Ref: ${submittedBooking.ref_number})`}
+                                </p>
                             </div>
                         </div>
 
@@ -1018,10 +1075,11 @@ export default function BookingWizard({
                                 Loading services...
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {services.map((srv) => {
                                     const isSelected = Number(selectedServiceId) === Number(srv.service_id);
                                     const sName = srv.service_name;
+                                    const isOcularSrv = Number(srv.service_id) === 4 || sName.toLowerCase().includes("ocular");
                                     const isInstall = sName.toLowerCase().includes("install");
                                     const isRepair = sName.toLowerCase().includes("repair") || sName.toLowerCase().includes("check");
 
@@ -1069,9 +1127,9 @@ export default function BookingWizard({
                                             </div>
 
                                             <div className="mt-5 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                                                <span className="font-semibold text-gray-400">Pricing Model</span>
-                                                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">
-                                                    Official Quotation
+                                                <span className="font-semibold text-gray-400">{isOcularSrv ? "Booking Fee" : "Pricing Model"}</span>
+                                                <span className={`font-bold px-2 py-0.5 rounded-md ${isOcularSrv ? "text-emerald-700 bg-emerald-50" : "text-blue-700 bg-blue-50"}`}>
+                                                    {isOcularSrv ? "Free (₱0.00)" : "Official Quotation"}
                                                 </span>
                                             </div>
                                         </div>
@@ -1117,7 +1175,8 @@ export default function BookingWizard({
                             </button>
                         </div>
 
-                        {/* SECTION A: MULTIPLE AIRCON UNITS LIST */}
+                        {/* SECTION A: MULTIPLE AIRCON UNITS LIST (HIDDEN FOR OCULAR INSPECTION) */}
+                        {!isOcularInspection && (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between">
                                 <div>
@@ -1207,19 +1266,67 @@ export default function BookingWizard({
                                 })}
                             </div>
                         </div>
+                        )}
 
                         {/* SECTION B: DYNAMIC SERVICE-SPECIFIC QUESTIONNAIRE */}
                         <div className="bg-gray-50/60 rounded-2xl p-5 sm:p-6 border border-gray-200/80 space-y-5">
                             <div className="border-b border-gray-200 pb-3 flex items-center justify-between">
                                 <div>
                                     <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider">
+                                        {serviceCategory === "ocular" && "Ocular Inspection Site Details"}
                                         {serviceCategory === "installation" && "Installation Requirements & Site Assessment"}
                                         {serviceCategory === "repair" && "Repair Diagnosis & Symptoms"}
                                         {serviceCategory === "cleaning" && "Cleaning & Maintenance History"}
                                     </h3>
-                                    <p className="text-xs text-gray-500 mt-0.5">Please provide additional details to help our team prepare the official quotation.</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        {serviceCategory === "ocular"
+                                            ? "Tell us briefly about the site where you plan to buy and install AC units."
+                                            : "Please provide additional details to help our team prepare the official quotation."}
+                                    </p>
                                 </div>
                             </div>
+
+                            {/* 0. OCULAR INSPECTION QUESTIONS */}
+                            {serviceCategory === "ocular" && (
+                                <div className="space-y-4 text-xs">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block font-bold text-gray-700 mb-1">Property Type</label>
+                                            <select
+                                                value={ocularDetails.property_type}
+                                                onChange={(e) => setOcularDetails({ ...ocularDetails, property_type: e.target.value })}
+                                                className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl font-medium"
+                                            >
+                                                <option value="Residential">Residential</option>
+                                                <option value="Commercial">Commercial</option>
+                                                <option value="Office">Office</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block font-bold text-gray-700 mb-1">Rooms to Inspect</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                max={50}
+                                                value={ocularDetails.rooms_to_inspect}
+                                                onChange={(e) => setOcularDetails({ ...ocularDetails, rooms_to_inspect: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                                                className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl font-medium"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block font-bold text-gray-700 mb-1">Site Notes (Optional)</label>
+                                        <input
+                                            type="text"
+                                            value={ocularDetails.site_notes}
+                                            onChange={(e) => setOcularDetails({ ...ocularDetails, site_notes: e.target.value })}
+                                            placeholder="e.g. Master bedroom & living room, planning to buy inverter split-type units"
+                                            className="w-full px-3.5 py-2 bg-white border border-gray-300 rounded-xl font-medium"
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             {/* 1. INSTALLATION QUESTIONS */}
                             {serviceCategory === "installation" && (
@@ -1792,12 +1899,35 @@ export default function BookingWizard({
                     <div className="space-y-6 animate-in fade-in duration-200">
                         <div className="border-b border-gray-100 pb-4">
                             <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Step 4 of 5</span>
-                            <h2 className="text-xl font-bold text-gray-900 mt-0.5">Appointment Reservation Fee</h2>
+                            <h2 className="text-xl font-bold text-gray-900 mt-0.5">
+                                {isOcularInspection ? "Free Ocular Inspection" : "Appointment Reservation Fee"}
+                            </h2>
                             <p className="text-xs text-gray-500 mt-1">
-                                An appointment reservation fee is required to secure your requested service schedule.
+                                {isOcularInspection
+                                    ? "Ocular inspection is free of charge — no booking fee payment is required."
+                                    : "An appointment reservation fee is required to secure your requested service schedule."}
                             </p>
                         </div>
 
+                        {isOcularInspection ? (
+                            <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-6 space-y-3">
+                                <div className="flex items-center justify-between flex-wrap gap-3">
+                                    <div>
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase tracking-wider">
+                                            No Booking Fee
+                                        </span>
+                                        <h3 className="text-2xl font-extrabold text-emerald-900 mt-1">Free (₱0.00)</h3>
+                                    </div>
+                                    <span className="px-3 py-1 rounded-xl bg-white border border-emerald-200 text-emerald-800 text-xs font-bold">
+                                        Status after submission: Pending
+                                    </span>
+                                </div>
+                                <p className="text-xs text-emerald-900 leading-relaxed">
+                                    Our assigned personnel will inspect your room dimensions and thermal load, then provide tailored AC unit brand and capacity recommendations from our inventory.
+                                </p>
+                            </div>
+                        ) : (
+                        <>
                         {/* Distinction & Clarity Notice */}
                         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-5 sm:p-6 text-white shadow-lg space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
@@ -1938,6 +2068,8 @@ export default function BookingWizard({
                                 </label>
                             </div>
                         </div>
+                        </>
+                        )}
                     </div>
                 )}
 
@@ -1970,7 +2102,25 @@ export default function BookingWizard({
                                 </div>
                             </div>
 
-                            {/* Units List */}
+                            {/* Units List / Ocular Scope */}
+                            {isOcularInspection ? (
+                                <div className="space-y-2 border-b border-gray-200 pb-4 text-xs">
+                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                        Ocular Inspection Scope
+                                    </span>
+                                    <div className="bg-white p-3 rounded-xl border border-gray-200 flex items-center justify-between flex-wrap gap-2">
+                                        <div>
+                                            <span className="font-extrabold text-blue-900">{ocularDetails.property_type} Property</span>
+                                            {ocularDetails.site_notes && (
+                                                <p className="text-gray-600 mt-0.5">{ocularDetails.site_notes}</p>
+                                            )}
+                                        </div>
+                                        <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-800 font-bold border border-blue-200">
+                                            {ocularDetails.rooms_to_inspect} Room(s) to Inspect
+                                        </span>
+                                    </div>
+                                </div>
+                            ) : (
                             <div className="space-y-2 border-b border-gray-200 pb-4">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
                                     Aircon Units Included ({totalUnitsCount} {totalUnitsCount === 1 ? "Unit" : "Units"})
@@ -2007,6 +2157,7 @@ export default function BookingWizard({
                                     })}
                                 </div>
                             </div>
+                            )}
 
                             {/* Schedule & Location */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs border-b border-gray-200 pb-4">
@@ -2041,8 +2192,12 @@ export default function BookingWizard({
                                 </div>
                                 <div>
                                     <span className="font-semibold text-gray-400 uppercase text-[10px]">Reservation Fee</span>
-                                    <p className="font-extrabold text-emerald-700 mt-0.5">₱{BOOKING_FEE.toFixed(2)}</p>
-                                    <p className="text-[11px] font-mono text-gray-500">Ref: {refNumber}</p>
+                                    <p className="font-extrabold text-emerald-700 mt-0.5">
+                                        {isOcularInspection ? "Free (₱0.00)" : `₱${BOOKING_FEE.toFixed(2)}`}
+                                    </p>
+                                    {!isOcularInspection && (
+                                        <p className="text-[11px] font-mono text-gray-500">Ref: {refNumber}</p>
+                                    )}
                                 </div>
                             </div>
 

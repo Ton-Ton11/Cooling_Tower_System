@@ -4,9 +4,12 @@ import { CUSTOMER_ENDPOINTS, extractErrorMessage } from "../../utils/superAdmin"
 export default function CancelModal({ booking, isOpen, onClose, onSuccess, addToast }) {
     const [reasonPreset, setReasonPreset] = useState("Change of personal schedule / No longer available");
     const [customReason, setCustomReason] = useState("");
+    const [fulfillmentSwitch, setFulfillmentSwitch] = useState("delivery");
     const [submitting, setSubmitting] = useState(false);
 
     if (!isOpen || !booking) return null;
+
+    const linkedOrder = booking.ac_unit_order || null;
 
     const reasons = [
         "Change of personal schedule / No longer available",
@@ -31,9 +34,13 @@ export default function CancelModal({ booking, isOpen, onClose, onSuccess, addTo
         setSubmitting(true);
         try {
             const url = CUSTOMER_ENDPOINTS.cancelBooking(booking.booking_id);
-            const { data } = await window.axios.patch(url, {
+            const payload = {
                 cancellation_reason: finalReason,
-            });
+            };
+            if (linkedOrder) {
+                payload.fulfillment_switch = fulfillmentSwitch;
+            }
+            const { data } = await window.axios.patch(url, payload);
 
             addToast(data.message || "Booking has been cancelled.", "success");
             onSuccess();
@@ -76,6 +83,51 @@ export default function CancelModal({ booking, isOpen, onClose, onSuccess, addTo
                     <div className="bg-rose-50 border border-rose-100 rounded-xl p-3.5 text-xs text-rose-900 leading-relaxed">
                         Are you sure you want to cancel this booking request? Once cancelled, the assigned technician reservation will be released.
                     </div>
+
+                    {linkedOrder && (
+                        <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3.5 space-y-2.5 text-xs">
+                            <p className="font-bold text-amber-900 uppercase tracking-wider text-[11px]">
+                                Purchased AC Unit Fulfillment Option ({linkedOrder.brand} {linkedOrder.model || ""})
+                            </p>
+                            <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                                fulfillmentSwitch === "delivery" ? "bg-white border-blue-500 ring-1 ring-blue-500/20" : "bg-white/60 border-amber-200"
+                            }`}>
+                                <input
+                                    type="radio"
+                                    name="fulfillment_switch"
+                                    value="delivery"
+                                    checked={fulfillmentSwitch === "delivery"}
+                                    onChange={() => setFulfillmentSwitch("delivery")}
+                                    className="mt-0.5 text-blue-600"
+                                />
+                                <div>
+                                    <span className="font-bold text-gray-900 block">Delivery Instead (Cancel Installation Only)</span>
+                                    <span className="text-gray-600 text-[11px]">
+                                        Unit will be delivered to your address. Remaining unit balance + delivery fee payable upon delivery.
+                                    </span>
+                                </div>
+                            </label>
+
+                            <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition ${
+                                fulfillmentSwitch === "pickup" ? "bg-white border-rose-500 ring-1 ring-rose-500/20" : "bg-white/60 border-amber-200"
+                            }`}>
+                                <input
+                                    type="radio"
+                                    name="fulfillment_switch"
+                                    value="pickup"
+                                    checked={fulfillmentSwitch === "pickup"}
+                                    onChange={() => setFulfillmentSwitch("pickup")}
+                                    className="mt-0.5 text-rose-600"
+                                />
+                                <div>
+                                    <span className="font-bold text-gray-900 block">Pick Up Instead (Cancel Delivery & Installation)</span>
+                                    <span className="text-rose-700 font-semibold text-[11px]">
+                                        Note: Installation booking fee (₱300.00) is non-refundable. Remaining unit balance payable upon store pick up.
+                                    </span>
+                                </div>
+                            </label>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">

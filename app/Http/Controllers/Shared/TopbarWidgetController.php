@@ -296,17 +296,21 @@ class TopbarWidgetController extends Controller
                 ];
             }
 
-            // 2. Customer Booking Updates (including Payment Incomplete 10-min timer & Reschedule Notice)
-            $bookings = Booking::with('service')
+            // 2. Customer Booking Updates (including Payment Incomplete 10-min timer, Reschedule Notice, Ocular Results & Rating Reminder)
+            $bookings = Booking::with(['service', 'feedback'])
                 ->where('client_id', $userId)
                 ->orderByDesc('updated_at')
-                ->limit(5)
+                ->limit(6)
                 ->get();
 
             foreach ($bookings as $b) {
                 $updated = $b->updated_at ? Carbon::parse($b->updated_at) : now()->subDay();
                 $srvName = $b->service?->service_name ?? 'Aircon Service';
                 $status = (string) $b->booking_status;
+                $sDetails = is_array($b->service_details)
+                    ? $b->service_details
+                    : (is_string($b->service_details) ? (json_decode($b->service_details, true) ?: []) : []);
+                $isOcularSubmitted = ($sDetails['inspection_status'] ?? null) === 'Submitted';
 
                 $badgeColor = match ($status) {
                     'Completed' => 'emerald',
@@ -319,6 +323,10 @@ class TopbarWidgetController extends Controller
                     $msg = 'Action required: Complete your GCash reservation payment within 10 minutes or the booking will be automatically cancelled and your payment returned.';
                 } elseif ($status === 'Reschedule Notice') {
                     $msg = 'Your preferred schedule slot is unavailable. Please select a new available date and time at no extra cost (₱0.00).';
+                } elseif ($isOcularSubmitted) {
+                    $msg = 'Your Ocular Inspection results and recommended AC units are ready for review and selection.';
+                } elseif ($status === 'Completed' && ! $b->feedback) {
+                    $msg = 'Your booking is complete! Thank you for choosing Cooling Tower — you can now leave a rating and feedback.';
                 } elseif ($b->quotation_status === 'Quotation Issued') {
                     $msg = 'Your official quotation is ready for review and acceptance.';
                 } else {
@@ -328,8 +336,8 @@ class TopbarWidgetController extends Controller
                 $items[] = [
                     'id'          => 'cust_booking_' . $b->booking_id,
                     'type'        => 'booking',
-                    'badge'       => $status,
-                    'badge_color' => $badgeColor,
+                    'badge'       => $isOcularSubmitted ? 'Recommendations Ready' : $status,
+                    'badge_color' => $isOcularSubmitted ? 'emerald' : $badgeColor,
                     'title'       => "Booking #{$b->booking_id} ({$srvName}) is {$status}",
                     'message'     => $msg,
                     'time_ago'    => $updated->diffForHumans(),
@@ -539,6 +547,43 @@ class TopbarWidgetController extends Controller
                         'time_ago'    => 'Due ' . $due->format('M d'),
                         'target_page' => 'dashboard',
                         'unread'      => ! $lastReadAt || now()->subHours(2)->gt($lastReadAt),
+                    ];
+                }
+            }
+
+            // Recent Confirmed AC Unit Purchases for Admin Assistant & Super Admin
+            if (in_array($roleId, [1, 3], true) && Schema::hasTable('ac_unit_orders')) {
+                $confirmedOrders = DB::table('ac_unit_orders')
+                    ->leftJoin('ac_units_inventory', 'ac_units_inventory.ac_unit_id', '=', 'ac_unit_orders.ac_unit_id')
+                    ->leftJoin('users as clients', 'clients.user_id', '=', 'ac_unit_orders.client_id')
+                    ->where('ac_unit_orders.order_status', 'Completed')
+                    ->orderByDesc('ac_unit_orders.confirmed_at')
+                    ->limit(3)
+                    ->select([
+                        'ac_unit_orders.order_id',
+                        'ac_unit_orders.total_unit_price',
+                        'ac_unit_orders.confirmed_at',
+                        'ac_unit_orders.updated_at',
+                        'ac_units_inventory.brand',
+                        'ac_units_inventory.model',
+                        'clients.given_name',
+                        'clients.last_name',
+                    ])
+                    ->get();
+
+                foreach ($confirmedOrders as $co) {
+                    $coTime = $co->confirmed_at ? Carbon::parse($co->confirmed_at) : ($co->updated_at ? Carbon::parse($co->updated_at) : now());
+                    $buyerName = trim(($co->given_name ?? '') . ' ' . ($co->last_name ?? '')) ?: 'Customer';
+                    $items[] = [
+                        'id'          => 'unit_sold_' . $co->order_id,
+                        'type'        => 'ac_unit_sale',
+                        'badge'       => 'Unit Sold',
+                        'badge_color' => 'emerald',
+                        'title'       => "AC Unit Sold: {$co->brand} {$co->model}",
+                        'message'     => "{$buyerName} completed unit purchase (₱" . number_format((float) $co->total_unit_price, 2) . "). Warranty & spare parts forecast activated.",
+                        'time_ago'    => $coTime->diffForHumans(),
+                        'target_page' => 'ac-units',
+                        'unread'      => ! $lastReadAt || $coTime->gt($lastReadAt),
                     ];
                 }
             }

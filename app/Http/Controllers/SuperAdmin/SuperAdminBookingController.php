@@ -25,8 +25,17 @@ class SuperAdminBookingController extends SuperAdminBaseController
         return response()->json([
             'data' => $this->mapBookings($query->get()),
             'technicians' => $this->techniciansCollection(),
+            'admin_assistants' => $this->adminAssistantsCollection(),
             'teams' => $this->teamsCollection(),
+            'unit_orders' => $this->unitOrdersCollection(),
         ]);
+    }
+
+    public function confirmUnitOrder(Request $request, int $orderId): JsonResponse
+    {
+        $this->authorizeSuperAdmin($request);
+
+        return response()->json($this->handleConfirmUnitOrderAction($request, $orderId));
     }
 
     public function approveBooking(Request $request, int $bookingId): JsonResponse

@@ -1806,6 +1806,16 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                     ? "power_tool"
                                     : "hand_tool";
                             };
+                            const isOcularChecklist = Boolean(
+                                managingChecklist.is_ocular_inspection ||
+                                    String(
+                                        managingChecklist.service_name ||
+                                            managingChecklist.booking?.service_name ||
+                                            ""
+                                    )
+                                        .toLowerCase()
+                                        .includes("ocular")
+                            );
                             const groups = [
                                 {
                                     key: "hand_tool",
@@ -1821,13 +1831,17 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                     badgeColor: "#6D28D9",
                                     items: allItems.filter((i) => getCat(i) === "power_tool"),
                                 },
-                                {
-                                    key: "material",
-                                    label: "Materials",
-                                    badgeBg: "#FEF3C7",
-                                    badgeColor: "#B45309",
-                                    items: allItems.filter((i) => getCat(i) === "material"),
-                                },
+                                ...(!isOcularChecklist
+                                    ? [
+                                          {
+                                              key: "material",
+                                              label: "Materials",
+                                              badgeBg: "#FEF3C7",
+                                              badgeColor: "#B45309",
+                                              items: allItems.filter((i) => getCat(i) === "material"),
+                                          },
+                                      ]
+                                    : []),
                             ];
 
                             return (
