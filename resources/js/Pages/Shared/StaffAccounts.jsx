@@ -851,29 +851,51 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                     flexWrap: "wrap",
                 }}
             >
-                <div style={{ flex: 1, minWidth: 260 }}>
+                <div style={{ flex: 1, minWidth: 260, position: "relative" }}>
+                    <span
+                        style={{
+                            position: "absolute",
+                            left: 12,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            color: "#94A3B8",
+                            display: "flex",
+                            pointerEvents: "none",
+                        }}
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                    </span>
                     <input
                         type="text"
                         className="input-field"
-                        placeholder="Search staff by name, email, phone, or role..."
+                        placeholder="Search name, email, phone, role..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        style={{ padding: "9px 14px", fontSize: 13 }}
+                        style={{ padding: "9px 14px 9px 36px", fontSize: 13, borderRadius: 10, borderColor: "#E5E7EB" }}
                     />
                 </div>
                 {searchQuery && (
                     <button
                         className="btn-secondary"
                         onClick={() => setSearchQuery("")}
-                        style={{ padding: "8px 12px", fontSize: 12 }}
+                        style={{ padding: "8px 14px", fontSize: 12, borderRadius: 10 }}
                     >
                         Clear Search
                     </button>
                 )}
             </div>
 
-            {/* Staff Table */}
-            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {/* Staff Table Card */}
+            <div className="card" style={{ padding: 0, overflow: "hidden", borderRadius: 16, border: "1px solid #E5E7EB", boxShadow: "0 1px 3px rgba(16,29,56,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>Users</h3>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#64748B" }}>
+                        {filteredStaff.length} of {staff.length} total
+                    </span>
+                </div>
                 {loading ? (
                     <div style={{ padding: 32, textAlign: "center", color: "#6B7280" }}>
                         Loading staff directory and dynamic roles...

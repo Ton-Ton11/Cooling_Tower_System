@@ -1494,7 +1494,7 @@ function SalesRecords({ addToast, endpoints }) {
                                                     <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 600, color: "#475569", whiteSpace: "nowrap" }}>
                                                         {record.booking_fee !== null && record.booking_fee !== undefined
                                                             ? formatCurrency(record.booking_fee)
-                                                            : formatCurrency(300)}
+                                                            : formatCurrency(100)}
                                                     </td>
                                                     <td style={{ padding: "10px 12px", fontSize: 12, fontWeight: 600, color: "#0F172A", whiteSpace: "nowrap" }}>
                                                         {Number(record.base_price) > 0

@@ -1685,8 +1685,8 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         );
     };
 
-    const thStyle = { padding: '10px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0' };
-    const tdStyle = { padding: '10px 12px', fontSize: 13, color: '#334155', whiteSpace: 'nowrap' };
+    const thStyle = { padding: '12px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0', background: '#F8FAFC' };
+    const tdStyle = { padding: '12px 14px', fontSize: 13, color: '#1E293B', whiteSpace: 'nowrap', borderBottom: '1px solid #F1F5F9' };
 
     // Header label helper based on active tab
     const getTabTitle = () => {

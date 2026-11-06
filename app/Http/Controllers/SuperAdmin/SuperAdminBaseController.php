@@ -882,7 +882,7 @@ abstract class SuperAdminBaseController extends Controller
             }
 
             // Booking Fee
-            $bookingFee = $saleType === 'service' ? ($downPaymentCredited > 0 ? $downPaymentCredited : 300.00) : null;
+            $bookingFee = $saleType === 'service' ? ($downPaymentCredited > 0 ? $downPaymentCredited : 100.00) : null;
 
             // Base Price
             $rowBookingPrice = (float) ($row->booking_price ?? 0.0);
@@ -1897,7 +1897,7 @@ abstract class SuperAdminBaseController extends Controller
             : (isset($turnover['net_collected']) ? (float) $turnover['net_collected'] : null);
 
         $totalServicePrice = (float) ($validated['installation_fee'] ?? ($turnover['total_service_price'] ?? ($booking->base_price ?? 0.0)));
-        $downPayment = (float) ($turnover['reservation_down_payment'] ?? 300.00);
+        $downPayment = (float) ($turnover['reservation_down_payment'] ?? 100.00);
         $deliveryFee = (float) ($validated['delivery_fee'] ?? ($turnover['delivery_fee'] ?? ($linkedOrder->delivery_fee ?? 0.0)));
 
         if ($turnedOverAmount === null) {

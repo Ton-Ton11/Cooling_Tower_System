@@ -1316,14 +1316,14 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                 key={heading}
                                                 className={isAction ? "sticky-action-col" : ""}
                                                 style={{
-                                                    padding: "10px 14px",
+                                                    padding: "12px 14px",
                                                     textAlign: isAction ? "right" : "left",
                                                     fontSize: 11,
-                                                    fontWeight: 600,
-                                                    color: "#6B7280",
+                                                    fontWeight: 700,
+                                                    color: "#64748B",
                                                     textTransform: "uppercase",
                                                     letterSpacing: "0.05em",
-                                                    borderBottom: "1px solid #EAECF0",
+                                                    borderBottom: "1px solid #E5E7EB",
                                                     ...(isAction ? { position: "sticky", right: 0, zIndex: 10, background: "#F8FAFC" } : {}),
                                                 }}
                                             >

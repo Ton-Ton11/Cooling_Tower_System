@@ -705,18 +705,26 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                 );
             })()}
 
-            <div className="card" style={{ padding: 20, marginTop: 16 }}>
-                <p className="section-label" style={{ marginBottom: 12 }}>
-                    Booking Details — manage assignments and view client records
-                </p>
+            <div className="card" style={{ padding: 0, marginTop: 16, overflow: "hidden", borderRadius: 16, border: "1px solid #E5E7EB", boxShadow: "0 1px 3px rgba(16,29,56,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>Bookings Directory</h3>
+                        <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748B" }}>
+                            Manage assignments, dispatch status, and customer service orders
+                        </p>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#64748B" }}>
+                        {filtered.length} of {bookings.length} total
+                    </span>
+                </div>
 
                 {loading ? (
                     <div
                         style={{
-                            padding: 24,
-                            borderRadius: 12,
-                            background: "#F9FAFB",
+                            padding: 32,
+                            textAlign: "center",
                             color: "#6B7280",
+                            fontSize: 13,
                         }}
                     >
                         Loading bookings...
@@ -724,10 +732,10 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                 ) : filtered.length === 0 ? (
                     <div
                         style={{
-                            padding: 24,
-                            borderRadius: 12,
-                            background: "#F9FAFB",
-                            color: "#6B7280",
+                            padding: 36,
+                            textAlign: "center",
+                            color: "#94A3B8",
+                            fontSize: 13,
                         }}
                     >
                         No bookings match the selected tab.
@@ -742,7 +750,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                             }}
                         >
                             <thead>
-                                <tr style={{ background: "#F5F7FA" }}>
+                                <tr style={{ background: "#F8FAFC" }}>
                                     {[
                                         "ID",
                                         "Client",
@@ -1729,7 +1737,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#2563EB", marginBottom: 6 }}>
                                         <span>Less Reservation Fee</span>
                                         <span style={{ fontWeight: 700 }}>
-                                            - {formatCurrency(turnover.reservation_down_payment || 300)}
+                                            - {formatCurrency(turnover.reservation_down_payment || completeModal.booking_fee_paid || 100)}
                                         </span>
                                     </div>
                                     <div style={{ borderTop: "1px dashed #86EFAC", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 800, color: "#15803D" }}>

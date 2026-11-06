@@ -382,7 +382,7 @@ function Documents({ addToast }) {
                             style={{ width: "100%", borderCollapse: "collapse" }}
                         >
                             <thead>
-                                <tr style={{ background: "#F5F7FA" }}>
+                                <tr style={{ background: "#F8FAFC" }}>
                                     {[
                                         "Doc ID",
                                         "Form Name",
@@ -398,21 +398,21 @@ function Documents({ addToast }) {
                                                 key={heading}
                                                 className={isAction ? "sticky-action-col" : ""}
                                                 style={{
-                                                    padding: "10px 12px",
+                                                    padding: "12px 14px",
                                                     textAlign: isAction ? "right" : "left",
                                                     fontSize: 11,
-                                                    fontWeight: 600,
+                                                    fontWeight: 700,
                                                     letterSpacing: "0.05em",
                                                     textTransform: "uppercase",
-                                                    color: "#6B7280",
+                                                    color: "#64748B",
                                                     whiteSpace: "nowrap",
-                                                    borderBottom: "1px solid #EAECF0",
+                                                    borderBottom: "1px solid #E5E7EB",
                                                     ...(isAction
                                                         ? {
                                                               position: "sticky",
                                                               right: 0,
                                                               zIndex: 10,
-                                                              background: "#F5F7FA",
+                                                              background: "#F8FAFC",
                                                           }
                                                         : {}),
                                                 }}

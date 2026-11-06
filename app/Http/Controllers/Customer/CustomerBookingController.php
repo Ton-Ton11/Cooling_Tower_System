@@ -248,7 +248,7 @@ class CustomerBookingController extends Controller
 
         $policy = [
             'fee_name' => 'Appointment Reservation Fee',
-            'amount' => 300.00,
+            'amount' => 100.00,
             'reschedule_fee' => 150.00,
             'unit_down_payment' => 7000.00,
             'default_delivery_fee' => 500.00,
@@ -261,7 +261,7 @@ class CustomerBookingController extends Controller
             'notice' => 'An appointment reservation fee is required to secure your requested service schedule. Your reservation fee is separate from the final service quotation.',
             'terms' => [
                 'Service Request Only: This booking is an initial service request and schedule reservation. Final service charges will be determined by assessment and an official quotation.',
-                'Reservation Fee Separation: The ₱300.00 reservation fee is strictly for reserving your schedule and is not the full service price.',
+                'Reservation Fee Separation: The ₱100.00 reservation fee is strictly for reserving your schedule and is not the full service price.',
                 'Fee Crediting: If your service proceeds, the reservation fee may be credited toward your final service bill based on company policy.',
                 'Cancellation Policy: Cancellations made at least 24 hours prior to the appointment are eligible for rescheduling or refund.',
                 'Rescheduling Policy: Rescheduling requested within the allowed window transfers the reservation fee to your new schedule.',
@@ -595,7 +595,7 @@ class CustomerBookingController extends Controller
                 'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
                 'payment_status' => $latestPay?->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
                 'payment_method' => $latestPay?->payment_method ?? ($isOcular ? 'Free Service' : 'GCash'),
-                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? 300),
+                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? 100),
                 'reference_number' => $reservationPay?->reference_number ?? $latestPay?->reference_number,
                 'payments' => $b->payments->map(function ($p) {
                     return [
@@ -762,7 +762,7 @@ class CustomerBookingController extends Controller
             ? 0.00
             : (isset($validated['booking_fee']) && (float) $validated['booking_fee'] > 0
                 ? (float) $validated['booking_fee']
-                : 300.00);
+                : 100.00);
 
         // Parse units data
         $units = $request->input('units');
@@ -1138,7 +1138,7 @@ class CustomerBookingController extends Controller
             Payment::create([
                 'booking_id' => $booking->booking_id,
                 'booking_price' => 0.00,
-                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : 300.00,
+                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : 100.00,
                 'payment_status' => 'Paid',
                 'payment_method' => 'GCash',
                 'payment_type' => 'Appointment Reservation Fee (Completed)',

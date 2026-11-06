@@ -259,8 +259,7 @@ function Announcements({ addToast, onDataChanged, endpoints, readOnly = false })
                                                 borderRadius: 20,
                                                 cursor: "pointer",
                                                 fontSize: 12,
-                                                fontFamily:
-                                                    "'DM Sans',sans-serif",
+                                                fontFamily: "inherit",
                                                 fontWeight: 600,
                                                 background: selected
                                                     ? `${color}18`
@@ -355,24 +354,25 @@ function Announcements({ addToast, onDataChanged, endpoints, readOnly = false })
                                                 style={{
                                                     width: 36,
                                                     height: 36,
-                                                    borderRadius: 9,
-                                                    background:
-                                                        "linear-gradient(135deg,#F58A07,#D97706)",
+                                                    borderRadius: 10,
+                                                    background: "#EFF6FF",
                                                     display: "flex",
                                                     alignItems: "center",
                                                     justifyContent: "center",
-                                                    color: "#FFFFFF",
+                                                    color: "#2563EB",
                                                     flexShrink: 0,
+                                                    border: "1px solid #DBEAFE",
                                                 }}
                                             >
-                                                <MegaphoneIcon size={18} color="#FFFFFF" />
+                                                <MegaphoneIcon size={18} color="#2563EB" />
                                             </div>
                                             <div>
                                                 <h4
                                                     style={{
-                                                        fontSize: 14,
+                                                        fontSize: 14.5,
                                                         fontWeight: 700,
-                                                        color: "#1E2F5F",
+                                                        color: "#111827",
+                                                        letterSpacing: "-0.01em",
                                                         margin: 0,
                                                     }}
                                                 >

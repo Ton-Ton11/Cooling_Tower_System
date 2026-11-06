@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePage } from "@inertiajs/react";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatDateTime } from "../../utils/superAdmin";
 import {
     resolveScheduleSlots,
@@ -211,6 +212,7 @@ export default function BookingWizard({
     initialUnits = null,
     initialServiceDetails = null,
 }) {
+    const pageUser = usePage()?.props?.auth?.user || null;
     const [step, setStep] = useState(initialStep || 1);
     const [services, setServices] = useState([]);
     const [unitTypes, setUnitTypes] = useState(DEFAULT_UNIT_TYPES);
@@ -331,23 +333,33 @@ export default function BookingWizard({
     });
     const [geocodeVerification, setGeocodeVerification] = useState(null);
     const [outsideZamboangaModalOpen, setOutsideZamboangaModalOpen] = useState(false);
-    const [contactNumber, setContactNumber] = useState(dashboardData?.user?.contact_number || "");
+    const [contactNumber, setContactNumber] = useState(
+        () => dashboardData?.user?.contact_number || pageUser?.contact_number || ""
+    );
     const [additionalContactNumber, setAdditionalContactNumber] = useState("");
     const [generalNotes, setGeneralNotes] = useState("");
 
     useEffect(() => {
-        if (dashboardData?.user?.address && !serviceAddress) {
-            setServiceAddress(dashboardData.user.address);
+        const phone = dashboardData?.user?.contact_number || pageUser?.contact_number;
+        if (phone && !contactNumber) {
+            setContactNumber(phone);
+        }
+    }, [dashboardData?.user?.contact_number, pageUser?.contact_number]);
+
+    useEffect(() => {
+        const addr = dashboardData?.user?.address || pageUser?.address;
+        if (addr && !serviceAddress) {
+            setServiceAddress(addr);
         }
         // If customer attempts to book while address is outside Zamboanga City and alert has not been acknowledged, show once
-        const addrToCheck = serviceAddress || dashboardData?.user?.address || "";
+        const addrToCheck = serviceAddress || addr || "";
         if (addrToCheck.trim().length > 2) {
             const evalRes = evaluateZamboangaGeospatial(addrToCheck);
-            if (!evalRes.is_within_zamboanga_city && !isGeospatialAlertAcknowledged(dashboardData?.user)) {
+            if (!evalRes.is_within_zamboanga_city && !isGeospatialAlertAcknowledged(dashboardData?.user || pageUser)) {
                 setOutsideZamboangaModalOpen(true);
             }
         }
-    }, [dashboardData?.user?.address, dashboardData?.user?.geospatial_alert_acknowledged]);
+    }, [dashboardData?.user?.address, pageUser?.address, dashboardData?.user?.geospatial_alert_acknowledged]);
 
     // Step 3: Scheduling (5 slots per day across 5 teams; Sunday is worker rest day)
     const today = useMemo(() => getTodayLocalYmd(), []);
@@ -397,10 +409,16 @@ export default function BookingWizard({
     }, [scheduleConfig]);
 
     // Step 4: Appointment Reservation Fee & GCash Payment
-    const BOOKING_FEE = 300.00;
+    const BOOKING_FEE = 100.00;
     const [refNumber, setRefNumber] = useState("");
-    const [senderName, setSenderName] = useState(dashboardData?.user?.full_name || "");
-    const [senderNumber, setSenderNumber] = useState(dashboardData?.user?.contact_number || "");
+    const [senderName, setSenderName] = useState(dashboardData?.user?.full_name || pageUser?.name || "");
+    const [senderNumber, setSenderNumber] = useState(dashboardData?.user?.contact_number || pageUser?.contact_number || "");
+
+    useEffect(() => {
+        if (contactNumber && !senderNumber) {
+            setSenderNumber(contactNumber);
+        }
+    }, [contactNumber]);
     const [receiptFile, setReceiptFile] = useState(null);
     const [receiptPreview, setReceiptPreview] = useState(null);
     const [servicePaymentMethod, setServicePaymentMethod] = useState("Cash");
@@ -894,7 +912,7 @@ export default function BookingWizard({
                                 <p className="font-bold text-emerald-700 mt-0.5">
                                     {submittedBooking.is_ocular
                                         ? "Free (₱0.00) — No Booking Fee"
-                                        : `₱300.00 Paid (Ref: ${submittedBooking.ref_number})`}
+                                        : `₱${Number(submittedBooking.booking_fee || 100).toFixed(2)} Paid (Ref: ${submittedBooking.ref_number})`}
                                 </p>
                             </div>
                         </div>
@@ -964,7 +982,7 @@ export default function BookingWizard({
     return (
         <div className="max-w-4xl mx-auto space-y-6">
             {/* Header Banner */}
-            <div className="bg-gradient-to-r from-[#1E2F5F] via-[#243B73] to-[#162347] rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+            <div className="bg-[#101D38] border border-slate-800 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
                 <div className="relative z-10 max-w-2xl">
                     <div className="flex items-center gap-2 flex-wrap mb-3">
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-extrabold uppercase tracking-wider">
@@ -981,8 +999,6 @@ export default function BookingWizard({
                         Authorized dealer, installer & service center for Panasonic, Daikin, Carrier, Condura, Kelvinator, Gree & Midea. Schedule certified care with 100% genuine parts and warranty preservation.
                     </p>
                 </div>
-                {/* Decorative glow */}
-                <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-blue-500/10 to-transparent pointer-events-none" />
             </div>
 
             {/* Crucial Notice: Service Request & Official Quotation Workflow */}
@@ -1154,7 +1170,7 @@ export default function BookingWizard({
                         </div>
 
                         {/* Selected Service Brief Banner */}
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 border border-blue-100 rounded-2xl p-4 flex items-center justify-between">
+                        <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <span className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
                                     <svg className="w-4 h-4 stroke-[2.5]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -1582,15 +1598,17 @@ export default function BookingWizard({
                                         Contact Number <span className="text-red-500">*</span>
                                     </label>
                                     <input
-                                        type="text"
+                                        type="tel"
+                                        inputMode="numeric"
+                                        maxLength={11}
                                         value={contactNumber}
-                                        readOnly
+                                        onChange={(e) => setContactNumber(e.target.value.replace(/\D/g, "").slice(0, 11))}
                                         placeholder="09XX XXX XXXX"
                                         required
-                                        className="w-full px-3.5 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-700 cursor-not-allowed select-none transition"
+                                        className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-sm text-gray-800 placeholder:text-gray-400 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                                     />
                                     <p className="text-[11px] text-gray-400 mt-1">
-                                        Primary contact number registered to your account.
+                                        {contactNumber ? `${contactNumber.length}/11 digits (Primary contact number)` : "Primary contact number for service confirmation (11 digits, e.g. 09XXXXXXXXX)."}
                                     </p>
                                 </div>
 
@@ -1929,36 +1947,61 @@ export default function BookingWizard({
                         ) : (
                         <>
                         {/* Distinction & Clarity Notice */}
-                        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-5 sm:p-6 text-white shadow-lg space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                        <div className="bg-blue-50/60 border border-blue-200/90 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-blue-200/70 pb-4">
                                 <div>
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 text-[11px] font-bold uppercase tracking-wider">
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-xs font-bold uppercase tracking-wider">
+                                        <svg className="w-3.5 h-3.5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                        </svg>
                                         Schedule Security Fee
                                     </span>
-                                    <h3 className="text-2xl font-extrabold mt-1 text-white">₱{BOOKING_FEE.toFixed(2)}</h3>
-                                    <p className="text-xs text-blue-200/90 mt-0.5">
+                                    <h3 className="text-3xl font-extrabold mt-1.5 text-[#101D38]">₱{BOOKING_FEE.toFixed(2)}</h3>
+                                    <p className="text-xs text-slate-500 font-medium mt-0.5">
                                         Your reservation fee is separate from the final service quotation.
                                     </p>
                                 </div>
-                                <div className="bg-white/10 rounded-xl p-3 border border-white/10 flex items-center gap-3 self-start sm:self-auto">
+                                <div className="bg-white rounded-xl p-3.5 border border-slate-200/90 shadow-2xs flex items-center justify-between gap-4 self-start sm:self-auto">
                                     <div>
-                                        <p className="text-[10px] text-blue-200 font-semibold uppercase tracking-wider">GCash Express Send No.</p>
-                                        <p className="text-base font-bold font-mono tracking-wider text-white mt-0.5">{gcashAccount}</p>
-                                        <p className="text-[10px] text-blue-300 font-medium">{gcashName}</p>
+                                        <p className="text-[10.5px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                                            GCash Express Send No.
+                                        </p>
+                                        <p className="text-base font-bold font-mono tracking-wider text-slate-900 mt-1">{gcashAccount}</p>
+                                        <p className="text-[11px] text-slate-500 font-medium">{gcashName}</p>
                                     </div>
                                     <button
                                         type="button"
                                         onClick={handleCopyGCash}
-                                        className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold transition shrink-0"
+                                        className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 shrink-0 cursor-pointer"
                                     >
-                                        {copied ? "Copied!" : "Copy"}
+                                        {copied ? (
+                                            <>
+                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                <span>Copied!</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                </svg>
+                                                <span>Copy</span>
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             </div>
 
-                            <p className="text-xs text-blue-100/90 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">
-                                <strong>Important Distinction:</strong> Please note that the appointment reservation fee is not the final service charge. Your final service charges will be provided through an official quotation based on the service requirements.
-                            </p>
+                            <div className="bg-white rounded-xl p-3.5 border border-blue-100 text-xs text-slate-600 leading-relaxed flex items-start gap-2.5">
+                                <svg className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <p className="m-0">
+                                    <strong className="text-slate-900 font-semibold">Important Distinction:</strong> Please note that the appointment reservation fee is not the final service charge. Your final service charges will be provided through an official quotation based on the service requirements.
+                                </p>
+                            </div>
                         </div>
 
                         {/* GCash Verification Form */}
@@ -2244,7 +2287,7 @@ export default function BookingWizard({
                         <button
                             type="button"
                             onClick={handleNext}
-                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-2"
+                            className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold shadow-xs transition flex items-center gap-2 cursor-pointer"
                         >
                             Next Step
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
@@ -2254,7 +2297,7 @@ export default function BookingWizard({
                             type="button"
                             onClick={handleSubmitBooking}
                             disabled={submitting || !canSubmit}
-                            className="px-7 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm font-extrabold shadow-lg shadow-emerald-500/25 disabled:opacity-50 transition flex items-center gap-2"
+                            className="px-7 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold shadow-xs disabled:opacity-50 transition flex items-center gap-2 cursor-pointer"
                         >
                             {submitting ? (
                                 <>

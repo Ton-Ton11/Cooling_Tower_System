@@ -177,7 +177,13 @@ function ActivityLogs({ addToast }) {
                 </select>
             </div>
 
-            <div className="card" style={{ padding: 20 }}>
+            <div className="card" style={{ padding: 0, overflow: "hidden", borderRadius: 16, border: "1px solid #E5E7EB", boxShadow: "0 1px 3px rgba(16,29,56,0.05)" }}>
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827" }}>Audit Records</h3>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#64748B" }}>
+                        {logs.length} entries
+                    </span>
+                </div>
                 <div style={{ overflowX: "auto" }}>
                     <table
                         style={{
@@ -187,7 +193,7 @@ function ActivityLogs({ addToast }) {
                         }}
                     >
                         <thead>
-                            <tr style={{ background: "#F5F7FA" }}>
+                            <tr style={{ background: "#F8FAFC" }}>
                                 {[
                                     "Log ID",
                                     "User",
@@ -199,16 +205,16 @@ function ActivityLogs({ addToast }) {
                                     <th
                                         key={heading}
                                         style={{
-                                            padding: "10px 12px",
+                                            padding: "12px 14px",
                                             textAlign: "left",
                                             fontSize: 11,
-                                            fontWeight: 600,
+                                            fontWeight: 700,
                                             letterSpacing: "0.05em",
                                             textTransform: "uppercase",
-                                            color: "#6B7280",
+                                            color: "#64748B",
                                             whiteSpace: "nowrap",
                                             borderBottom:
-                                                "1px solid #EAECF0",
+                                                "1px solid #E5E7EB",
                                         }}
                                     >
                                         {heading}

@@ -1517,7 +1517,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         </label>
                                         <input
                                             type="number"
-                                            min="300"
+                                            min="100"
                                             step="0.01"
                                             className="input-field"
                                             value={reportForm.total_service_price}
@@ -1591,13 +1591,13 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
                                         <span>Less Reservation Fee:</span>
-                                        <strong>- ₱300.00</strong>
+                                        <strong>- ₱{Number(completeModal?.booking_fee_paid ?? 100).toFixed(2)}</strong>
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
                                         <span>Net Balance to Turn Over:</span>
                                         <span>
                                             ₱{(
-                                                Math.max(0, Number(reportForm.total_service_price || 0) - 300) +
+                                                Math.max(0, Number(reportForm.total_service_price || 0) - Number(completeModal?.booking_fee_paid ?? 100)) +
                                                 (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0)
                                             ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})
                                         </span>

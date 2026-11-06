@@ -77,23 +77,24 @@ function Modal({
                 className={className}
                 style={{
                     background: "#fff",
-                    borderRadius: 20,
+                    borderRadius: 16,
                     padding,
                     maxWidth: resolvedMaxWidth,
                     width: "100%",
                     maxHeight: "90vh",
                     overflowY: "auto",
-                    boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-                    border: "1px solid rgba(0,0,0,0.06)",
+                    boxShadow: "0 20px 48px -8px rgba(16, 29, 56, 0.22), 0 4px 12px -2px rgba(16, 29, 56, 0.08)",
+                    border: "1px solid #E5E7EB",
                     animation: "fadeIn 0.18s ease",
                 }}
             >
                 {title && (
                     <h2
                         style={{
-                            fontSize: 16,
+                            fontSize: 17,
                             fontWeight: 700,
-                            color: "#1E2F5F",
+                            color: "#111827",
+                            letterSpacing: "-0.015em",
                             margin: "0 0 8px",
                         }}
                     >
@@ -105,7 +106,7 @@ function Modal({
                     <p
                         style={{
                             fontSize: 13,
-                            color: "#6B7280",
+                            color: "#64748B",
                             lineHeight: 1.6,
                             margin: children
                                 ? "0 0 18px"
@@ -138,11 +139,11 @@ function Modal({
                                 onClick={handleClose}
                                 disabled={cancelDisabled}
                                 style={{
-                                    padding: "9px 18px",
+                                    padding: "8px 16px",
                                     borderRadius: 10,
-                                    border: "1px solid #E5E7EB",
+                                    border: "1px solid #D1D5DB",
                                     background: "#fff",
-                                    color: "#6B7280",
+                                    color: "#374151",
                                     fontSize: 13,
                                     fontWeight: 600,
                                     cursor: cancelDisabled
@@ -150,6 +151,7 @@ function Modal({
                                         : "pointer",
                                     fontFamily: "inherit",
                                     opacity: cancelDisabled ? 0.6 : 1,
+                                    transition: "all 0.15s ease",
                                 }}
                                 onMouseEnter={(e) =>
                                     !cancelDisabled &&
@@ -168,15 +170,15 @@ function Modal({
                                 onClick={onConfirm}
                                 disabled={confirmDisabled}
                                 style={{
-                                    padding: "9px 18px",
+                                    padding: "8px 16px",
                                     borderRadius: 10,
                                     border: "none",
                                     background:
                                         variant === "danger"
-                                            ? "linear-gradient(135deg,#EF4444,#DC2626)"
+                                            ? "#DC2626"
                                             : variant === "warning"
-                                            ? "linear-gradient(135deg,#F59E0B,#D97706)"
-                                            : "linear-gradient(135deg,#3F7DFF,#1E2F5F)",
+                                            ? "#D97706"
+                                            : "#2563EB",
                                     color: "#fff",
                                     fontSize: 13,
                                     fontWeight: 600,
@@ -186,11 +188,32 @@ function Modal({
                                     fontFamily: "inherit",
                                     boxShadow:
                                         variant === "danger"
-                                            ? "0 4px 12px rgba(239,68,68,0.3)"
+                                            ? "0 2px 6px rgba(220,38,38,0.25)"
                                             : variant === "warning"
-                                            ? "0 4px 12px rgba(217,119,6,0.3)"
-                                            : "0 4px 12px rgba(63,125,255,0.3)",
+                                            ? "0 2px 6px rgba(217,119,6,0.25)"
+                                            : "0 2px 6px rgba(37,99,235,0.25)",
                                     opacity: confirmDisabled ? 0.6 : 1,
+                                    transition: "all 0.15s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (!confirmDisabled) {
+                                        e.currentTarget.style.background =
+                                            variant === "danger"
+                                                ? "#B91C1C"
+                                                : variant === "warning"
+                                                ? "#B45309"
+                                                : "#1D4ED8";
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (!confirmDisabled) {
+                                        e.currentTarget.style.background =
+                                            variant === "danger"
+                                                ? "#DC2626"
+                                                : variant === "warning"
+                                                ? "#D97706"
+                                                : "#2563EB";
+                                    }
                                 }}
                             >
                                 {confirmLabel}

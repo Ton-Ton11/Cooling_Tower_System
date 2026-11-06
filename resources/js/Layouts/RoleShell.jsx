@@ -37,119 +37,146 @@ const chatSupportIcon = "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a
 // ── Role-aware Sidebar (inline, not shared with SuperAdmin Sidebar) ───────────
 function RoleSidebar({ navItems, activePage, onNavigate, collapsed, onLogout, badges = {}, isMobile, mobileOpen, onMobileClose }) {
     const sidebarStyle = isMobile
-        ? { width: 264, height: "100vh", position: "fixed", top: 0, left: 0, background: "#0E1A33", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, zIndex: 20, transform: mobileOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s ease" }
-        : { width: collapsed ? 72 : 248, minHeight: "100vh", background: "#0E1A33", display: "flex", flexDirection: "column", transition: "width 0.25s ease", overflow: "hidden", flexShrink: 0, zIndex: 10 };
+        ? { width: 268, height: "100vh", position: "fixed", top: 0, left: 0, background: "#101D38", display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0, zIndex: 50, transform: mobileOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)", boxShadow: mobileOpen ? "0 20px 40px rgba(0,0,0,0.4)" : "none" }
+        : { width: collapsed ? 76 : 260, minHeight: "100vh", background: "#101D38", display: "flex", flexDirection: "column", transition: "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)", overflow: "hidden", flexShrink: 0, zIndex: 20, borderRight: "1px solid rgba(255, 255, 255, 0.06)" };
 
     return (
-        <aside style={sidebarStyle}>
+        <aside style={sidebarStyle} className={`ct-sidebar ${collapsed && !isMobile ? "is-collapsed" : ""}`}>
             {/* Logo Brand Container */}
-            <div style={{ padding: collapsed && !isMobile ? "18px 14px" : "18px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.08)", minHeight: 74, flexShrink: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 11, overflow: "hidden" }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 12, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, flexShrink: 0, boxShadow: "0 2px 10px rgba(0,0,0,0.25)" }}>
-                        <img src={logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 8 }} />
+            <div style={{ padding: collapsed && !isMobile ? "16px 12px" : "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderBottom: "1px solid rgba(255,255,255,0.07)", minHeight: 70, flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, overflow: "hidden" }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", padding: 3, flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
+                        <img src={logo} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 7 }} />
                     </div>
                     {(!collapsed || isMobile) && (
                         <div style={{ overflow: "hidden" }}>
-                            <p style={{ fontSize: 13, fontWeight: 800, color: "#fff", whiteSpace: "nowrap", lineHeight: 1.2, margin: 0, letterSpacing: "-0.01em" }}>Cooling Tower</p>
-                            <p style={{ fontSize: 10, color: "#38BDF8", fontWeight: 600, whiteSpace: "nowrap", lineHeight: 1.3, margin: "2px 0 0" }}>Airconditioning Services</p>
+                            <p style={{ fontSize: 14, fontWeight: 700, color: "#FFFFFF", whiteSpace: "nowrap", lineHeight: 1.2, margin: 0, letterSpacing: "-0.01em" }}>Cooling Tower</p>
+                            <p style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500, whiteSpace: "nowrap", lineHeight: 1.3, margin: "2px 0 0" }}>Airconditioning Services</p>
                         </div>
                     )}
                 </div>
                 {isMobile && (
-                    <button onClick={onMobileClose} style={{ width: 32, height: 32, border: "none", borderRadius: 10, background: "rgba(255,255,255,0.12)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-                        <Icon d={closeIcon} size={16} />
+                    <button onClick={onMobileClose} style={{ width: 30, height: 30, border: "none", borderRadius: 8, background: "rgba(255,255,255,0.08)", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Icon d={closeIcon} size={15} />
                     </button>
                 )}
             </div>
 
             {/* Nav */}
-            <nav style={{ flex: 1, padding: "14px 10px", overflowY: "auto", overflowX: "hidden" }}>
-                {navItems.map((item) => {
-                    const isActive =
-                        activePage === item.id ||
-                        (item.id === "bookings" &&
-                            (activePage === "ocular_results" ||
-                                activePage === "ocular_payment" ||
-                                activePage === "reschedule"));
-                    const badgeCount  = Number(badges[item.id] ?? 0);
-                    const hasBadge    = Number.isFinite(badgeCount) && badgeCount > 0;
-                    const badgeLabel  = badgeCount > 99 ? "99+" : badgeCount;
+            <nav className="sidebar-scrollbar" style={{ flex: 1, padding: collapsed && !isMobile ? "12px 8px" : "16px 12px", overflowY: "auto", overflowX: "hidden" }}>
+                {(!collapsed || isMobile) && (
+                    <p style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "rgba(148, 163, 184, 0.6)", margin: "0 0 8px 10px", whiteSpace: "nowrap" }}>
+                        Navigation
+                    </p>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {navItems.map((item) => {
+                        const isActive =
+                            activePage === item.id ||
+                            (item.id === "bookings" &&
+                                (activePage === "ocular_results" ||
+                                    activePage === "ocular_payment" ||
+                                    activePage === "reschedule"));
+                        const badgeCount  = Number(badges[item.id] ?? 0);
+                        const hasBadge    = Number.isFinite(badgeCount) && badgeCount > 0;
+                        const badgeLabel  = badgeCount > 99 ? "99+" : badgeCount;
 
-                    return (
-                        <button
-                            key={item.id}
-                            onClick={() => onNavigate(item.id)}
-                            title={collapsed && !isMobile ? item.label : undefined}
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: collapsed && !isMobile ? 0 : 11,
-                                width: "100%",
-                                padding: collapsed && !isMobile ? "11px 0" : "11px 14px",
-                                justifyContent: collapsed && !isMobile ? "center" : "flex-start",
-                                borderRadius: 14,
-                                border: "none",
-                                background: isActive ? "#FFFFFF" : "transparent",
-                                cursor: "pointer",
-                                transition: "all 0.18s ease",
-                                marginBottom: 4,
-                                position: "relative",
-                                color: isActive ? "#0E1A33" : "rgba(255,255,255,0.72)",
-                                boxShadow: isActive ? "0 4px 12px rgba(0,0,0,0.15)" : "none",
-                            }}
-                            onMouseEnter={(e) => {
-                                if (!isActive) {
-                                    e.currentTarget.style.color = "#FFFFFF";
-                                    e.currentTarget.style.background = "rgba(255,255,255,0.08)";
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                if (!isActive) {
-                                    e.currentTarget.style.color = "rgba(255,255,255,0.72)";
-                                    e.currentTarget.style.background = "transparent";
-                                }
-                            }}
-                        >
-                            <span style={{ flexShrink: 0, display: "flex", color: isActive ? "#1D4ED8" : "inherit" }}>
-                                <Icon d={item.icon} size={19} />
-                            </span>
-                            {(!collapsed || isMobile) && (
-                                <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 500, flex: 1, textAlign: "left", whiteSpace: "nowrap" }}>
-                                    {item.label}
+                        return (
+                            <button
+                                key={item.id}
+                                onClick={() => onNavigate(item.id)}
+                                title={collapsed && !isMobile ? item.label : undefined}
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: collapsed && !isMobile ? 0 : 11,
+                                    width: "100%",
+                                    padding: collapsed && !isMobile ? "10px 0" : "9px 12px",
+                                    justifyContent: collapsed && !isMobile ? "center" : "flex-start",
+                                    borderRadius: 10,
+                                    border: "none",
+                                    background: isActive ? "#2563EB" : "transparent",
+                                    cursor: "pointer",
+                                    transition: "all 0.15s ease",
+                                    position: "relative",
+                                    color: isActive ? "#FFFFFF" : "rgba(226, 232, 240, 0.78)",
+                                    boxShadow: isActive ? "0 4px 12px rgba(37, 99, 235, 0.35)" : "none",
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (!isActive) {
+                                        e.currentTarget.style.color = "#FFFFFF";
+                                        e.currentTarget.style.background = "rgba(255,255,255,0.07)";
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (!isActive) {
+                                        e.currentTarget.style.color = "rgba(226, 232, 240, 0.78)";
+                                        e.currentTarget.style.background = "transparent";
+                                    }
+                                }}
+                            >
+                                <span style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: isActive ? "#FFFFFF" : "inherit" }}>
+                                    <Icon d={item.icon} size={18} />
                                 </span>
-                            )}
-                            {(!collapsed || isMobile) && hasBadge ? (
-                                <span style={{ flexShrink: 0, background: isActive ? "#EF4444" : "#F58A07", color: "#fff", fontSize: 10, fontWeight: 700, minWidth: 20, height: 20, padding: "0 6px", borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    {badgeLabel}
-                                </span>
-                            ) : collapsed && hasBadge ? (
-                                <span style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, background: "#F58A07", borderRadius: "50%" }} />
-                            ) : null}
-                        </button>
-                    );
-                })}
+                                {(!collapsed || isMobile) && (
+                                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, flex: 1, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        {item.label}
+                                    </span>
+                                )}
+                                {(!collapsed || isMobile) && hasBadge ? (
+                                    <span style={{ flexShrink: 0, background: isActive ? "#FFFFFF" : "#F59E0B", color: isActive ? "#2563EB" : "#FFFFFF", fontSize: 10.5, fontWeight: 700, minWidth: 20, height: 20, padding: "0 6px", borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                        {badgeLabel}
+                                    </span>
+                                ) : collapsed && hasBadge ? (
+                                    <span style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, background: "#F59E0B", borderRadius: "50%", boxShadow: "0 0 0 2px #101D38" }} />
+                                ) : null}
+                            </button>
+                        );
+                    })}
+                </div>
             </nav>
 
             {/* Bottom Utilities (Shortcuts & Help) */}
-            {(!collapsed || isMobile) && (
-                <div style={{ padding: "8px 10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 2 }}>
+            {(!collapsed || isMobile) ? (
+                <div style={{ padding: "10px 14px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 3, flexShrink: 0 }}>
                     <button
                         onClick={() => onNavigate("book")}
-                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 14px", borderRadius: 10, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 8, border: "none", background: "transparent", color: "rgba(226,232,240,0.72)", fontSize: 12.5, fontWeight: 500, cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#FFFFFF"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(226,232,240,0.72)"; e.currentTarget.style.background = "transparent"; }}
                     >
-                        <span style={{ flexShrink: 0, display: "flex", color: "#60A5FA" }}><Icon d={calendarPlusIcon} size={15} /></span>
+                        <span style={{ flexShrink: 0, display: "flex", color: "#60A5FA" }}><Icon d={calendarPlusIcon} size={16} /></span>
                         <span>Quick Book Service</span>
                     </button>
                     <button
                         onClick={() => onNavigate("complaints")}
-                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 14px", borderRadius: 10, border: "none", background: "transparent", color: "rgba(255,255,255,0.6)", fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "#fff"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.6)"; e.currentTarget.style.background = "transparent"; }}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 8, border: "none", background: "transparent", color: "rgba(226,232,240,0.72)", fontSize: 12.5, fontWeight: 500, cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#FFFFFF"; e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(226,232,240,0.72)"; e.currentTarget.style.background = "transparent"; }}
                     >
-                        <span style={{ flexShrink: 0, display: "flex", color: "#94A3B8" }}><Icon d={chatSupportIcon} size={15} /></span>
+                        <span style={{ flexShrink: 0, display: "flex", color: "#94A3B8" }}><Icon d={chatSupportIcon} size={16} /></span>
                         <span>Help & Support</span>
+                    </button>
+                </div>
+            ) : (
+                <div style={{ padding: "10px 8px 14px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                    <button
+                        onClick={() => onNavigate("book")}
+                        title="Quick Book Service"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "none", background: "transparent", color: "#60A5FA", cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                        <Icon d={calendarPlusIcon} size={17} />
+                    </button>
+                    <button
+                        onClick={() => onNavigate("complaints")}
+                        title="Help & Support"
+                        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "none", background: "transparent", color: "#94A3B8", cursor: "pointer", transition: "all 0.15s" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                    >
+                        <Icon d={chatSupportIcon} size={17} />
                     </button>
                 </div>
             )}

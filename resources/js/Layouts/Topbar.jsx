@@ -387,42 +387,46 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
         <header
             className="topbar-header"
             style={{
-                background: "#fff",
-                borderBottom: "1px solid #F0F2F5",
-                padding: isMobile ? "0 12px" : "0 20px",
-                minHeight: 60,
+                background: "#FFFFFF",
+                borderBottom: "1px solid #E5E7EB",
+                padding: isMobile ? "0 14px" : "0 24px",
+                minHeight: 64,
                 display: "flex",
                 alignItems: "center",
-                gap: 12,
+                gap: 16,
                 flexShrink: 0,
                 zIndex: 30,
-                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                boxShadow: "0 1px 2px rgba(16, 29, 56, 0.04)",
                 position: "relative",
             }}
         >
             <button
                 onClick={onToggleSidebar}
+                title="Toggle Sidebar"
                 style={{
-                    width: 34,
-                    height: 34,
+                    width: 36,
+                    height: 36,
                     borderRadius: 10,
-                    border: "none",
-                    background: "transparent",
+                    border: "1px solid #E5E7EB",
+                    background: "#FFFFFF",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     color: "#64748B",
                     flexShrink: 0,
-                    transition: "all 0.15s",
+                    transition: "all 0.15s ease",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
                 }}
                 onMouseEnter={(e) => {
-                    e.currentTarget.style.background = "#F1F5F9";
-                    e.currentTarget.style.color = "#0F172A";
+                    e.currentTarget.style.background = "#F8FAFC";
+                    e.currentTarget.style.color = "#111827";
+                    e.currentTarget.style.borderColor = "#CBD5E1";
                 }}
                 onMouseLeave={(e) => {
-                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.background = "#FFFFFF";
                     e.currentTarget.style.color = "#64748B";
+                    e.currentTarget.style.borderColor = "#E5E7EB";
                 }}
             >
                 <Icon
@@ -432,22 +436,22 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
             </button>
 
             {!isMobile && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 12 }}>
-                    <span style={{ fontSize: 15, fontWeight: 800, color: "#0E1A33", letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 700, color: "#111827", letterSpacing: "-0.015em", whiteSpace: "nowrap" }}>
                         Cooling Tower System
                     </span>
                 </div>
             )}
 
             {!isMobile && (
-                <div style={{ position: "relative", flex: 1, maxWidth: 380, margin: "0 auto" }}>
+                <div style={{ position: "relative", flex: 1, maxWidth: 360, margin: "0 auto" }}>
                     <span
                         style={{
                             position: "absolute",
-                            left: 14,
+                            left: 13,
                             top: "50%",
                             transform: "translateY(-50%)",
-                            color: "#64748B",
+                            color: "#94A3B8",
                             display: "flex",
                             pointerEvents: "none",
                         }}
@@ -464,27 +468,27 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
                         }}
                         style={{
                             width: "100%",
-                            paddingLeft: 38,
-                            paddingRight: 32,
+                            paddingLeft: 36,
+                            paddingRight: 28,
                             paddingTop: 8,
                             paddingBottom: 8,
-                            background: "#F1F5F9",
-                            border: "1px solid #E2E8F0",
-                            borderRadius: 999,
+                            background: "#F4F6FA",
+                            border: "1px solid #E5E7EB",
+                            borderRadius: 10,
                             fontSize: 13,
-                            color: "#1E293B",
+                            color: "#111827",
                             outline: "none",
                             fontFamily: "inherit",
-                            transition: "all 0.2s",
+                            transition: "all 0.15s ease",
                         }}
                         onFocus={(e) => {
                             e.currentTarget.style.borderColor = "#2563EB";
-                            e.currentTarget.style.background = "#fff";
-                            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.12)";
+                            e.currentTarget.style.background = "#FFFFFF";
+                            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.14)";
                         }}
                         onBlur={(e) => {
-                            e.currentTarget.style.borderColor = "#E2E8F0";
-                            e.currentTarget.style.background = "#F1F5F9";
+                            e.currentTarget.style.borderColor = "#E5E7EB";
+                            e.currentTarget.style.background = "#F4F6FA";
                             e.currentTarget.style.boxShadow = "none";
                         }}
                     />

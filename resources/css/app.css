@@ -2,3 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 @plugin "daisyui";
+
+/* --------------------------------------------------------------------------
+   Enterprise form defaults (base layer -> any utility class on an element
+   still takes precedence, so existing page styling is never overridden).
+   -------------------------------------------------------------------------- */
+@layer base {
+    [type='text'],
+    [type='email'],
+    [type='url'],
+    [type='password'],
+    [type='number'],
+    [type='date'],
+    [type='datetime-local'],
+    [type='month'],
+    [type='search'],
+    [type='tel'],
+    [type='time'],
+    [type='week'],
+    [multiple],
+    textarea,
+    select {
+        border-color: #d5dbe5;
+        border-radius: 0.625rem;
+        color: #111827;
+        background-color: #fff;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    [type='text']:focus,
+    [type='email']:focus,
+    [type='url']:focus,
+    [type='password']:focus,
+    [type='number']:focus,
+    [type='date']:focus,
+    [type='datetime-local']:focus,
+    [type='month']:focus,
+    [type='search']:focus,
+    [type='tel']:focus,
+    [type='time']:focus,
+    [type='week']:focus,
+    [multiple]:focus,
+    textarea:focus,
+    select:focus {
+        --tw-ring-color: rgba(37, 99, 235, 0.16);
+        --tw-ring-offset-shadow: 0 0 #0000;
+        --tw-ring-shadow: 0 0 0 3px var(--tw-ring-color);
+        box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow);
+        border-color: #2563eb;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+        color: #94a3b8;
+        opacity: 1;
+    }
+
+    [type='checkbox'],
+    [type='radio'] {
+        color: #2563eb;
+        border-color: #cbd5e1;
+    }
+
+    [type='checkbox'] {
+        border-radius: 0.3rem;
+    }
+
+    label {
+        color: inherit;
+    }
+
+    html.dark [type='text'],
+    html.dark [type='email'],
+    html.dark [type='password'],
+    html.dark [type='number'],
+    html.dark [type='date'],
+    html.dark [type='time'],
+    html.dark [type='search'],
+    html.dark [type='tel'],
+    html.dark textarea,
+    html.dark select {
+        background-color: #0b1120;
+        border-color: #1e293b;
+        color: #f1f5f9;
+    }
+}

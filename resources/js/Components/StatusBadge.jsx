@@ -1,83 +1,212 @@
 import React from "react";
 
 const cfg = {
-    Pending: { bg: "rgba(245,138,7,0.12)", text: "#D97706", dot: "#F58A07" },
-    Approved: { bg: "rgba(63,125,255,0.12)", text: "#2563EB", dot: "#3F7DFF" },
-    "Partially Completed": {
-        bg: "rgba(13,148,136,0.12)",
-        text: "#0F766E",
-        dot: "#14B8A6",
+    Pending: {
+        bg: "#FEF3C7",
+        text: "#92400E",
+        border: "#FDE68A",
+        dot: "#D97706",
     },
-    Completed: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
-    Invalid: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
-    Cancelled: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
-    Active: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
-    Archived: { bg: "rgba(107,114,128,0.12)", text: "#6B7280", dot: "#9CA3AF" },
+    Approved: {
+        bg: "#DBEAFE",
+        text: "#1E40AF",
+        border: "#BFDBFE",
+        dot: "#2563EB",
+    },
+    "Partially Completed": {
+        bg: "#CCFBF1",
+        text: "#115E59",
+        border: "#99F6E4",
+        dot: "#0D9488",
+    },
+    Completed: {
+        bg: "#DCFCE7",
+        text: "#166534",
+        border: "#BBF7D0",
+        dot: "#16A34A",
+    },
+    Invalid: {
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
+    },
+    Cancelled: {
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
+    },
+    Active: {
+        bg: "#DCFCE7",
+        text: "#166534",
+        border: "#BBF7D0",
+        dot: "#16A34A",
+    },
+    Archived: {
+        bg: "#F1F5F9",
+        text: "#475569",
+        border: "#E2E8F0",
+        dot: "#64748B",
+    },
     Dispatched: {
-        bg: "rgba(89,183,255,0.12)",
-        text: "#0284C7",
-        dot: "#59B7FF",
+        bg: "#E0F2FE",
+        text: "#0369A1",
+        border: "#BAE6FD",
+        dot: "#0284C7",
     },
     "In-Progress": {
-        bg: "rgba(63,125,255,0.12)",
-        text: "#2563EB",
-        dot: "#3F7DFF",
+        bg: "#DBEAFE",
+        text: "#1E40AF",
+        border: "#BFDBFE",
+        dot: "#2563EB",
     },
-    Incomplete: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
+    Incomplete: {
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
+    },
     Rescheduled: {
-        bg: "rgba(245,138,7,0.12)",
-        text: "#D97706",
-        dot: "#F58A07",
+        bg: "#FEF3C7",
+        text: "#92400E",
+        border: "#FDE68A",
+        dot: "#D97706",
     },
-    Available: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
-    Reserved: { bg: "rgba(89,183,255,0.12)", text: "#0284C7", dot: "#59B7FF" },
-    Installed: { bg: "rgba(63,125,255,0.12)", text: "#2563EB", dot: "#3F7DFF" },
+    Available: {
+        bg: "#DCFCE7",
+        text: "#166534",
+        border: "#BBF7D0",
+        dot: "#16A34A",
+    },
+    Reserved: {
+        bg: "#E0F2FE",
+        text: "#0369A1",
+        border: "#BAE6FD",
+        dot: "#0284C7",
+    },
+    Installed: {
+        bg: "#DBEAFE",
+        text: "#1E40AF",
+        border: "#BFDBFE",
+        dot: "#2563EB",
+    },
     "Order Base": {
-        bg: "rgba(245,138,7,0.12)",
-        text: "#D97706",
-        dot: "#F58A07",
+        bg: "#FEF3C7",
+        text: "#92400E",
+        border: "#FDE68A",
+        dot: "#D97706",
     },
-    Defect: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
-    Paid: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
+    Defect: {
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
+    },
+    Paid: {
+        bg: "#DCFCE7",
+        text: "#166534",
+        border: "#BBF7D0",
+        dot: "#16A34A",
+    },
     "Checked Out": {
-        bg: "rgba(245,138,7,0.12)",
-        text: "#D97706",
-        dot: "#F58A07",
+        bg: "#FEF3C7",
+        text: "#92400E",
+        border: "#FDE68A",
+        dot: "#D97706",
     },
     "Lost/Damaged": {
-        bg: "rgba(239,68,68,0.12)",
-        text: "#DC2626",
-        dot: "#EF4444",
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
     },
-    Draft: { bg: "rgba(107,114,128,0.12)", text: "#6B7280", dot: "#9CA3AF" },
-    Finalized: { bg: "rgba(89,183,255,0.12)", text: "#0284C7", dot: "#59B7FF" },
-    Exported: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
-    Tool: { bg: "rgba(63,125,255,0.12)", text: "#2563EB", dot: "#3F7DFF" },
-    Material: { bg: "rgba(89,183,255,0.12)", text: "#0284C7", dot: "#59B7FF" },
+    Draft: {
+        bg: "#F1F5F9",
+        text: "#475569",
+        border: "#E2E8F0",
+        dot: "#64748B",
+    },
+    Finalized: {
+        bg: "#E0F2FE",
+        text: "#0369A1",
+        border: "#BAE6FD",
+        dot: "#0284C7",
+    },
+    Exported: {
+        bg: "#DCFCE7",
+        text: "#166534",
+        border: "#BBF7D0",
+        dot: "#16A34A",
+    },
+    Tool: {
+        bg: "#DBEAFE",
+        text: "#1E40AF",
+        border: "#BFDBFE",
+        dot: "#2563EB",
+    },
+    Material: {
+        bg: "#E0F2FE",
+        text: "#0369A1",
+        border: "#BAE6FD",
+        dot: "#0284C7",
+    },
     "Spare Part": {
-        bg: "rgba(245,138,7,0.12)",
-        text: "#D97706",
-        dot: "#F58A07",
+        bg: "#FEF3C7",
+        text: "#92400E",
+        border: "#FDE68A",
+        dot: "#D97706",
+    },
+    Admin: {
+        bg: "#F3E8FF",
+        text: "#6B21A8",
+        border: "#E9D5FF",
+        dot: "#9333EA",
+    },
+    Staff: {
+        bg: "#DBEAFE",
+        text: "#1E40AF",
+        border: "#BFDBFE",
+        dot: "#2563EB",
+    },
+    Technician: {
+        bg: "#E0F2FE",
+        text: "#0369A1",
+        border: "#BAE6FD",
+        dot: "#0284C7",
+    },
+    Inactive: {
+        bg: "#FEE2E2",
+        text: "#991B1B",
+        border: "#FECACA",
+        dot: "#DC2626",
     },
 };
+
 function StatusBadge({ status }) {
     const c = cfg[status] ?? {
-        bg: "rgba(107,114,128,0.12)",
-        text: "#6B7280",
-        dot: "#9CA3AF",
+        bg: "#F1F5F9",
+        text: "#475569",
+        border: "#E2E8F0",
+        dot: "#64748B",
     };
+
     return (
         <span
-            style={{ background: c.bg, color: c.text }}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
+            style={{
+                backgroundColor: c.bg,
+                color: c.text,
+                border: `1px solid ${c.border || "transparent"}`,
+            }}
+            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11.5px] font-semibold whitespace-nowrap"
         >
-            {" "}
             <span
-                style={{ background: c.dot }}
+                style={{ backgroundColor: c.dot }}
                 className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-            />{" "}
-            {status}{" "}
+            />
+            {status}
         </span>
     );
 }
+
 export { StatusBadge as default };
