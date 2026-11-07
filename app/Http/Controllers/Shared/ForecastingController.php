@@ -54,9 +54,10 @@ class ForecastingController extends Controller
 
         $summary = [
             'total_certificates'           => count($visibleCerts),
-            'active_compliant'             => collect($visibleCerts)->where('status', 'Active')->count(),
-            'expiring_within_1_week'       => collect($visibleCerts)->filter(fn ($c) => ($c['days_until_expiry'] ?? 99) <= 7 && ($c['status'] ?? '') !== 'Renewal Submitted')->count(),
+            'active_compliant'             => collect($visibleCerts)->filter(fn ($c) => ($c['status'] ?? '') === 'Active' && ($c['days_until_expiry'] ?? 99) > 7)->count(),
+            'expiring_within_1_week'       => collect($visibleCerts)->filter(fn ($c) => ($c['days_until_expiry'] ?? 99) <= 7 && ($c['days_until_expiry'] ?? 99) >= 0 && ! in_array(($c['status'] ?? ''), ['Renewal Submitted'], true))->count(),
             'pending_manager_verification' => collect($visibleCerts)->where('status', 'Renewal Submitted')->count(),
+            'expired'                      => collect($visibleCerts)->filter(fn ($c) => (($c['days_until_expiry'] ?? 99) < 0 || ($c['status'] ?? '') === 'Expired') && ($c['status'] ?? '') !== 'Renewal Submitted')->count(),
         ];
 
         $technicianOptions = $techUsers->map(fn ($u) => [
@@ -188,9 +189,11 @@ class ForecastingController extends Controller
             $validated = $request->validate([
                 'certificate_number' => ['required', 'string', 'min:3', 'max:100'],
                 'submission_notes'   => ['nullable', 'string', 'max:500'],
-                'certificate_file'   => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
+                'certificate_file'   => ['required', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:5120'],
             ], [
                 'certificate_number.required' => 'Please enter your renewed certificate number for Manager verification.',
+                'certificate_file.required'   => 'Please upload a clear photo or copy of your renewed certificate (JPG, PNG, or PDF).',
+                'certificate_file.max'        => 'The certificate file size must not exceed 5MB.',
             ]);
 
             $proofPath = null;
@@ -223,6 +226,56 @@ class ForecastingController extends Controller
 
             return response()->json([
                 'message'        => 'Renewed certificate submitted (1/1)! The Manager will now verify your certificate, confirm the renewal status, and enter the new expiration date.',
+                'certifications' => $this->forecastingService->getTechnicianCertifications((int) $cert->user_id),
+            ]);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // ACTION: MANAGER DECLINES SUBMISSION (DETAILS INVALID)
+        // ─────────────────────────────────────────────────────────────────────
+        if (in_array($action, ['decline', 'decline_submission', 'reject'], true)) {
+            if (! $isManagerOrSuperAdmin) {
+                abort(403, 'Only the Manager or Super Admin can decline certificate renewal submissions.');
+            }
+
+            $validated = $request->validate([
+                'decline_reason' => ['required', 'string', 'min:3', 'max:500'],
+            ], [
+                'decline_reason.required' => 'Please provide the reason for declining this certificate submission so the technician knows what to correct.',
+            ]);
+
+            $reason = trim($validated['decline_reason']);
+
+            $cert->update([
+                'status' => 'Renewal Declined',
+                'notes'  => sprintf(
+                    '[Declined by Manager %s on %s]: %s (Technician must resubmit valid certificate details)',
+                    $user->name,
+                    now()->format('M d, Y h:i A'),
+                    $reason
+                ),
+            ]);
+
+            try {
+                $techUser = User::find($cert->user_id);
+                if ($techUser && \Illuminate\Support\Facades\Schema::hasTable('notifications')) {
+                    $techUser->notify(new \App\Notifications\ForecastReminderNotification(
+                        'tech_certification_declined',
+                        "Certificate Submission Declined: {$cert->certification_name}",
+                        "Manager {$user->name} declined your certificate renewal submission: \"{$reason}\". Please check your credentials and resubmit.",
+                        [
+                            'certification_id' => $cert->certification_id,
+                            'manager_name'     => $user->name,
+                            'decline_reason'   => $reason,
+                        ]
+                    ));
+                }
+            } catch (\Throwable $e) {
+                // Ignore notification delivery error
+            }
+
+            return response()->json([
+                'message'        => 'Certificate renewal submission has been declined. The technician can now resubmit with valid details.',
                 'certifications' => $this->forecastingService->getTechnicianCertifications((int) $cert->user_id),
             ]);
         }

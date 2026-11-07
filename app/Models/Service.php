@@ -19,6 +19,7 @@ class Service extends Model
         'service_name',
         'description',
         'base_price',
+        'booking_fee',
         'is_active',
         'category',
         'display_order',
@@ -27,6 +28,7 @@ class Service extends Model
     protected $casts = [
         'service_id' => 'integer',
         'base_price' => 'float',
+        'booking_fee' => 'float',
         'is_active' => 'boolean',
         'display_order' => 'integer',
     ];

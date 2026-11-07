@@ -259,7 +259,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function storeRoom(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $validated = $this->validateRoomPayload($request);
         $capacity = $this->calculateCoolingCapacity($validated);
@@ -300,7 +300,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function updateRoom(Request $request, int $bookingId, int $roomId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $existing = DB::table('ocular_inspection_rooms')
             ->where('room_id', $roomId)
@@ -343,6 +343,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function destroyRoom(Request $request, int $bookingId, int $roomId): JsonResponse
     {
         $this->authorizeRole($request);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $deleted = DB::table('ocular_inspection_rooms')
             ->where('room_id', $roomId)
@@ -361,7 +362,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function storeRecommendation(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $validated = $this->validateRecommendationPayload($request);
         $payload = $this->buildRecommendationPersistencePayload($request, $validated, null);
@@ -400,7 +401,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function updateRecommendation(Request $request, int $bookingId, int $recommendationId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $existing = DB::table('ocular_inspection_recommendations')
             ->where('recommendation_id', $recommendationId)
@@ -440,6 +441,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function destroyRecommendation(Request $request, int $bookingId, int $recommendationId): JsonResponse
     {
         $this->authorizeRole($request);
+        $this->ensureOcularBookingExists($bookingId, true);
 
         $deleted = DB::table('ocular_inspection_recommendations')
             ->where('recommendation_id', $recommendationId)
@@ -458,7 +460,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function submitToCustomer(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeRole($request);
-        $booking = $this->ensureOcularBookingExists($bookingId);
+        $booking = $this->ensureOcularBookingExists($bookingId, true);
 
         $roomsCount = DB::table('ocular_inspection_rooms')
             ->where('booking_id', $bookingId)
@@ -531,7 +533,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
         ]);
     }
 
-    protected function ensureOcularBookingExists(int $bookingId): object
+    protected function ensureOcularBookingExists(int $bookingId, bool $requireApproved = false): object
     {
         $booking = DB::table('bookings')
             ->leftJoin('services', 'services.service_id', '=', 'bookings.service_id')
@@ -541,6 +543,10 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
 
         if (! $booking) {
             abort(404, 'Booking not found.');
+        }
+
+        if ($requireApproved && strtolower($booking->booking_status ?? '') === 'pending') {
+            abort(422, 'Ocular inspection cannot be managed while booking is pending approval.');
         }
 
         return $booking;

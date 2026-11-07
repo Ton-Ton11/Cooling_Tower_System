@@ -283,6 +283,10 @@ Route::prefix('super-admin')
             Route::patch('/catalog/brands/{id}/restore', 'restoreBrand')->name('catalog.brands.restore');
             Route::delete('/catalog/brands/{id}', 'destroyBrand')->name('catalog.brands.destroy');
             Route::delete('/catalog/brands/{id}/force-delete', 'forceDeleteBrand')->name('catalog.brands.force-delete');
+
+            // Catalog & Booking Settings
+            Route::get('/catalog/settings', 'getSettings')->name('catalog.settings');
+            Route::patch('/catalog/settings', 'updateSettings')->name('catalog.settings.update');
         });
     });
 
@@ -363,6 +367,10 @@ Route::prefix('manager')
             Route::match(['patch', 'delete'], '/catalog/brands/{id}/archive', 'archiveBrand')->name('catalog.brands.archive');
             Route::patch('/catalog/brands/{id}/restore', 'restoreBrand')->name('catalog.brands.restore');
             Route::delete('/catalog/brands/{id}', 'destroyBrand')->name('catalog.brands.destroy');
+
+            // Catalog & Booking Settings
+            Route::get('/catalog/settings', 'getSettings')->name('catalog.settings');
+            Route::patch('/catalog/settings', 'updateSettings')->name('catalog.settings.update');
         });
     });
 
@@ -453,6 +461,10 @@ Route::prefix('admin-assistant')
             Route::match(['patch', 'delete'], '/catalog/brands/{id}/archive', 'archiveBrand')->name('catalog.brands.archive');
             Route::patch('/catalog/brands/{id}/restore', 'restoreBrand')->name('catalog.brands.restore');
             Route::delete('/catalog/brands/{id}', 'destroyBrand')->name('catalog.brands.destroy');
+
+            // Catalog & Booking Settings
+            Route::get('/catalog/settings', 'getSettings')->name('catalog.settings');
+            Route::patch('/catalog/settings', 'updateSettings')->name('catalog.settings.update');
         });
 
         Route::controller(AdminAssistantAcUnitController::class)->group(function () {

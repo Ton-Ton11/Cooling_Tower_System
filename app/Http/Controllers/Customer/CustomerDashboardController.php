@@ -164,22 +164,20 @@ class CustomerDashboardController extends Controller
 
         CustomerBookingController::ensurePrimaryServicesExist();
 
-        $services = Service::whereIn('service_name', [
-            'Installation',
-            'Repair / Check-up',
-            'Cleaning / Preventive Maintenance',
-            'Ocular Inspection',
-        ])
-        ->orderBy('display_order')
-        ->get()
-        ->map(function ($s) {
-            return [
-                'service_id' => $s->service_id,
-                'service_name' => $s->service_name,
-                'description' => $s->description,
-                'category' => $s->category,
-            ];
-        });
+        $services = Service::active()
+            ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->orderBy('display_order')
+            ->get()
+            ->map(function ($s) {
+                return [
+                    'service_id' => $s->service_id,
+                    'service_name' => $s->service_name,
+                    'description' => $s->description,
+                    'category' => $s->category,
+                    'booking_fee' => (float) ($s->booking_fee ?? 300.00),
+                    'is_active' => (bool) $s->is_active,
+                ];
+            });
 
         $unitTypes = \App\Models\UnitType::active()->orderBy('display_order')->orderBy('id')->get();
         $brands = \App\Models\Brand::active()->orderBy('display_order')->orderBy('name')->get();

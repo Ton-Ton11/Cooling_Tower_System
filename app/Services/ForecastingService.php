@@ -621,6 +621,8 @@ class ForecastingService
 
             if ($cert->status === 'Renewal Submitted') {
                 $computedStatus = 'Renewal Submitted';
+            } elseif ($cert->status === 'Renewal Declined') {
+                $computedStatus = 'Renewal Declined';
             } elseif ($daysLeft < 0) {
                 $computedStatus = 'Expired';
             } elseif ($daysLeft <= 3) {
@@ -631,11 +633,11 @@ class ForecastingService
                 $computedStatus = 'Active';
             }
 
-            if ($cert->status !== $computedStatus && $cert->status !== 'Renewal Submitted') {
+            if ($cert->status !== $computedStatus && ! in_array($cert->status, ['Renewal Submitted', 'Renewal Declined'], true)) {
                 $cert->update(['status' => $computedStatus]);
             }
 
-            $isReminderTriggered = ($daysLeft <= $leadDays) || $computedStatus === 'Renewal Submitted';
+            $isReminderTriggered = ($daysLeft <= $leadDays) || in_array($computedStatus, ['Renewal Submitted', 'Renewal Declined'], true);
             $hasSubmittedOnce = $computedStatus === 'Renewal Submitted';
             $canTechnicianSubmit = ($daysLeft <= $leadDays) && ! $hasSubmittedOnce;
 
@@ -667,9 +669,12 @@ class ForecastingService
         if ($status === 'Renewal Submitted') {
             return "Renewal submitted. Awaiting manager review and updated expiration date.";
         }
+        if ($status === 'Renewal Declined') {
+            return "Renewal submission was declined by manager. Please review feedback and resubmit valid certificate details.";
+        }
         if ($daysLeft < 0) {
             $ago = abs($daysLeft);
-            return "Certificate expired {$ago} days ago. Please upload your renewed certificate for review.";
+            return "Certificate expired {$ago} days ago. You can upload your renewed certificate or request manager update.";
         }
         if ($daysLeft <= 7) {
             return "Expires in {$daysLeft} " . ($daysLeft === 1 ? 'day' : 'days') . ". You can now submit your renewal details for manager verification.";
@@ -753,7 +758,9 @@ class ForecastingService
                 $leadDays = 7;
                 $status = $c->status === 'Renewal Submitted'
                     ? 'Renewal Submitted'
-                    : ($daysLeft < 0 ? 'Expired' : ($daysLeft <= 3 ? 'Critical' : ($daysLeft <= $leadDays ? 'Expiring Soon' : 'Active')));
+                    : ($c->status === 'Renewal Declined'
+                        ? 'Renewal Declined'
+                        : ($daysLeft < 0 ? 'Expired' : ($daysLeft <= 3 ? 'Critical' : ($daysLeft <= $leadDays ? 'Expiring Soon' : 'Active'))));
 
                 $tech = $c->technician;
                 $techRole = ($tech && (int) $tech->role_id === 7) ? 'Head Technician' : 'Technician';
@@ -773,7 +780,7 @@ class ForecastingService
                     'days_until_expiry'     => $daysLeft,
                     'renewal_lead_days'     => $leadDays,
                     'status'                => $status,
-                    'is_reminder_triggered' => ($daysLeft <= $leadDays) || $status === 'Renewal Submitted',
+                    'is_reminder_triggered' => ($daysLeft <= $leadDays) || in_array($status, ['Renewal Submitted', 'Renewal Declined'], true),
                     'has_submitted_once'    => $status === 'Renewal Submitted',
                     'can_technician_submit' => ($daysLeft <= $leadDays) && $status !== 'Renewal Submitted',
                     'notes'                 => $c->notes,

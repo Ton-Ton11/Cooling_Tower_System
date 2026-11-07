@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Shared\LocationAutocompleteController;
 use App\Models\Booking;
+use App\Models\BookingSetting;
 use App\Models\Brand;
 use App\Models\CustomerUnitDetail;
 use App\Models\DisabledBookingDate;
@@ -73,14 +74,19 @@ class CustomerBookingController extends Controller
             ->where('service_name', 'not like', 'AC Unit Sale%')
             ->delete();
 
-        // 3. Upsert IDs 1, 2, 3, 4 with primary definitions
+        // 3. Upsert IDs 1, 2, 3, 4 with primary definitions (insert only if missing to preserve manager/admin edits)
         foreach ($primaryServices as $id => $ps) {
-            DB::table('services')->updateOrInsert(
-                ['service_id' => $id],
-                array_merge($ps, [
-                    'updated_at' => now(),
-                ])
-            );
+            $existing = DB::table('services')->where('service_id', $id)->first();
+            if (! $existing) {
+                DB::table('services')->insert(
+                    array_merge($ps, [
+                        'service_id' => $id,
+                        'booking_fee' => $id === 4 ? 0.00 : 300.00,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ])
+                );
+            }
         }
     }
 
@@ -114,14 +120,10 @@ class CustomerBookingController extends Controller
     {
         static::ensurePrimaryServicesExist();
 
-        $services = Service::whereIn('service_name', [
-            'Installation',
-            'Repair / Check-up',
-            'Cleaning / Preventive Maintenance',
-            'Ocular Inspection',
-        ])
-        ->orderBy('display_order')
-        ->get();
+        $services = Service::active()
+            ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->orderBy('display_order')
+            ->get();
 
         return response()->json([
             'data' => $services,
@@ -135,14 +137,10 @@ class CustomerBookingController extends Controller
     {
         static::ensurePrimaryServicesExist();
 
-        $services = Service::whereIn('service_name', [
-            'Installation',
-            'Repair / Check-up',
-            'Cleaning / Preventive Maintenance',
-            'Ocular Inspection',
-        ])
-        ->orderBy('display_order')
-        ->get();
+        $services = Service::active()
+            ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->orderBy('display_order')
+            ->get();
 
         $unitTypes = [
             [
@@ -246,10 +244,12 @@ class CustomerBookingController extends Controller
             'Not Sure',
         ];
 
+        $defaultBookingFee = (float) ($services->firstWhere('service_id', 1)?->booking_fee ?? 300.00);
+        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
         $policy = [
             'fee_name' => 'Appointment Reservation Fee',
-            'amount' => 300.00,
-            'reschedule_fee' => 150.00,
+            'amount' => $defaultBookingFee,
+            'reschedule_fee' => $rescheduleFee,
             'unit_down_payment' => 7000.00,
             'default_delivery_fee' => 500.00,
             'allowed_cancellation_hours' => 24,
@@ -261,10 +261,10 @@ class CustomerBookingController extends Controller
             'notice' => 'An appointment reservation fee is required to secure your requested service schedule. Your reservation fee is separate from the final service quotation.',
             'terms' => [
                 'Service Request Only: This booking is an initial service request and schedule reservation. Final service charges will be determined by assessment and an official quotation.',
-                'Reservation Fee Separation: The ₱300.00 reservation fee is strictly for reserving your schedule and is not the full service price.',
+                'Reservation Fee Separation: The reservation fee is strictly for reserving your schedule and is not the full service price.',
                 'Fee Crediting: If your service proceeds, the reservation fee may be credited toward your final service bill based on company policy.',
                 'Cancellation Policy: Cancellations made at least 24 hours prior to the appointment are eligible for rescheduling or refund.',
-                'Rescheduling Policy: Rescheduling requested within the allowed window transfers the reservation fee to your new schedule.',
+                'Rescheduling Policy: Rescheduling during Approved status is free of charge. Rescheduling during In-Progress status requires a ₱' . number_format($rescheduleFee, 2) . ' rescheduling fee.',
                 'Late Cancellation / No-Show: Late cancellations (under 24 hours) or customer no-shows may forfeit the reservation fee to cover administrative costs.',
                 'Company Cancellation: If the service appointment is rescheduled or cancelled by the company due to emergencies or weather, your booking and fee are fully protected.',
             ],
@@ -595,7 +595,7 @@ class CustomerBookingController extends Controller
                 'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
                 'payment_status' => $latestPay?->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
                 'payment_method' => $latestPay?->payment_method ?? ($isOcular ? 'Free Service' : 'GCash'),
-                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? 300),
+                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? ($b->service?->booking_fee ?? 300)),
                 'reference_number' => $reservationPay?->reference_number ?? $latestPay?->reference_number,
                 'payments' => $b->payments->map(function ($p) {
                     return [
@@ -654,42 +654,45 @@ class CustomerBookingController extends Controller
         static::ensurePrimaryServicesExist();
         static::autoExpireIncompletePayments();
 
-        // Resolve or fallback service_id intelligently if missing or non-existent
+        // Resolve or fallback service_id intelligently if missing, non-existent, or inactive
         $reqServiceId = (int) $request->input('service_id');
-        if (! in_array($reqServiceId, [1, 2, 3, 4], true) || ! Service::where('service_id', $reqServiceId)->exists()) {
+        if (! Service::active()->where('service_id', $reqServiceId)->exists()) {
             $serviceDetails = $request->input('service_details');
             if (is_string($serviceDetails)) {
                 $serviceDetails = json_decode($serviceDetails, true) ?: [];
             }
             $category = $serviceDetails['category'] ?? null;
 
-            $resolvedId = match ($reqServiceId) {
-                1, 6, 7, 14 => 1,
-                2, 5, 8, 15 => 2,
-                3, 16 => 3,
-                4 => 4,
-                default => null,
-            };
+            $fallback = Service::active()->orderBy('display_order')->first();
+            $resolvedId = $fallback ? $fallback->service_id : 1;
 
-            if (! $resolvedId && $category) {
-                $resolvedId = match (true) {
-                    str_contains(strtolower($category), 'ocular') => 4,
-                    str_contains(strtolower($category), 'install') => 1,
-                    str_contains(strtolower($category), 'repair') || str_contains(strtolower($category), 'check') => 2,
-                    default => 3,
+            if ($category) {
+                $matched = match (true) {
+                    str_contains(strtolower($category), 'ocular') => Service::active()->where('service_id', 4)->first(),
+                    str_contains(strtolower($category), 'install') => Service::active()->where('service_id', 1)->first(),
+                    str_contains(strtolower($category), 'repair') || str_contains(strtolower($category), 'check') => Service::active()->where('service_id', 2)->first(),
+                    default => Service::active()->where('service_id', 3)->first(),
                 };
+                if ($matched) {
+                    $resolvedId = $matched->service_id;
+                }
             }
 
-            $resolvedId = $resolvedId ?: 1;
             $request->merge(['service_id' => $resolvedId]);
         }
 
-        $targetService = Service::find((int) $request->input('service_id'));
+        $targetService = Service::active()->find((int) $request->input('service_id'));
+        $targetBookingFee = $targetService ? (float) ($targetService->booking_fee ?? 300.00) : 300.00;
         $isOcularRequest = ((int) $request->input('service_id') === 4)
-            || ($targetService && stripos((string) $targetService->service_name, 'ocular') !== false);
+            || ($targetService && stripos((string) $targetService->service_name, 'ocular') !== false)
+            || $targetBookingFee == 0.0;
 
         $validated = $request->validate([
-            'service_id' => ['required', 'integer', 'exists:services,service_id'],
+            'service_id' => [
+                'required',
+                'integer',
+                Rule::exists('services', 'service_id')->where('is_active', true),
+            ],
             'ac_unit_order_id' => ['nullable', 'integer'],
             'units' => ['nullable'],
             'service_details' => ['nullable'],
@@ -756,13 +759,14 @@ class CustomerBookingController extends Controller
             $repairMediaPath = $request->file('repair_media')->store('repair_media', 'public');
         }
 
-        $service = Service::findOrFail($validated['service_id']);
+        $service = Service::active()->findOrFail($validated['service_id']);
         $isOcularInspection = ((int) $service->service_id === 4) || stripos((string) $service->service_name, 'ocular') !== false;
+        $configuredFee = (float) ($service->booking_fee ?? ($isOcularInspection ? 0.00 : 300.00));
         $bookingFee = $isOcularInspection
             ? 0.00
-            : (isset($validated['booking_fee']) && (float) $validated['booking_fee'] > 0
+            : (isset($validated['booking_fee']) && is_numeric($validated['booking_fee'])
                 ? (float) $validated['booking_fee']
-                : 300.00);
+                : $configuredFee);
 
         // Parse units data
         $units = $request->input('units');
@@ -962,8 +966,8 @@ class CustomerBookingController extends Controller
                     ]);
             }
 
-            // 3. Create Payment record for Appointment Reservation Fee (skip for Free Ocular Inspection)
-            if (! $isOcularInspection) {
+            // 3. Create Payment record for Appointment Reservation Fee (skip for Free Ocular Inspection or 0 fee)
+            if (! $isOcularInspection && $bookingFee > 0) {
                 Payment::create([
                     'booking_id' => $booking->booking_id,
                     'booking_price' => 0.00,
@@ -1197,6 +1201,11 @@ class CustomerBookingController extends Controller
         $isManagerRescheduleNotice = $booking->booking_status === 'Reschedule Notice'
             || ! empty($details['reschedule_notice_by_manager']);
 
+        // Reschedule is FREE during Approved, Pending, or Reschedule Notice.
+        // Reschedule fee applies ONLY during In-Progress status.
+        $isFeeRequired = ($booking->booking_status === 'In-Progress') && ! $isManagerRescheduleNotice;
+        $isFreeReschedule = ! $isFeeRequired;
+
         $validated = $request->validate([
             'new_scheduled_date' => [
                 'required',
@@ -1214,9 +1223,9 @@ class CustomerBookingController extends Controller
                 },
             ],
             'reschedule_fee' => ['nullable', 'numeric', 'min:0'],
-            'reference_number' => $isManagerRescheduleNotice
-                ? ['nullable', 'string', 'max:13']
-                : ['required', 'string', 'min:5', 'max:13'],
+            'reference_number' => $isFeeRequired
+                ? ['required', 'string', 'min:5', 'max:13']
+                : ['nullable', 'string', 'max:13'],
             'sender_name' => ['nullable', 'string', 'max:150'],
             'sender_number' => ['nullable', 'string', 'max:11'],
             'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
@@ -1280,11 +1289,12 @@ class CustomerBookingController extends Controller
             $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
         }
 
-        $rescheduleFee = $isManagerRescheduleNotice
+        $defaultRescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
+        $rescheduleFee = $isFreeReschedule
             ? 0.00
             : (isset($validated['reschedule_fee']) && (float) $validated['reschedule_fee'] > 0
                 ? (float) $validated['reschedule_fee']
-                : 150.00);
+                : $defaultRescheduleFee);
 
         DB::beginTransaction();
         try {
@@ -1315,6 +1325,10 @@ class CustomerBookingController extends Controller
                 $details['reschedule_notice_message']
             );
 
+            $statusNote = $isManagerRescheduleNotice
+                ? ' [Free via Manager Reschedule Notice]'
+                : ($booking->booking_status === 'Approved' ? ' [Free Reschedule - Approved Status]' : ($isFeeRequired ? " [Fee: ₱{$rescheduleFee}]" : ' [Free Reschedule]'));
+
             $booking->update([
                 'scheduled_date' => $newDate,
                 'booking_status' => 'Pending', // Resets to Pending so Admin/Manager can re-dispatch
@@ -1325,12 +1339,12 @@ class CustomerBookingController extends Controller
                 'assigned_by' => null,
                 'assigned_at' => null,
                 'service_details' => $details,
-                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "Rescheduled from {$oldDateStr} to " . $newDate->format('M d, Y h:i A') . " ({$rateType})" . ($isManagerRescheduleNotice ? ' [Free via Manager Reschedule Notice]' : '') . ". Reason: " . ($validated['reschedule_reason'] ?? 'Customer request')),
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . "Rescheduled from {$oldDateStr} to " . $newDate->format('M d, Y h:i A') . " ({$rateType})" . $statusNote . ". Reason: " . ($validated['reschedule_reason'] ?? 'Customer request')),
                 'updated_at' => now(),
             ]);
 
             $paymentId = null;
-            if (! $isManagerRescheduleNotice && $rescheduleFee > 0) {
+            if ($isFeeRequired && $rescheduleFee > 0) {
                 $payment = Payment::create([
                     'booking_id' => $booking->booking_id,
                     'booking_price' => 0.00,
@@ -1342,7 +1356,7 @@ class CustomerBookingController extends Controller
                     'sender_name' => $validated['sender_name'] ?? $request->user()->name,
                     'sender_number' => $validated['sender_number'] ?? $request->user()->contact_number,
                     'receipt_image' => $receiptPath,
-                    'notes' => 'Rescheduling Fee payment',
+                    'notes' => 'In-Progress Rescheduling Fee payment',
                     'payment_date' => now(),
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -1367,10 +1381,11 @@ class CustomerBookingController extends Controller
                 'user_id' => $userId,
                 'action_type' => 'BOOKING_RESCHEDULE',
                 'description' => sprintf(
-                    'Customer rescheduled booking #%d to %s (%s). Reschedule record #%d.',
+                    'Customer rescheduled booking #%d (%s) to %s (%s). Reschedule record #%d.',
                     $booking->booking_id,
+                    $booking->booking_status,
                     $newDate->format('M d, Y h:i A'),
-                    $isManagerRescheduleNotice ? 'Free Reschedule Notice' : ('GCash Ref: ' . ($validated['reference_number'] ?? 'N/A')),
+                    $isFreeReschedule ? 'Free Reschedule' : ('GCash Ref: ' . ($validated['reference_number'] ?? 'N/A')),
                     $reschedule->reschedule_id
                 ),
                 'created_at' => now(),
@@ -1932,6 +1947,7 @@ class CustomerBookingController extends Controller
             'bookings_by_date' => $bookingsByDate,
             'full_dates' => $fullDates,
             'disabled_dates' => $disabledDates,
+            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 150.00),
             'regular' => $regular,
             'differential' => $differential,
         ];

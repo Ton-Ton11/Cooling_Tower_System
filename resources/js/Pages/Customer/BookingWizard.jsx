@@ -421,7 +421,9 @@ export default function BookingWizard({
     useEffect(() => {
         window.axios.get(CUSTOMER_ENDPOINTS.catalog)
             .then(({ data }) => {
-                const sList = data?.services && data.services.length > 0 ? data.services : DEFAULT_PRIMARY_SERVICES;
+                const sList = Array.isArray(data?.services)
+                    ? data.services.filter(s => s.is_active !== false && s.is_active !== 0)
+                    : DEFAULT_PRIMARY_SERVICES;
                 setServices(sList);
                 if (data?.unit_types?.length) {
                     setUnitTypes(data.unit_types);
@@ -471,7 +473,7 @@ export default function BookingWizard({
 
     // Active Service
     const currentService = useMemo(() => {
-        return services.find(s => Number(s.service_id) === Number(selectedServiceId)) || services[0] || DEFAULT_PRIMARY_SERVICES[0];
+        return services.find(s => Number(s.service_id) === Number(selectedServiceId)) || services[0] || null;
     }, [services, selectedServiceId]);
 
     const serviceCategory = useMemo(() => {
@@ -483,7 +485,11 @@ export default function BookingWizard({
     }, [currentService]);
 
     const isOcularInspection = serviceCategory === "ocular";
-    const effectiveBookingFee = isOcularInspection ? 0.0 : BOOKING_FEE;
+    const serviceFeeNumber = currentService?.booking_fee !== undefined && currentService?.booking_fee !== null
+        ? Number(currentService.booking_fee)
+        : (policyData?.amount ? Number(policyData.amount) : 300.0);
+    const effectiveBookingFee = isOcularInspection ? 0.0 : serviceFeeNumber;
+    const isFeeExempt = isOcularInspection || effectiveBookingFee === 0;
 
     const handleCopyGCash = () => {
         navigator.clipboard.writeText((gcashAccount || "0917 877 7670").replace(/\s+/g, ''));
@@ -570,7 +576,7 @@ export default function BookingWizard({
     );
     const isAddressInZamboanga = Boolean(addressGeoCheck?.is_within_zamboanga_city);
 
-    const canProceedStep1 = Boolean(selectedServiceId);
+    const canProceedStep1 = Boolean(selectedServiceId && services.some(s => Number(s.service_id) === Number(selectedServiceId)));
     const canProceedStep2 = Boolean(
         (isOcularInspection || units.length > 0) &&
         serviceAddress.trim().length >= 5 &&
@@ -584,7 +590,7 @@ export default function BookingWizard({
         selectedDateSlotInfo.isAvailable &&
         !isSelectedTimePast
     );
-    const canProceedStep4 = isOcularInspection
+    const canProceedStep4 = isFeeExempt
         ? true
         : Boolean(
             refNumber.trim().length >= 5 &&
@@ -642,7 +648,7 @@ export default function BookingWizard({
             }
             return;
         }
-        if (step === 4 && !isOcularInspection) {
+        if (step === 4 && !isFeeExempt) {
             if (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13) {
                 addToast("Please enter a valid GCash reference number (maximum 13 digits).", "error");
                 return;
@@ -762,7 +768,7 @@ export default function BookingWizard({
         formData.append("is_differential", isDifferential ? "1" : "0");
         formData.append("service_payment_method", servicePaymentMethod);
         formData.append("booking_fee", effectiveBookingFee);
-        if (!isOcularInspection) {
+        if (!isFeeExempt) {
             formData.append("reference_number", refNumber.trim());
             if (senderName.trim()) formData.append("sender_name", senderName.trim());
             if (senderNumber.trim()) formData.append("sender_number", senderNumber.trim());
@@ -809,9 +815,9 @@ export default function BookingWizard({
                 is_differential: isDifferential,
                 units_count: totalUnitQuantity,
                 units: cleanUnits,
-                ref_number: isOcularInspection ? "FREE" : refNumber.trim(),
+                ref_number: isFeeExempt ? "FREE" : refNumber.trim(),
                 booking_fee: effectiveBookingFee,
-                is_ocular: isOcularInspection,
+                is_ocular: isFeeExempt,
             });
 
             if (onBookingCreated) {
@@ -892,9 +898,9 @@ export default function BookingWizard({
                             <div>
                                 <span className="font-semibold text-gray-400 uppercase text-[10px]">Reservation Fee Status</span>
                                 <p className="font-bold text-emerald-700 mt-0.5">
-                                    {submittedBooking.is_ocular
+                                    {submittedBooking.is_ocular || Number(submittedBooking.booking_fee) === 0
                                         ? "Free (₱0.00) — No Booking Fee"
-                                        : `₱300.00 Paid (Ref: ${submittedBooking.ref_number})`}
+                                        : `₱${Number(submittedBooking.booking_fee || 300).toFixed(2)} Paid (Ref: ${submittedBooking.ref_number})`}
                                 </p>
                             </div>
                         </div>
@@ -1074,6 +1080,11 @@ export default function BookingWizard({
                                 </svg>
                                 Loading services...
                             </div>
+                        ) : services.length === 0 ? (
+                            <div className="py-12 text-center text-gray-500 text-sm bg-gray-50 rounded-2xl border border-gray-200 p-8 space-y-2">
+                                <p className="font-bold text-gray-800">No Services Currently Available</p>
+                                <p className="text-xs text-gray-500">All service packages are currently being updated or offline. Please check back later or contact customer support.</p>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 {services.map((srv) => {
@@ -1127,9 +1138,9 @@ export default function BookingWizard({
                                             </div>
 
                                             <div className="mt-5 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                                                <span className="font-semibold text-gray-400">{isOcularSrv ? "Booking Fee" : "Pricing Model"}</span>
-                                                <span className={`font-bold px-2 py-0.5 rounded-md ${isOcularSrv ? "text-emerald-700 bg-emerald-50" : "text-blue-700 bg-blue-50"}`}>
-                                                    {isOcularSrv ? "Free (₱0.00)" : "Official Quotation"}
+                                                <span className="font-semibold text-gray-400">Booking Fee</span>
+                                                <span className={`font-bold px-2 py-0.5 rounded-md ${isOcularSrv || Number(srv.booking_fee) === 0 ? "text-emerald-700 bg-emerald-50" : "text-blue-700 bg-blue-50"}`}>
+                                                    {isOcularSrv || Number(srv.booking_fee) === 0 ? "Free (₱0.00)" : `₱${Number(srv.booking_fee ?? 300).toFixed(2)}`}
                                                 </span>
                                             </div>
                                         </div>
@@ -1900,16 +1911,16 @@ export default function BookingWizard({
                         <div className="border-b border-gray-100 pb-4">
                             <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider">Step 4 of 5</span>
                             <h2 className="text-xl font-bold text-gray-900 mt-0.5">
-                                {isOcularInspection ? "Free Ocular Inspection" : "Appointment Reservation Fee"}
+                                {isFeeExempt ? "Free Service Reservation" : "Appointment Reservation Fee"}
                             </h2>
                             <p className="text-xs text-gray-500 mt-1">
-                                {isOcularInspection
-                                    ? "Ocular inspection is free of charge — no booking fee payment is required."
+                                {isFeeExempt
+                                    ? "This service has no appointment reservation fee — no booking payment is required."
                                     : "An appointment reservation fee is required to secure your requested service schedule."}
                             </p>
                         </div>
 
-                        {isOcularInspection ? (
+                        {isFeeExempt ? (
                             <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-6 space-y-3">
                                 <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div>
@@ -1923,7 +1934,9 @@ export default function BookingWizard({
                                     </span>
                                 </div>
                                 <p className="text-xs text-emerald-900 leading-relaxed">
-                                    Our assigned personnel will inspect your room dimensions and thermal load, then provide tailored AC unit brand and capacity recommendations from our inventory.
+                                    {isOcularInspection
+                                        ? "Our assigned personnel will inspect your room dimensions and thermal load, then provide tailored AC unit brand and capacity recommendations from our inventory."
+                                        : "This service package requires no advance deposit. Your schedule reservation will be processed directly upon submission."}
                                 </p>
                             </div>
                         ) : (
@@ -1935,7 +1948,7 @@ export default function BookingWizard({
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 text-[11px] font-bold uppercase tracking-wider">
                                         Schedule Security Fee
                                     </span>
-                                    <h3 className="text-2xl font-extrabold mt-1 text-white">₱{BOOKING_FEE.toFixed(2)}</h3>
+                                    <h3 className="text-2xl font-extrabold mt-1 text-white">₱{effectiveBookingFee.toFixed(2)}</h3>
                                     <p className="text-xs text-blue-200/90 mt-0.5">
                                         Your reservation fee is separate from the final service quotation.
                                     </p>
@@ -2193,9 +2206,9 @@ export default function BookingWizard({
                                 <div>
                                     <span className="font-semibold text-gray-400 uppercase text-[10px]">Reservation Fee</span>
                                     <p className="font-extrabold text-emerald-700 mt-0.5">
-                                        {isOcularInspection ? "Free (₱0.00)" : `₱${BOOKING_FEE.toFixed(2)}`}
+                                        {isFeeExempt ? "Free (₱0.00)" : `₱${effectiveBookingFee.toFixed(2)}`}
                                     </p>
-                                    {!isOcularInspection && (
+                                    {!isFeeExempt && (
                                         <p className="text-[11px] font-mono text-gray-500">Ref: {refNumber}</p>
                                     )}
                                 </div>
@@ -2203,7 +2216,11 @@ export default function BookingWizard({
 
                             {/* Service Price Distinction Callout */}
                             <div className="bg-blue-50/80 border border-blue-200/80 rounded-xl p-3 text-xs text-blue-900 leading-relaxed">
-                                <strong>Appointment Reservation Fee Only:</strong> The ₱{BOOKING_FEE.toFixed(2)} reservation fee secures your requested appointment schedule. Final service charges will be provided through an official quotation based on your technical assessment.
+                                {isFeeExempt ? (
+                                    <><strong>No Booking Fee Required:</strong> This service has no appointment reservation fee. Final charges (if applicable) will be provided through an official quotation.</>
+                                ) : (
+                                    <><strong>Appointment Reservation Fee Only:</strong> The ₱{effectiveBookingFee.toFixed(2)} reservation fee secures your requested appointment schedule. Final service charges will be provided through an official quotation based on your technical assessment.</>
+                                )}
                             </div>
                         </div>
 

@@ -40,6 +40,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
         services: [],
         unit_types: [],
         brands: [],
+        settings: { reschedule_fee: 150 },
         stats: {},
     });
 
@@ -52,14 +53,17 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
     const [brandModal, setBrandModal] = useState({ open: false, mode: "create", data: null });
     const [archiveModal, setArchiveModal] = useState({ open: false, type: "", id: null, title: "", action: "archive" });
     const [deleteModal, setDeleteModal] = useState({ open: false, type: "", id: null, title: "", hasBookings: false });
+    const [rescheduleFeeModal, setRescheduleFeeModal] = useState({ open: false, fee: 150 });
     const [submitting, setSubmitting] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [savingFee, setSavingFee] = useState(false);
 
     // Form states
     const [serviceForm, setServiceForm] = useState({
         service_name: "",
         category: "Cleaning",
         base_price: "",
+        booking_fee: "",
         description: "",
         display_order: 0,
         is_active: true,
@@ -135,6 +139,47 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
         });
     }, [catalogData.brands, searchQuery, statusFilter]);
 
+    // ── Reschedule Fee Action ─────────────────────────────────────────────────
+    const openRescheduleFeeModal = () => {
+        setRescheduleFeeModal({
+            open: true,
+            fee: catalogData.settings?.reschedule_fee ?? 150,
+        });
+    };
+
+    const handleSaveRescheduleFee = async (e) => {
+        e.preventDefault();
+        const numFee = parseFloat(rescheduleFeeModal.fee);
+        if (isNaN(numFee) || numFee < 0) {
+            addToast("Please enter a valid rescheduling fee (₱0 or higher).", "error");
+            return;
+        }
+
+        setSavingFee(true);
+        try {
+            const url = endpoints.updateCatalogSettings || "/super-admin/catalog/settings";
+            const { data } = await window.axios.patch(url, {
+                reschedule_fee: numFee,
+            });
+
+            setCatalogData((prev) => ({
+                ...prev,
+                settings: {
+                    ...prev.settings,
+                    reschedule_fee: numFee,
+                },
+            }));
+
+            setRescheduleFeeModal({ open: false, fee: numFee });
+            addToast(data.message || "Reschedule fee updated successfully.", "success");
+            if (onDataChanged) onDataChanged();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Failed to update reschedule fee."), "error");
+        } finally {
+            setSavingFee(false);
+        }
+    };
+
     // ── Service Actions ───────────────────────────────────────────────────────
     const openServiceModal = (mode = "create", service = null) => {
         if (mode === "edit" && service) {
@@ -142,6 +187,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                 service_name: service.service_name,
                 category: service.category || "Cleaning",
                 base_price: service.base_price,
+                booking_fee: service.booking_fee !== null && service.booking_fee !== undefined ? service.booking_fee : 300.00,
                 description: service.description || "",
                 display_order: service.display_order ?? 0,
                 is_active: Boolean(service.is_active),
@@ -152,6 +198,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                 service_name: "",
                 category: "Cleaning",
                 base_price: "",
+                booking_fee: 300.00,
                 description: "",
                 display_order: (catalogData.services?.length || 0) + 1,
                 is_active: true,
@@ -543,6 +590,34 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                 {/* ── TAB 1: SERVICES & PRICING ── */}
                 {activeTab === "services" && (
                     <div className="space-y-4">
+                        {/* Reschedule Fee Policy Banner */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-gradient-to-r from-blue-50/70 to-indigo-50/70 border border-blue-100 rounded-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold text-gray-800">In-Progress Reschedule Fee:</span>
+                                        <span className="text-sm font-extrabold text-blue-700">₱{Number(catalogData.settings?.reschedule_fee ?? 150).toFixed(2)}</span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-500">Approved bookings reschedule for free. In-progress reschedules charge this fee.</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={openRescheduleFeeModal}
+                                className="self-start sm:self-center px-3.5 py-1.5 rounded-xl bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold transition shadow-xs flex items-center gap-1.5"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                                Edit Fee
+                            </button>
+                        </div>
+
                         {loading ? (
                             <div className="py-12 text-center text-xs text-gray-400">Loading services catalog...</div>
                         ) : filteredServices.length === 0 ? (
@@ -588,10 +663,16 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                         </div>
 
                                         <div className="mt-5 pt-3.5 border-t border-gray-100">
-                                            <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center justify-between mb-1.5">
                                                 <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Base Price</span>
-                                                <span className="text-lg font-black text-blue-700">
+                                                <span className="text-base font-black text-blue-700">
                                                     {formatCurrency(service.base_price)}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Booking Fee</span>
+                                                <span className="text-xs font-bold text-gray-800">
+                                                    {Number(service.booking_fee) > 0 ? formatCurrency(service.booking_fee) : "Free (₱0)"}
                                                 </span>
                                             </div>
 
@@ -945,24 +1026,43 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                         onChange={(e) => setServiceForm({ ...serviceForm, base_price: e.target.value })}
                                         className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                                     />
+                                    <p className="text-[11px] text-gray-400 mt-1">Starting service rate</p>
                                 </div>
 
                                 <div>
                                     <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                                        Category
+                                        Booking Fee (₱)
                                     </label>
-                                    <select
-                                        value={serviceForm.category}
-                                        onChange={(e) => setServiceForm({ ...serviceForm, category: e.target.value })}
-                                        className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-                                    >
-                                        <option value="Cleaning">Cleaning & Wash</option>
-                                        <option value="Maintenance">Maintenance & Tuning</option>
-                                        <option value="Repair">Repair & Troubleshooting</option>
-                                        <option value="Installation">Installation & Relocation</option>
-                                        <option value="Inspection">Diagnostic & Inspection</option>
-                                    </select>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        placeholder="300.00"
+                                        value={serviceForm.booking_fee}
+                                        onChange={(e) => setServiceForm({ ...serviceForm, booking_fee: e.target.value })}
+                                        className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                                    />
+                                    <p className="text-[11px] text-gray-400 mt-1">Reservation deposit upon booking</p>
                                 </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                    Category
+                                </label>
+                                <select
+                                    value={serviceForm.category}
+                                    onChange={(e) => setServiceForm({ ...serviceForm, category: e.target.value })}
+                                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                                >
+                                    <option value="Cleaning">Cleaning & Wash</option>
+                                    <option value="Maintenance">Maintenance & Tuning</option>
+                                    <option value="Repair">Repair & Troubleshooting</option>
+                                    <option value="Installation">Installation & Relocation</option>
+                                    <option value="Ocular Inspection">Ocular Inspection</option>
+                                    <option value="Inspection">Diagnostic & Inspection</option>
+                                    <option value="General">General</option>
+                                </select>
                             </div>
 
                             <div>
@@ -1246,6 +1346,66 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                     className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition shadow-sm"
                                 >
                                     {submitting ? "Saving..." : brandModal.mode === "create" ? "Create Brand" : "Save Changes"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ── MODAL: EDIT RESCHEDULE FEE ── */}
+            {rescheduleFeeModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+                        <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                            <h3 className="text-base font-bold text-gray-900">
+                                Edit Reschedule Fee
+                            </h3>
+                            <button
+                                onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 150 })}
+                                className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveRescheduleFee} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                    Reschedule Fee (₱) <span className="text-red-500">*</span>
+                                </label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">₱</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        required
+                                        value={rescheduleFeeModal.fee}
+                                        onChange={(e) => setRescheduleFeeModal((prev) => ({ ...prev, fee: e.target.value }))}
+                                        className="w-full pl-8 pr-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition font-bold text-gray-900"
+                                        placeholder="150"
+                                    />
+                                </div>
+                                <span className="text-[11px] text-gray-400 mt-1.5 block">
+                                    Charged only when a client reschedules an In-Progress booking. Approved status reschedules are always free.
+                                </span>
+                            </div>
+
+                            <div className="pt-4 border-t border-gray-100 flex items-center justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 150 })}
+                                    className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={savingFee}
+                                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition shadow-sm disabled:opacity-50"
+                                >
+                                    {savingFee ? "Saving..." : "Save Changes"}
                                 </button>
                             </div>
                         </form>

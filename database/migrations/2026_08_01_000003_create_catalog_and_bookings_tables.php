@@ -124,10 +124,17 @@ return new class extends Migration
                 $table->string('service_name', 100);
                 $table->text('description')->nullable();
                 $table->decimal('base_price', 10, 2)->nullable();
+                $table->decimal('booking_fee', 10, 2)->default(300.00);
                 $table->boolean('is_active')->default(true);
                 $table->string('category', 50)->nullable();
                 $table->integer('display_order')->default(0);
                 $table->timestamps();
+            });
+        } else {
+            Schema::table('services', function (Blueprint $table) {
+                if (! Schema::hasColumn('services', 'booking_fee')) {
+                    $table->decimal('booking_fee', 10, 2)->default(300.00)->after('base_price');
+                }
             });
         }
 
@@ -275,6 +282,21 @@ return new class extends Migration
             });
         }
 
+        // 9. Booking & System Settings
+        if (! Schema::hasTable('booking_settings')) {
+            Schema::create('booking_settings', function (Blueprint $table) {
+                $table->id();
+                $table->string('key', 100)->unique();
+                $table->text('value')->nullable();
+                $table->timestamps();
+            });
+
+            DB::table('booking_settings')->updateOrInsert(
+                ['key' => 'reschedule_fee'],
+                ['value' => '150.00', 'created_at' => now(), 'updated_at' => now()]
+            );
+        }
+
         Schema::enableForeignKeyConstraints();
     }
 
@@ -285,6 +307,7 @@ return new class extends Migration
     {
         Schema::disableForeignKeyConstraints();
 
+        Schema::dropIfExists('booking_settings');
         Schema::dropIfExists('reschedule_bookings');
         Schema::dropIfExists('payment');
         Schema::dropIfExists('schedule');

@@ -228,9 +228,23 @@ export default function OcularInspections({
 
     const selectedInspection =
         inspections.find((b) => b.booking_id === selectedBookingId) || null;
+    const isSelectedPending =
+        String(selectedInspection?.booking_status || "").trim().toLowerCase() ===
+        "pending";
 
     // ── Checklist (Tools Only) Handlers ─────────────────────────────
     const openChecklistBuilder = async (booking) => {
+        if (
+            String(booking?.booking_status || "")
+                .trim()
+                .toLowerCase() === "pending"
+        ) {
+            addToast?.(
+                "Tools checklist cannot be created while booking status is pending approval.",
+                "error"
+            );
+            return;
+        }
         if (!ep.availableCatalog) {
             addToast?.(
                 "Checklist catalog is available from Admin Assistant account.",
@@ -324,6 +338,17 @@ export default function OcularInspections({
     const handleSaveChecklist = async (e) => {
         e.preventDefault();
         if (!selectedInspection) return;
+        if (
+            String(selectedInspection.booking_status || "")
+                .trim()
+                .toLowerCase() === "pending"
+        ) {
+            addToast?.(
+                "Tools checklist cannot be created while booking status is pending approval.",
+                "error"
+            );
+            return;
+        }
         if (checklistItems.length === 0) {
             addToast?.("Please select at least 1 tool for the checklist.", "error");
             return;
@@ -809,12 +834,17 @@ export default function OcularInspections({
             {/* ── Detail / Manage Workspace View ────────────────────────── */}
             {selectedInspection ? (
                 <div className="space-y-6">
+                    {isSelectedPending && (
+                        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-medium flex items-center gap-2">
+                            <span>⚠ This ocular inspection booking is pending approval. Measurements and unit recommendations are disabled until the booking is approved.</span>
+                        </div>
+                    )}
                     {/* Booking Overview Banner */}
                     <div className="card p-5">
                         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                             <div className="space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-mono text-sm font-bold text-primary-600">
+                                    <span className="font-mono text-sm font-bold text-blue-600">
                                         Ocular Inspection #
                                         {selectedInspection.booking_id}
                                     </span>
@@ -884,12 +914,18 @@ export default function OcularInspections({
                                 {ep.availableCatalog && (
                                     <button
                                         type="button"
+                                        disabled={isSelectedPending}
+                                        title={
+                                            isSelectedPending
+                                                ? "Tools checklist cannot be created while booking is pending approval."
+                                                : undefined
+                                        }
                                         onClick={() =>
                                             openChecklistBuilder(
                                                 selectedInspection
                                             )
                                         }
-                                        className="btn-secondary btn-sm"
+                                        className="btn-secondary btn-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         {selectedInspection.checklist
                                             ? `Tools Checklist (${selectedInspection.checklist.status})`
@@ -899,6 +935,7 @@ export default function OcularInspections({
                                 <button
                                     type="button"
                                     disabled={
+                                        isSelectedPending ||
                                         submittingToCustomer ||
                                         selectedInspection.rooms?.length ===
                                             0 ||
@@ -1041,8 +1078,9 @@ export default function OcularInspections({
                             </div>
                             <button
                                 type="button"
+                                disabled={isSelectedPending}
                                 onClick={openAddRoomModal}
-                                className="btn-primary btn-sm self-start"
+                                className="btn-primary btn-sm self-start disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 + Add Inspected Room
                             </button>
@@ -1068,7 +1106,7 @@ export default function OcularInspections({
                                         <div className="flex items-start justify-between gap-2">
                                             <div>
                                                 <div className="flex items-center gap-2">
-                                                    <span className="text-xs font-bold uppercase tracking-wider text-primary-600">
+                                                    <span className="text-xs font-bold uppercase tracking-wider text-blue-600">
                                                         {room.room_name ||
                                                             `Room #${idx + 1}`}
                                                     </span>
@@ -1147,7 +1185,7 @@ export default function OcularInspections({
                                                         room
                                                     )
                                                 }
-                                                className="text-xs font-semibold text-primary-600 hover:text-primary-700"
+                                                className="text-xs font-semibold text-blue-600 hover:text-blue-700"
                                             >
                                                 + Recommend Unit for This Room
                                             </button>
@@ -1196,8 +1234,9 @@ export default function OcularInspections({
                             </div>
                             <button
                                 type="button"
+                                disabled={isSelectedPending}
                                 onClick={() => openAddRecommendationModal(null)}
-                                className="btn-primary btn-sm self-start"
+                                className="btn-primary btn-sm self-start disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 + Add Unit Recommendation
                             </button>
@@ -1267,7 +1306,7 @@ export default function OcularInspections({
                                                         </span>
                                                         {rec.status ===
                                                             "Selected" && (
-                                                            <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary-600 text-white shadow-xs">
+                                                            <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-600 text-white shadow-xs">
                                                                 Customer
                                                                 Selected
                                                             </span>
@@ -1291,7 +1330,7 @@ export default function OcularInspections({
                                                                     ? `— ${rec.model_recommendation}`
                                                                     : ""}
                                                             </h4>
-                                                            <p className="text-xs font-semibold text-primary-600 mt-0.5">
+                                                            <p className="text-xs font-semibold text-blue-600 mt-0.5">
                                                                 {rec.unit_price
                                                                     ? `₱${Number(
                                                                           rec.unit_price
@@ -1402,7 +1441,7 @@ export default function OcularInspections({
                                     >
                                         <div className="space-y-1">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <span className="font-mono text-xs font-bold text-primary-600">
+                                                <span className="font-mono text-xs font-bold text-blue-600">
                                                     Order #{ord.order_id}
                                                 </span>
                                                 <span className="text-sm font-bold text-gray-900">
@@ -1504,10 +1543,10 @@ export default function OcularInspections({
                                     key={t.id}
                                     type="button"
                                     onClick={() => setFilterTab(t.id)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                                         filterTab === t.id
-                                            ? "bg-primary-600 text-white"
-                                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                            ? "bg-blue-600 text-white shadow-xs"
+                                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                                     }`}
                                 >
                                     {t.label}
@@ -1560,7 +1599,7 @@ export default function OcularInspections({
                                                 key={b.booking_id}
                                                 className="hover:bg-gray-50/70 transition"
                                             >
-                                                <td className="py-3 px-4 font-mono font-bold text-primary-600">
+                                                <td className="py-3 px-4 font-mono font-bold text-blue-600">
                                                     #{b.booking_id}
                                                     <span className="block text-[10px] font-normal text-emerald-700">
                                                         FREE Ocular
@@ -1617,7 +1656,7 @@ export default function OcularInspections({
                                                         Room(s)
                                                     </span>{" "}
                                                     •{" "}
-                                                    <span className="font-semibold text-primary-600">
+                                                    <span className="font-semibold text-blue-600">
                                                         {b.recommendations
                                                             ?.length || 0}{" "}
                                                         Rec(s)
@@ -1650,17 +1689,28 @@ export default function OcularInspections({
                                                     </div>
                                                 </td>
                                                 <td className="py-3 px-4 text-right">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            setSelectedBookingId(
-                                                                b.booking_id
-                                                            )
-                                                        }
-                                                        className="btn-primary btn-sm text-xs"
-                                                    >
-                                                        Manage Inspection
-                                                    </button>
+                                                    {String(b.booking_status || "").trim().toLowerCase() === "pending" ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled
+                                                            title="Ocular inspection cannot be managed while booking status is pending approval."
+                                                            className="btn-sm text-xs px-3 py-1.5 rounded-xl border border-gray-200 bg-gray-100 text-gray-400 font-semibold cursor-not-allowed select-none shadow-none inline-flex items-center justify-center opacity-70"
+                                                        >
+                                                            Manage Inspection
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setSelectedBookingId(
+                                                                    b.booking_id
+                                                                )
+                                                            }
+                                                            className="btn-primary btn-sm text-xs"
+                                                        >
+                                                            Manage Inspection
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );
@@ -1710,11 +1760,11 @@ export default function OcularInspections({
                                 {["Meters", "Feet"].map((unit) => (
                                     <label
                                         key={unit}
-                                        className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                                        className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
                                             roomForm.unit_of_measurement ===
                                             unit
-                                                ? "bg-primary-50 border-primary-500 text-primary-700"
-                                                : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                                                ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
+                                                : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
                                         }`}
                                     >
                                         <input
@@ -1878,10 +1928,10 @@ export default function OcularInspections({
                             {SUN_EXPOSURE_OPTIONS.map((opt) => (
                                 <label
                                     key={opt}
-                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
                                         roomForm.sun_exposure_level === opt
-                                            ? "bg-primary-50 border-primary-500 text-primary-700"
-                                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                                            ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
+                                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
                                     }`}
                                 >
                                     <input
@@ -1914,10 +1964,10 @@ export default function OcularInspections({
                             {WINDOW_GLAZING_OPTIONS.map((opt) => (
                                 <label
                                     key={opt}
-                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
                                         roomForm.window_size_glazing === opt
-                                            ? "bg-primary-50 border-primary-500 text-primary-700"
-                                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                                            ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
+                                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
                                     }`}
                                 >
                                     <input
@@ -2171,11 +2221,11 @@ export default function OcularInspections({
                             {MOTOR_TYPE_OPTIONS.map((opt) => (
                                 <label
                                     key={opt}
-                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
                                         recForm.motor_type_recommendation ===
                                         opt
-                                            ? "bg-primary-50 border-primary-500 text-primary-700"
-                                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                                            ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
+                                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
                                     }`}
                                 >
                                     <input
@@ -2343,10 +2393,10 @@ export default function OcularInspections({
                                     key={t.id}
                                     type="button"
                                     onClick={() => setChecklistTab(t.id)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                                         checklistTab === t.id
-                                            ? "bg-primary-600 text-white"
-                                            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                            ? "bg-blue-600 text-white shadow-xs"
+                                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                                     }`}
                                 >
                                     {t.label}
@@ -2383,7 +2433,7 @@ export default function OcularInspections({
                                             key={tool.item_id}
                                             className={`p-2.5 flex items-center justify-between text-xs ${
                                                 selected
-                                                    ? "bg-primary-50/50"
+                                                    ? "bg-blue-50/60"
                                                     : "hover:bg-gray-50"
                                             }`}
                                         >
@@ -2394,7 +2444,7 @@ export default function OcularInspections({
                                                     onChange={() =>
                                                         toggleCatalogTool(tool)
                                                     }
-                                                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                                 />
                                                 <span className="font-medium text-gray-900">
                                                     {tool.item_name}
@@ -2479,8 +2529,8 @@ export default function OcularInspections({
                         </button>
                         <button
                             type="submit"
-                            disabled={checklistSubmitting}
-                            className="btn-primary btn-sm"
+                            disabled={checklistSubmitting || isSelectedPending}
+                            className="btn-primary btn-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {checklistSubmitting
                                 ? "Submitting..."

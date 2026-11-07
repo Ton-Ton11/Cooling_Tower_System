@@ -212,6 +212,11 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
 
     // Open Checklist Builder for a Job
     const openCreateChecklist = (job) => {
+        if (String(job?.booking_status || "").trim().toLowerCase() === "pending") {
+            addToast("Tools checklist cannot be created while booking status is pending approval.", "error");
+            return;
+        }
+
         const latestChecklist =
             (Array.isArray(job.checklists) && job.checklists.length > 0
                 ? job.checklists[0]

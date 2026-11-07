@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Shared;
 
 use App\Http\Controllers\Controller;
+use App\Models\BookingSetting;
 use App\Models\Brand;
 use App\Models\Service;
 use App\Models\UnitType;
@@ -31,10 +32,15 @@ class CatalogManagementController extends Controller
             ->orderBy('name')
             ->get();
 
+        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
+
         return response()->json([
             'services' => $services,
             'unit_types' => $unitTypes,
             'brands' => $brands,
+            'settings' => [
+                'reschedule_fee' => $rescheduleFee,
+            ],
             'stats' => [
                 'total_services' => $services->count(),
                 'active_services' => $services->where('is_active', true)->count(),
@@ -62,6 +68,7 @@ class CatalogManagementController extends Controller
             'service_name' => ['required', 'string', 'max:100', 'unique:services,service_name'],
             'description' => ['nullable', 'string', 'max:1000'],
             'base_price' => ['required', 'numeric', 'min:0'],
+            'booking_fee' => ['nullable', 'numeric', 'min:0'],
             'category' => ['nullable', 'string', 'max:50'],
             'display_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
@@ -71,15 +78,16 @@ class CatalogManagementController extends Controller
             'service_name' => $validated['service_name'],
             'description' => $validated['description'] ?? null,
             'base_price' => $validated['base_price'],
+            'booking_fee' => isset($validated['booking_fee']) && $validated['booking_fee'] !== '' ? (float) $validated['booking_fee'] : 300.00,
             'category' => $validated['category'] ?? 'General',
             'display_order' => $validated['display_order'] ?? 0,
-            'is_active' => $validated['is_active'] ?? true,
+            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true,
         ]);
 
         $this->logActivity(
             $request->user()->user_id,
             'SERVICE_CREATE',
-            sprintf('Created new service "%s" with base price ₱%s.', $service->service_name, number_format($service->base_price, 2))
+            sprintf('Created new service "%s" with base price ₱%s, booking fee ₱%s.', $service->service_name, number_format((float) $service->base_price, 2), number_format((float) $service->booking_fee, 2))
         );
 
         return response()->json([
@@ -99,18 +107,23 @@ class CatalogManagementController extends Controller
             'service_name' => ['required', 'string', 'max:100', Rule::unique('services', 'service_name')->ignore($service->service_id, 'service_id')],
             'description' => ['nullable', 'string', 'max:1000'],
             'base_price' => ['required', 'numeric', 'min:0'],
+            'booking_fee' => ['nullable', 'numeric', 'min:0'],
             'category' => ['nullable', 'string', 'max:50'],
             'display_order' => ['nullable', 'integer', 'min:0'],
             'is_active' => ['nullable', 'boolean'],
         ]);
 
-        $oldPrice = $service->base_price;
+        $oldPrice = (float) $service->base_price;
+        $oldBookingFee = (float) $service->booking_fee;
+        if ($request->has('is_active')) {
+            $validated['is_active'] = $request->boolean('is_active');
+        }
         $service->update($validated);
 
         $this->logActivity(
             $request->user()->user_id,
             'SERVICE_UPDATE',
-            sprintf('Updated service "%s" (Base Price: ₱%s → ₱%s).', $service->service_name, number_format($oldPrice, 2), number_format($service->base_price, 2))
+            sprintf('Updated service "%s" (Base: ₱%s → ₱%s, Booking Fee: ₱%s → ₱%s).', $service->service_name, number_format($oldPrice, 2), number_format((float) $service->base_price, 2), number_format($oldBookingFee, 2), number_format((float) $service->booking_fee, 2))
         );
 
         return response()->json([
@@ -247,7 +260,7 @@ class CatalogManagementController extends Controller
             'icon' => $validated['icon'] ?? 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
             'description' => $validated['description'] ?? null,
             'display_order' => $validated['display_order'] ?? 0,
-            'is_active' => $validated['is_active'] ?? true,
+            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true,
         ]);
 
         $this->logActivity(
@@ -474,7 +487,7 @@ class CatalogManagementController extends Controller
             'description' => $validated['description'] ?? null,
             'logo_url' => $validated['logo_url'] ?? null,
             'display_order' => $validated['display_order'] ?? 0,
-            'is_active' => $validated['is_active'] ?? true,
+            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true,
         ]);
 
         $this->logActivity(
@@ -650,6 +663,44 @@ class CatalogManagementController extends Controller
             'message' => sprintf('AC Brand "%s" restored successfully.', $brand->name),
             'brand' => $brand->fresh(),
             'restored' => true,
+        ]);
+    }
+
+    /**
+     * Get booking and catalog settings (e.g. reschedule fee).
+     */
+    public function getSettings(): JsonResponse
+    {
+        return response()->json([
+            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 150.00),
+        ]);
+    }
+
+    /**
+     * Update booking and catalog settings (e.g. reschedule fee).
+     */
+    public function updateSettings(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'reschedule_fee' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $fee = (float) $validated['reschedule_fee'];
+        BookingSetting::setValue('reschedule_fee', number_format($fee, 2, '.', ''));
+
+        if ($request->user()) {
+            $this->logActivity(
+                $request->user()->user_id,
+                'CATALOG_SETTINGS_UPDATE',
+                sprintf('Updated in-progress reschedule fee to ₱%.2f.', $fee)
+            );
+        }
+
+        return response()->json([
+            'message' => 'Reschedule fee updated successfully.',
+            'settings' => [
+                'reschedule_fee' => $fee,
+            ],
         ]);
     }
 

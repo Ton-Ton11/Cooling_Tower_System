@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import { formatCurrency, formatDateTime } from "../../utils/superAdmin";
 import { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
@@ -85,7 +85,9 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
     const stats = dashboardData?.stats ?? {};
     const recentBookings = dashboardData?.recent_bookings ?? [];
-    const services = dashboardData?.services ?? [];
+    const services = useMemo(() => {
+        return (dashboardData?.services ?? []).filter(s => s.is_active !== false && s.is_active !== 0);
+    }, [dashboardData?.services]);
     const announcements = dashboardData?.announcements ?? [];
     const user = dashboardData?.user ?? {};
     const upcoming = dashboardData?.upcoming_appointment ?? null;
@@ -295,7 +297,7 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                 >
                                     <span>Core Services</span>
                                     <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${activeTab === "services" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"}`}>
-                                        {services.length || 3}
+                                        {services.length}
                                     </span>
                                 </button>
 

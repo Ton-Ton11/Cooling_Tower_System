@@ -104,6 +104,8 @@ export const SUPER_ADMIN_ENDPOINTS = {
 
     // Catalog Management endpoints
     catalog: "/super-admin/catalog",
+    catalogSettings: "/super-admin/catalog/settings",
+    updateCatalogSettings: "/super-admin/catalog/settings",
     storeService: "/super-admin/catalog/services",
     updateService: (id) => `/super-admin/catalog/services/${id}`,
     toggleService: (id) => `/super-admin/catalog/services/${id}/toggle`,
@@ -151,6 +153,8 @@ export const MANAGER_ENDPOINTS = {
 
     // Catalog Management endpoints
     catalog: "/manager/catalog",
+    catalogSettings: "/manager/catalog/settings",
+    updateCatalogSettings: "/manager/catalog/settings",
     storeService: "/manager/catalog/services",
     updateService: (id) => `/manager/catalog/services/${id}`,
     toggleService: (id) => `/manager/catalog/services/${id}/toggle`,
@@ -239,6 +243,8 @@ export const ADMIN_ASSISTANT_ENDPOINTS = {
 
     // Catalog Management endpoints
     catalog: "/admin-assistant/catalog",
+    catalogSettings: "/admin-assistant/catalog/settings",
+    updateCatalogSettings: "/admin-assistant/catalog/settings",
     storeService: "/admin-assistant/catalog/services",
     updateService: (id) => `/admin-assistant/catalog/services/${id}`,
     toggleService: (id) => `/admin-assistant/catalog/services/${id}/toggle`,

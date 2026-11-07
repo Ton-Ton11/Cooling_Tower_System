@@ -277,7 +277,7 @@ export default function MyBookings({
                         const isCancelled = b.booking_status === "Cancelled";
                         const isOcular = Boolean(b.is_ocular_inspection) || Number(b.service_id) === 4;
                         const hasOcularResults = isOcular && (b.inspection_status === "Submitted" || (Array.isArray(b.ocular_recommendations) && b.ocular_recommendations.length > 0));
-                        const canReschedule = isPending || ["Approved"].includes(b.booking_status);
+                        const canReschedule = isPending || ["Approved", "In-Progress"].includes(b.booking_status);
                         const canCancel = isPending || (Boolean(b.ac_unit_order) && b.booking_status === "Approved");
 
                         let remainingSeconds = 0;
@@ -338,7 +338,7 @@ export default function MyBookings({
                                                 </span>
                                                 <span>•</span>
                                                 <span className="text-emerald-700 font-semibold">
-                                                    {isOcular
+                                                    {isOcular || Number(b.booking_fee_paid) === 0
                                                         ? "Booking Fee: Free (₱0.00)"
                                                         : `Reservation Fee: ₱${Number(b.booking_fee_paid ?? 300).toFixed(2)}`}
                                                 </span>
@@ -384,11 +384,15 @@ export default function MyBookings({
                                                 className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 ${
                                                     isRescheduleNotice
                                                         ? "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                                                        : b.booking_status === "In-Progress"
+                                                        ? "border-amber-300 bg-amber-50/70 hover:bg-amber-100/80 text-amber-800"
                                                         : "border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 text-blue-700"
                                                 }`}
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                {isRescheduleNotice ? "Reschedule (Free)" : "Reschedule (₱150)"}
+                                                {b.booking_status === "In-Progress"
+                                                    ? `Reschedule (₱${Number(scheduleConfig?.reschedule_fee ?? 150).toFixed(0)})`
+                                                    : "Reschedule (Free)"}
                                             </button>
                                         )}
 
@@ -531,7 +535,7 @@ export default function MyBookings({
                                     <div className="bg-gray-50/80 rounded-xl p-3 border border-gray-100">
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Reservation Fee</span>
                                         <span className="text-xs font-mono font-bold text-emerald-700 mt-1 block">
-                                            {isOcular
+                                            {isOcular || Number(b.booking_fee_paid) === 0
                                                 ? "Free (₱0.00)"
                                                 : `₱${Number(b.booking_fee_paid ?? 300).toFixed(2)} (Ref: ${b.reference_number || "N/A"})`}
                                         </span>
@@ -1115,7 +1119,7 @@ export default function MyBookings({
                                                 )}
                                                 <p className="text-[10px] text-gray-400 mt-0.5">Requested on {r.created_at_formatted}</p>
                                             </div>
-                                            <span className="font-extrabold text-purple-700 shrink-0">Fee: {formatCurrency(r.fee)}</span>
+                                            <span className="font-extrabold text-purple-700 shrink-0">Fee: {r.fee > 0 ? formatCurrency(r.fee) : "Free (₱0.00)"}</span>
                                         </div>
                                     ))}
                                 </div>

@@ -77,7 +77,7 @@ export default function ReschedulePage({
             if (!found && list.length > 0) {
                 found = list.find(
                     (b) =>
-                        ["Pending", "Rescheduled", "Payment Incomplete", "Reschedule Notice", "Approved"].includes(
+                        ["Pending", "Rescheduled", "Payment Incomplete", "Reschedule Notice", "Approved", "In-Progress"].includes(
                             b.booking_status
                         )
                 );
@@ -113,6 +113,14 @@ export default function ReschedulePage({
     const isManagerNotice =
         booking?.booking_status === "Reschedule Notice" ||
         Boolean(details.reschedule_notice_by_manager);
+    const isApprovedStatus = booking?.booking_status === "Approved";
+    const isInProgressStatus = booking?.booking_status === "In-Progress";
+
+    // Rescheduling is FREE during Approved, Pending, or Reschedule Notice.
+    // Reschedule fee applies ONLY during In-Progress status.
+    const isFeeRequired = isInProgressStatus && !isManagerNotice;
+    const rescheduleFee = isFeeRequired ? (Number(scheduleConfig?.reschedule_fee) || 150.0) : 0.0;
+    const isFreeReschedule = !isFeeRequired;
 
     const minDateStr = useMemo(() => getTodayLocalYmd(), []);
 
@@ -213,7 +221,6 @@ export default function ReschedulePage({
         }
     }, [newDate, scheduleSlotsData, currentTime, isSlotBlocked]);
 
-    const rescheduleFee = isManagerNotice ? 0.0 : 150.0;
     const gcashAccount = scheduleConfig?.payment_gcash_account || "0917 877 7670";
     const gcashName = scheduleConfig?.payment_gcash_name || "Cooling Tower Airconditioning Services";
 
@@ -303,14 +310,14 @@ export default function ReschedulePage({
             return;
         }
 
-        if (!isManagerNotice && (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13)) {
+        if (isFeeRequired && (!refNumber.trim() || refNumber.trim().length < 5 || refNumber.trim().length > 13)) {
             const msg = "Please enter a valid GCash reference number (5 to 13 digits).";
             setValidationError(msg);
             if (addToast) addToast(msg, "error");
             return;
         }
 
-        if (senderNumber.trim() && senderNumber.trim().length !== 11) {
+        if (isFeeRequired && senderNumber.trim() && senderNumber.trim().length !== 11) {
             const msg = "Sender contact number must be 11 digits only (e.g., 09XXXXXXXXX).";
             setValidationError(msg);
             if (addToast) addToast(msg, "error");
@@ -742,12 +749,14 @@ export default function ReschedulePage({
                             </p>
                         </div>
                         <div className="flex items-center gap-2 self-start sm:self-auto">
-                            {isManagerNotice ? (
-                                <span className="px-3 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-extrabold">
-                                    Free (₱0.00)
+                            {isFreeReschedule ? (
+                                <span className="px-3 py-1 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-extrabold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                    Free Reschedule (₱0.00)
                                 </span>
                             ) : (
-                                <span className="px-3 py-1 rounded-xl bg-amber-100 text-amber-800 text-xs font-extrabold">
+                                <span className="px-3 py-1 rounded-xl bg-amber-100 text-amber-800 text-xs font-extrabold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500" />
                                     Fee: ₱{rescheduleFee.toFixed(2)}
                                 </span>
                             )}
@@ -778,18 +787,29 @@ export default function ReschedulePage({
                         </div>
 
                         {/* 2. Fee & Payment Fields */}
-                        {isManagerNotice ? (
+                        {isFreeReschedule ? (
                             <div className="bg-emerald-50/90 border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider">
-                                        Manager Reschedule Notice
+                                    <span className="text-xs font-extrabold text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
+                                        <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        {isManagerNotice
+                                            ? "Manager Reschedule Notice"
+                                            : isApprovedStatus
+                                            ? "Approved Booking — Free Reschedule"
+                                            : "Free Schedule Adjustment"}
                                     </span>
                                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-900">
                                         Free (₱0.00)
                                     </span>
                                 </div>
                                 <p className="text-xs text-emerald-900 leading-relaxed">
-                                    Your previous schedule required adjustment by our operations team. Selecting a new vacant schedule is free of charge.
+                                    {isManagerNotice
+                                        ? "Your previous schedule required adjustment by our operations team. Selecting a new vacant schedule is free of charge."
+                                        : isApprovedStatus
+                                        ? "Rescheduling while your booking is in Approved status is free of charge. No additional fee or GCash payment is required."
+                                        : "Rescheduling at this stage is free of charge. Pick your preferred new date and arrival time to continue."}
                                 </p>
                             </div>
                         ) : (
@@ -798,7 +818,7 @@ export default function ReschedulePage({
                                     <div className="flex items-center gap-2">
                                         <span className="size-2.5 rounded-full bg-amber-500 ring-4 ring-amber-100" />
                                         <h3 className="text-xs font-extrabold uppercase tracking-wider text-gray-800">
-                                            Rescheduling Fee: ₱{rescheduleFee.toFixed(2)}
+                                            In-Progress Rescheduling Fee: ₱{rescheduleFee.toFixed(2)}
                                         </h3>
                                     </div>
                                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
@@ -807,7 +827,7 @@ export default function ReschedulePage({
                                 </div>
 
                                 <p className="text-xs text-gray-600 leading-relaxed">
-                                    To adjust technician team dispatch locks and schedule reservations, please send the ₱150.00 fee via GCash.
+                                    Because this service is currently in progress with technician and equipment allocated, a ₱{rescheduleFee.toFixed(2)} rescheduling fee applies to coordinate new team dispatch.
                                 </p>
 
                                 {/* GCash Account Box */}
@@ -935,7 +955,7 @@ export default function ReschedulePage({
                                 <div className="bg-white/5 rounded-xl p-3 border border-white/10">
                                     <span className="text-emerald-300 text-[11px] block">Reschedule Fee</span>
                                     <strong className="text-emerald-300 font-mono text-sm block mt-0.5">
-                                        {isManagerNotice ? "Free (₱0.00)" : `₱${rescheduleFee.toFixed(2)}`}
+                                        {isFreeReschedule ? "Free (₱0.00)" : `₱${rescheduleFee.toFixed(2)}`}
                                     </strong>
                                 </div>
                             </div>
