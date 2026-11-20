@@ -31,6 +31,9 @@ class SuperAdminController extends SuperAdminBaseController
             'low_stock_items' => DB::table('inventory_items')->whereColumn('quantity_on_hand', '<=', 'reorder_level')->count(),
             'available_ac_units' => DB::table('ac_units_inventory')->where('status', 'Available')->count(),
             'announcements' => DB::table('announcements')->count(),
+            'pending_business_verifications' => \Illuminate\Support\Facades\Schema::hasColumn('users', 'account_type')
+                ? DB::table('users')->where('role_id', 6)->where('account_type', 'business')->where('verification_status', 'pending')->count()
+                : 0,
             'paid_revenue_this_month' => (float) DB::table('payment')
                 ->where('payment_status', 'Paid')
                 ->whereBetween('payment_date', [$monthStart, $monthEnd])

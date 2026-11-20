@@ -11,6 +11,10 @@ use App\Models\Service;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -235,6 +239,21 @@ class CustomerDashboardController extends Controller
                 $geo = LocationAutocompleteController::evaluateGeospatialLocation($user->address);
                 return [
                     'user_id' => $user->user_id,
+                    'account_type' => $user->account_type ?? 'individual',
+                    'company_name' => $user->company_name,
+                    'representative_role' => $user->representative_role,
+                    'tin' => $user->tin,
+                    'business_permit_path' => $user->business_permit_path,
+                    'business_permit_url' => $user->business_permit_url,
+                    'verification_status' => $user->verification_status ?? 'approved',
+                    'verification_rejection_reason' => $user->verification_rejection_reason,
+                    'resubmission_attempts' => (int) ($user->resubmission_attempts ?? 0),
+                    'last_resubmitted_at' => $user->last_resubmitted_at?->toISOString(),
+                    'remaining_daily_attempts' => $user->getDailyResubmissionAttemptsRemaining(),
+                    'can_resubmit_today' => $user->getDailyResubmissionAttemptsRemaining() > 0,
+                    'verified_at' => $user->verified_at?->toISOString(),
+                    'is_business_account' => $user->isBusinessCustomer(),
+                    'is_business_verified' => $user->isBusinessVerified(),
                     'given_name' => $user->given_name,
                     'middle_name' => $user->middle_name,
                     'last_name' => $user->last_name,
@@ -307,6 +326,136 @@ class CustomerDashboardController extends Controller
 
         return response()->json([
             'data' => $announcements,
+        ]);
+    }
+
+    /**
+     * Re-submit business verification details after rejection (Rate limited to 3 daily attempts).
+     */
+    public function resubmitBusinessVerification(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user || (int) $user->role_id !== 6 || ! $user->isBusinessCustomer()) {
+            return response()->json([
+                'message' => 'Unauthorized. Only Business / Corporate customers can submit verification details.',
+            ], 403);
+        }
+
+        if ($user->verification_status === 'approved') {
+            return response()->json([
+                'message' => 'Your business account is already verified and approved.',
+            ], 422);
+        }
+
+        if ($user->verification_status === 'pending') {
+            return response()->json([
+                'message' => 'Your business account verification is currently under review by our administrators.',
+            ], 422);
+        }
+
+        // Strict daily limit: 3 attempts per calendar day
+        $remainingAttempts = $user->getDailyResubmissionAttemptsRemaining();
+        if ($remainingAttempts <= 0) {
+            return response()->json([
+                'message' => 'You have reached the maximum limit of 3 verification re-submission attempts for today. Please try again tomorrow.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'company_name' => ['required', 'string', 'max:255'],
+            'representative_role' => ['required', 'string', 'max:150'],
+            'tin' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('users', 'tin')->ignore($user->user_id, 'user_id'),
+            ],
+            'contact_number' => ['required', 'string', 'max:30'],
+            'address' => ['required', 'string', 'max:500'],
+            'business_permit' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'], // Max 5MB
+        ], [
+            'tin.unique' => 'This Tax Identification Number (TIN) is already registered to another business account. If your company already has an account, please contact AC TOWER Support.',
+            'business_permit.max' => 'The uploaded business permit must not exceed 5MB.',
+            'business_permit.mimes' => 'The business permit must be a valid PDF, JPG, JPEG, or PNG document.',
+        ]);
+
+        // Normalize TIN
+        $rawTin = (string) $validated['tin'];
+        $digitsOnly = preg_replace('/[^0-9]/', '', $rawTin);
+        if (strlen($digitsOnly) === 9) {
+            $formattedTin = sprintf('%s-%s-%s-000', substr($digitsOnly, 0, 3), substr($digitsOnly, 3, 3), substr($digitsOnly, 6, 3));
+        } elseif (strlen($digitsOnly) === 12) {
+            $formattedTin = sprintf('%s-%s-%s-%s', substr($digitsOnly, 0, 3), substr($digitsOnly, 3, 3), substr($digitsOnly, 6, 3), substr($digitsOnly, 9, 3));
+        } else {
+            $formattedTin = strtoupper(trim($rawTin));
+        }
+
+        // Handle business permit document upload if provided
+        if ($request->hasFile('business_permit')) {
+            $file = $request->file('business_permit');
+            $filename = 'permit_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('uploads/business-permits', $filename, 'public');
+
+            // Ensure file is mirrored to public/uploads/business-permits for frictionless serving
+            $publicPermitDir = public_path('uploads/business-permits');
+            if (! File::exists($publicPermitDir)) {
+                File::makeDirectory($publicPermitDir, 0755, true);
+            }
+            @copy(storage_path('app/public/' . $path), $publicPermitDir . '/' . $filename);
+
+            $user->business_permit_path = $path;
+        }
+
+        // Calculate daily attempt sequence
+        $tz = config('app.timezone', 'Asia/Manila');
+        $isToday = $user->last_resubmitted_at && $user->last_resubmitted_at->timezone($tz)->isToday();
+        $newAttempts = $isToday ? ((int) $user->resubmission_attempts + 1) : 1;
+
+        $user->company_name = trim($validated['company_name']);
+        $user->representative_role = trim($validated['representative_role']);
+        $user->tin = $formattedTin;
+        $user->contact_number = trim($validated['contact_number']);
+        $user->address = trim($validated['address']);
+        $user->verification_status = 'pending';
+        $user->verification_rejection_reason = null;
+        $user->resubmission_attempts = $newAttempts;
+        $user->last_resubmitted_at = now();
+        $user->save();
+
+        if (Schema::hasTable('activity_logs')) {
+            DB::table('activity_logs')->insert([
+                'user_id' => $user->user_id,
+                'action' => 'UPDATE',
+                'description' => "Business customer {$user->name} ({$user->company_name}) re-submitted verification details (Daily attempt {$newAttempts}/3).",
+                'ip_address' => $request->ip(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        $leftToday = max(0, 3 - $newAttempts);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Your business verification details have been successfully re-submitted for admin review. You have {$leftToday} re-submission attempt(s) remaining today.",
+            'user' => [
+                'user_id' => $user->user_id,
+                'account_type' => $user->account_type,
+                'company_name' => $user->company_name,
+                'representative_role' => $user->representative_role,
+                'tin' => $user->tin,
+                'business_permit_path' => $user->business_permit_path,
+                'business_permit_url' => $user->business_permit_url,
+                'verification_status' => $user->verification_status,
+                'verification_rejection_reason' => null,
+                'resubmission_attempts' => $newAttempts,
+                'remaining_daily_attempts' => $leftToday,
+                'can_resubmit_today' => $leftToday > 0,
+                'last_resubmitted_at' => $user->last_resubmitted_at->toISOString(),
+                'address' => $user->address,
+                'contact_number' => $user->contact_number,
+            ],
         ]);
     }
 }

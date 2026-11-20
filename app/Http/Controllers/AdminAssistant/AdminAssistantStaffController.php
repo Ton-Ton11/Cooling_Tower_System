@@ -53,13 +53,116 @@ class AdminAssistantStaffController extends AdminAssistantBaseController
             ]);
         });
 
+        $businessCustomers = \Illuminate\Support\Facades\Schema::hasColumn('users', 'account_type')
+            ? $this->mapBusinessCustomers(
+                $this->businessCustomersBaseQuery()
+                    ->orderByRaw("CASE WHEN users.verification_status = 'pending' THEN 0 WHEN users.verification_status = 'rejected' THEN 1 ELSE 2 END")
+                    ->orderByDesc('users.created_at')
+                    ->get()
+            )
+            : collect();
+
         return response()->json([
             'data' => $staffData,
             'meta' => [
                 'roles' => $roles,
                 'specialties' => DB::table('specialties')->orderBy('specialty_name')->get(['specialty_id', 'specialty_name']),
                 'can_create_super_admin' => false,
+                'business_customers' => $businessCustomers,
+                'pending_business_verifications' => $businessCustomers->where('verification_status', 'pending')->count(),
             ],
+        ]);
+    }
+
+    public function businessCustomersIndex(Request $request): JsonResponse
+    {
+        $this->authorizeRole($request);
+
+        $query = $this->businessCustomersBaseQuery()
+            ->orderByRaw("CASE WHEN users.verification_status = 'pending' THEN 0 WHEN users.verification_status = 'rejected' THEN 1 ELSE 2 END")
+            ->orderByDesc('users.created_at');
+
+        if ($status = strtolower(trim((string) $request->input('status', '')))) {
+            if (in_array($status, ['pending', 'approved', 'rejected'], true)) {
+                $query->where('users.verification_status', $status);
+            }
+        }
+
+        $customers = $this->mapBusinessCustomers($query->get());
+
+        return response()->json([
+            'data' => $customers,
+            'meta' => [
+                'pending_count' => $customers->where('verification_status', 'pending')->count(),
+                'approved_count' => $customers->where('verification_status', 'approved')->count(),
+                'rejected_count' => $customers->where('verification_status', 'rejected')->count(),
+            ],
+        ]);
+    }
+
+    public function verifyBusinessCustomer(Request $request, int $userId): JsonResponse
+    {
+        $this->authorizeRole($request);
+
+        $rawStatus = strtolower(trim((string) ($request->input('status') ?? $request->input('verification_status') ?? $request->input('action') ?? '')));
+        $normalizedStatus = match ($rawStatus) {
+            'approve', 'approved' => 'approved',
+            'reject', 'rejected' => 'rejected',
+            'pending' => 'pending',
+            default => $rawStatus,
+        };
+
+        $request->merge(['verification_status' => $normalizedStatus]);
+
+        $validated = $request->validate([
+            'verification_status' => ['required', Rule::in(['approved', 'rejected'])],
+            'rejection_reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $customer = DB::table('users')
+            ->where('user_id', $userId)
+            ->where('role_id', 6)
+            ->first();
+
+        if (! $customer) {
+            throw ValidationException::withMessages([
+                'user_id' => ['Customer account not found.'],
+            ]);
+        }
+
+        $isApproved = $validated['verification_status'] === 'approved';
+        $rejectionReason = ! $isApproved ? trim((string) ($validated['rejection_reason'] ?? '')) : null;
+
+        DB::table('users')
+            ->where('user_id', $userId)
+            ->update([
+                'verification_status' => $validated['verification_status'],
+                'verification_rejection_reason' => $rejectionReason ?: null,
+                'verified_at' => now(),
+                'verified_by' => (int) $request->user()->user_id,
+                'updated_at' => now(),
+            ]);
+
+        $this->logActivity(
+            (int) $request->user()->user_id,
+            $isApproved ? 'APPROVE' : 'UPDATE',
+            sprintf(
+                '%s Business Customer account for "%s" (TIN: %s, Rep: %s)%s.',
+                $isApproved ? 'Approved' : 'Rejected',
+                $customer->company_name ?: 'Company',
+                $customer->tin ?: 'N/A',
+                $this->formatName($customer->given_name, $customer->middle_name, $customer->last_name),
+                (! $isApproved && $rejectionReason) ? " — Reason: {$rejectionReason}" : ''
+            )
+        );
+
+        $updated = $this->businessCustomersBaseQuery()->where('users.user_id', $userId)->first();
+
+        return response()->json([
+            'message' => $isApproved
+                ? sprintf('Business account for "%s" has been approved and unlocked for service bookings.', $customer->company_name ?: 'Customer')
+                : sprintf('Business account verification for "%s" has been rejected.', $customer->company_name ?: 'Customer'),
+            'data' => $updated ? $this->mapBusinessCustomers(collect([$updated]))->first() : null,
         ]);
     }
 

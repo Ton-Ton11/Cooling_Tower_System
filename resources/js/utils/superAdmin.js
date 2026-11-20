@@ -17,6 +17,8 @@ export const SUPER_ADMIN_ENDPOINTS = {
     reactivateStaff: (userId) => `/super-admin/staff/${userId}/reactivate`,
     archiveStaff: (userId) => `/super-admin/staff/${userId}/deactivate`,
     restoreStaff: (userId) => `/super-admin/staff/${userId}/reactivate`,
+    businessCustomers: "/super-admin/customers/business",
+    verifyBusinessCustomer: (userId) => `/super-admin/customers/${userId}/verify`,
 
     // Technician Teams
     teams: "/super-admin/teams",
@@ -186,6 +188,8 @@ export const ADMIN_ASSISTANT_ENDPOINTS = {
     reactivateStaff: (userId) => `/admin-assistant/staff/${userId}/reactivate`,
     archiveStaff: (userId) => `/admin-assistant/staff/${userId}/deactivate`,
     restoreStaff: (userId) => `/admin-assistant/staff/${userId}/reactivate`,
+    businessCustomers: "/admin-assistant/customers/business",
+    verifyBusinessCustomer: (userId) => `/admin-assistant/customers/${userId}/verify`,
 
     // Dynamic Roles
     roles: "/admin-assistant/roles",
@@ -375,6 +379,7 @@ export const CUSTOMER_ENDPOINTS = {
     announcements: "/customer/announcements",
     warrantyContext: "/customer/warranty-tracking/context",
     trackWarranty: "/customer/warranty-tracking/track",
+    resubmitBusinessVerification: "/customer/business-verification/resubmit",
 };
 
 export const STAFF_ROLE_OPTIONS = [

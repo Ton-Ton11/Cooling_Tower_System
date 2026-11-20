@@ -139,7 +139,7 @@ Route::prefix('super-admin')
             Route::post('/checklists/{checklistId}/complete', 'complete')->name('checklists.complete');
         });
 
-        // ─── Staff & Dynamic Roles ───
+        // ─── Staff & Dynamic Roles & B2B Customer Verification ───
         Route::controller(SuperAdminStaffController::class)->group(function () {
             Route::get('/staff', 'staffIndex')->name('staff.index');
             Route::post('/staff', 'storeStaff')->name('staff.store');
@@ -148,6 +148,10 @@ Route::prefix('super-admin')
             Route::patch('/staff/{userId}/reactivate', 'reactivateStaff')->name('staff.reactivate');
             Route::patch('/staff/{userId}/archive', 'archiveStaff')->name('staff.archive');
             Route::patch('/staff/{userId}/restore', 'restoreStaff')->name('staff.restore');
+
+            // B2B Customer Verification Queue
+            Route::get('/customers/business', 'businessCustomersIndex')->name('customers.business.index');
+            Route::match(['post', 'patch'], '/customers/{userId}/verify', 'verifyBusinessCustomer')->name('customers.business.verify');
         });
 
         Route::controller(RoleManagementController::class)->group(function () {
@@ -396,6 +400,10 @@ Route::prefix('admin-assistant')
             Route::patch('/staff/{userId}/reactivate', 'reactivateStaff')->name('staff.reactivate');
             Route::patch('/staff/{userId}/archive', 'archiveStaff')->name('staff.archive');
             Route::patch('/staff/{userId}/restore', 'restoreStaff')->name('staff.restore');
+
+            // B2B Customer Verification Queue
+            Route::get('/customers/business', 'businessCustomersIndex')->name('customers.business.index');
+            Route::match(['post', 'patch'], '/customers/{userId}/verify', 'verifyBusinessCustomer')->name('customers.business.verify');
         });
 
         Route::controller(RoleManagementController::class)->group(function () {
@@ -684,6 +692,7 @@ Route::prefix('customer')
             Route::get('/dashboard', 'dashboard')->name('dashboard');
             Route::get('/dashboard/data', 'dashboardData')->name('dashboard.data');
             Route::post('/acknowledge-geospatial-alert', 'acknowledgeGeospatialAlert')->name('acknowledge-geospatial-alert');
+            Route::post('/business-verification/resubmit', 'resubmitBusinessVerification')->name('business-verification.resubmit');
             Route::get('/announcements', 'announcementsIndex')->name('announcements.index');
         });
 

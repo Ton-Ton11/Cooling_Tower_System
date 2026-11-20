@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { usePage } from "@inertiajs/react";
+import StatusBadge from "../../Components/StatusBadge";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatDateTime } from "../../utils/superAdmin";
 import {
     resolveScheduleSlots,
@@ -211,6 +213,12 @@ export default function BookingWizard({
     initialUnits = null,
     initialServiceDetails = null,
 }) {
+    const pageAuthUser = usePage()?.props?.auth?.user || null;
+    const currentUser = dashboardData?.user || pageAuthUser || {};
+    const isBusinessAccount = currentUser?.account_type === "business";
+    const businessVerificationStatus = currentUser?.verification_status || "approved";
+    const isUnverifiedBusiness = isBusinessAccount && businessVerificationStatus !== "approved";
+
     const [step, setStep] = useState(initialStep || 1);
     const [services, setServices] = useState([]);
     const [unitTypes, setUnitTypes] = useState(DEFAULT_UNIT_TYPES);
@@ -597,9 +605,18 @@ export default function BookingWizard({
             refNumber.trim().length <= 13 &&
             policyAccepted
         );
-    const canSubmit = canProceedStep1 && canProceedStep2 && canProceedStep3 && canProceedStep4 && finalAcknowledged;
+    const canSubmit = !isUnverifiedBusiness && canProceedStep1 && canProceedStep2 && canProceedStep3 && canProceedStep4 && finalAcknowledged;
 
     const handleNext = () => {
+        if (isUnverifiedBusiness) {
+            addToast(
+                businessVerificationStatus === "rejected"
+                    ? "Booking creation is locked because your business verification was declined. Please contact support."
+                    : "Your Business / Corporate account is currently under admin review. Booking creation will unlock once verified.",
+                "error"
+            );
+            return;
+        }
         if (step === 1 && !canProceedStep1) {
             addToast("Please choose one of the three service categories to proceed.", "error");
             return;
@@ -670,6 +687,15 @@ export default function BookingWizard({
     };
 
     const handleSubmitBooking = async () => {
+        if (isUnverifiedBusiness) {
+            addToast(
+                businessVerificationStatus === "rejected"
+                    ? "Booking creation is locked because your business verification was declined."
+                    : "Your Business / Corporate account is under admin review. Booking creation will unlock once verified.",
+                "error"
+            );
+            return;
+        }
         if (!canSubmit) {
             addToast("Please complete all required fields and accept the confirmation checkbox.", "error");
             return;
@@ -990,6 +1016,59 @@ export default function BookingWizard({
                 {/* Decorative glow */}
                 <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-blue-500/10 to-transparent pointer-events-none" />
             </div>
+
+            {/* Unverified B2B Account Lock Banner */}
+            {isUnverifiedBusiness && (
+                <div
+                    className={`rounded-2xl border p-4 sm:p-5 flex items-start gap-3.5 shadow-sm ${
+                        businessVerificationStatus === "rejected"
+                            ? "bg-red-50/90 border-red-200 text-red-950"
+                            : "bg-amber-50/90 border-amber-200 text-amber-950"
+                    }`}
+                >
+                    <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                            businessVerificationStatus === "rejected"
+                                ? "bg-red-600 text-white"
+                                : "bg-amber-500 text-white"
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="2"
+                                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                            />
+                        </svg>
+                    </div>
+                    <div className="text-xs leading-relaxed flex-1">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className="font-extrabold uppercase tracking-wide text-[11px]">
+                                Booking Trigger Locked • Business Verification Required
+                            </span>
+                            <StatusBadge
+                                status={businessVerificationStatus === "rejected" ? "Rejected" : "Pending Verification"}
+                            />
+                        </div>
+                        <p>
+                            {businessVerificationStatus === "rejected" ? (
+                                <>
+                                    Your business registration for <strong>{currentUser?.company_name}</strong> (TIN: <strong>{currentUser?.tin}</strong>) was not approved.
+                                    {currentUser?.verification_rejection_reason ? (
+                                        <> Reason: <strong>{currentUser.verification_rejection_reason}</strong>.</>
+                                    ) : null}{" "}
+                                    Please contact AC TOWER Customer Support to resolve your verification status.
+                                </>
+                            ) : (
+                                <>
+                                    Your business account for <strong>{currentUser?.company_name}</strong> (TIN: <strong>{currentUser?.tin}</strong>) is currently under admin review. Service booking submission is temporarily locked and will unlock automatically once an administrator approves your business verification.
+                                </>
+                            )}
+                        </p>
+                    </div>
+                </div>
+            )}
 
             {/* Crucial Notice: Service Request & Official Quotation Workflow */}
             <div className="bg-blue-50/90 border border-blue-200/90 rounded-2xl p-4 sm:p-4.5 flex items-start gap-3.5 shadow-sm">
@@ -2269,17 +2348,19 @@ export default function BookingWizard({
                         <button
                             type="button"
                             onClick={handleNext}
-                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-2"
+                            disabled={isUnverifiedBusiness}
+                            title={isUnverifiedBusiness ? "Booking is locked until your Business / Corporate account is verified by an administrator." : undefined}
+                            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
                         >
-                            Next Step
+                            <span>{isUnverifiedBusiness ? "Locked — Pending Business Verification" : "Next Step"}</span>
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
                         </button>
                     ) : (
                         <button
                             type="button"
                             onClick={handleSubmitBooking}
-                            disabled={submitting || !canSubmit}
-                            className="px-7 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm font-extrabold shadow-lg shadow-emerald-500/25 disabled:opacity-50 transition flex items-center gap-2"
+                            disabled={submitting || !canSubmit || isUnverifiedBusiness}
+                            className="px-7 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm font-extrabold shadow-lg shadow-emerald-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
                         >
                             {submitting ? (
                                 <>

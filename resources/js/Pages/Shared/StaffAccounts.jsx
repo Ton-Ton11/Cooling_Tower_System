@@ -32,12 +32,17 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
 
     // State
     const [staff, setStaff] = useState([]);
+    const [businessCustomers, setBusinessCustomers] = useState([]);
+    const [b2bStatusFilter, setB2bStatusFilter] = useState("all"); // 'all' | 'pending' | 'approved' | 'rejected'
+    const [b2bActionTarget, setB2bActionTarget] = useState(null); // { customer, action: 'approved' | 'rejected' }
+    const [b2bRejectionReason, setB2bRejectionReason] = useState("");
+    const [b2bProcessing, setB2bProcessing] = useState(false);
     const [rolesData, setRolesData] = useState([]);
     const [metaSpecialties, setMetaSpecialties] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategory, setSelectedCategory] = useState("all"); // 'all' or role_id (string/number)
-    const [viewMode, setViewMode] = useState("active"); // 'active' | 'deactivated' | 'add' | 'edit'
+    const [viewMode, setViewMode] = useState("active"); // 'active' | 'deactivated' | 'b2b' | 'add' | 'edit'
 
     // Modals
     const [deactivateTarget, setDeactivateTarget] = useState(null);
@@ -90,6 +95,10 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
 
                 if (Array.isArray(resData?.meta?.specialties)) {
                     setMetaSpecialties(resData.meta.specialties);
+                }
+
+                if (Array.isArray(resData?.meta?.business_customers)) {
+                    setBusinessCustomers(resData.meta.business_customers);
                 }
 
                 // If roles meta is also present
@@ -167,6 +176,59 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
 
     const isFormMode = viewMode === "add" || viewMode === "edit";
     const isTechnician = Number(form.role_id) === 5 || Number(form.role_id) === 7;
+
+    const pendingBusinessCount = useMemo(
+        () => businessCustomers.filter((c) => c.verification_status === "pending").length,
+        [businessCustomers]
+    );
+
+    const filteredBusinessCustomers = useMemo(() => {
+        return businessCustomers.filter((c) => {
+            if (b2bStatusFilter !== "all" && c.verification_status !== b2bStatusFilter) {
+                return false;
+            }
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                const matchCompany = c.company_name?.toLowerCase().includes(q);
+                const matchTin = c.tin?.toLowerCase().includes(q);
+                const matchRep = c.full_name?.toLowerCase().includes(q);
+                const matchRole = c.representative_role?.toLowerCase().includes(q);
+                const matchEmail = c.email?.toLowerCase().includes(q);
+                return matchCompany || matchTin || matchRep || matchRole || matchEmail;
+            }
+            return true;
+        });
+    }, [businessCustomers, b2bStatusFilter, searchQuery]);
+
+    const handleVerifyBusinessCustomer = async (customer, status, rejectionReason = "") => {
+        if (!customer || b2bProcessing) return;
+        setB2bProcessing(true);
+
+        const verifyUrl = ep.verifyBusinessCustomer
+            ? ep.verifyBusinessCustomer(customer.user_id)
+            : `${ep.staff.replace(/\/staff$/, "")}/customers/${customer.user_id}/verify`;
+
+        try {
+            const { data } = await window.axios.patch(verifyUrl, {
+                verification_status: status,
+                rejection_reason: status === "rejected" ? rejectionReason.trim() || null : null,
+            });
+            addToast(
+                data?.message ||
+                    (status === "approved"
+                        ? "Business account approved!"
+                        : "Business account verification rejected.")
+            );
+            setB2bActionTarget(null);
+            setB2bRejectionReason("");
+            await fetchStaff(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to update business verification status."), "error");
+        } finally {
+            setB2bProcessing(false);
+        }
+    };
 
     // Handlers: Open Add Form (with optional category pre-selection)
     const openAddForm = (preselectedRoleId = null) => {
@@ -656,14 +718,39 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
             {/* Header */}
             <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
                 <div>
-                    <h1 className="page-title font-display">Staff & Role Management</h1>
+                    <h1 className="page-title font-display">
+                        {viewMode === "b2b" ? "Business Customer (B2B) Verification" : "Staff & Role Management"}
+                    </h1>
                     <p className="page-subtitle">
-                        {viewMode === "deactivated"
+                        {viewMode === "b2b"
+                            ? `${businessCustomers.length} registered B2B corporate accounts (${pendingBusinessCount} pending verification)`
+                            : viewMode === "deactivated"
                             ? `${deactivatedStaff.length} deactivated staff accounts`
                             : `${activeStaff.length} active staff accounts across ${rolesData.length || roleOptions.length} role categories`}
                     </p>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                        className={viewMode === "b2b" ? "btn-primary" : "btn-secondary"}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                        onClick={() => setViewMode(viewMode === "b2b" ? "active" : "b2b")}
+                    >
+                        <span>{viewMode === "b2b" ? "← Staff Directory" : "B2B Verifications"}</span>
+                        {pendingBusinessCount > 0 && (
+                            <span
+                                style={{
+                                    padding: "1px 7px",
+                                    borderRadius: 999,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    background: "#F58A07",
+                                    color: "#fff",
+                                }}
+                            >
+                                {pendingBusinessCount}
+                            </span>
+                        )}
+                    </button>
                     <button
                         className="btn-secondary"
                         onClick={() => {
@@ -699,6 +786,311 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                 </div>
             </div>
 
+            {/* Pending B2B Verification Alert Banner when in Staff View */}
+            {viewMode !== "b2b" && pendingBusinessCount > 0 && (
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 12,
+                        padding: "12px 18px",
+                        borderRadius: 14,
+                        background: "rgba(245,138,7,0.08)",
+                        border: "1px solid rgba(245,138,7,0.3)",
+                        marginBottom: 16,
+                    }}
+                >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span
+                            style={{
+                                width: 10,
+                                height: 10,
+                                borderRadius: "50%",
+                                background: "#F58A07",
+                                flexShrink: 0,
+                            }}
+                        />
+                        <div>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>
+                                {pendingBusinessCount} Business / Corporate Customer Account(s) Pending Verification
+                            </span>
+                            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#B45309" }}>
+                                Inspect submitted company TINs and registration documents to unlock service bookings for verified businesses.
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        className="btn-primary"
+                        style={{ background: "#D97706", padding: "7px 14px", fontSize: 12 }}
+                        onClick={() => setViewMode("b2b")}
+                    >
+                        Review B2B Queue →
+                    </button>
+                </div>
+            )}
+
+            {/* B2B Customer Verification Queue View */}
+            {viewMode === "b2b" ? (
+                <div>
+                    {/* Filter Pills for B2B Status */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                        {[
+                            { id: "all", label: "All B2B Accounts", count: businessCustomers.length },
+                            { id: "pending", label: "Pending Review", count: businessCustomers.filter((c) => c.verification_status === "pending").length },
+                            { id: "approved", label: "Approved", count: businessCustomers.filter((c) => c.verification_status === "approved").length },
+                            { id: "rejected", label: "Rejected", count: businessCustomers.filter((c) => c.verification_status === "rejected").length },
+                        ].map((tab) => {
+                            const active = b2bStatusFilter === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setB2bStatusFilter(tab.id)}
+                                    style={{
+                                        padding: "7px 14px",
+                                        borderRadius: 12,
+                                        border: active ? "2px solid #3F7DFF" : "1px solid #E5E7EB",
+                                        background: active ? "rgba(63,125,255,0.1)" : "#fff",
+                                        color: active ? "#1E2F5F" : "#6B7280",
+                                        fontWeight: active ? 700 : 500,
+                                        fontSize: 12,
+                                        cursor: "pointer",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 6,
+                                    }}
+                                >
+                                    <span>{tab.label}</span>
+                                    <span
+                                        style={{
+                                            padding: "1px 7px",
+                                            borderRadius: 10,
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            background: active ? "#3F7DFF" : "#F3F4F6",
+                                            color: active ? "#fff" : "#6B7280",
+                                        }}
+                                    >
+                                        {tab.count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+
+                        <div style={{ flex: 1, minWidth: 220, marginLeft: "auto" }}>
+                            <input
+                                type="text"
+                                className="input-field"
+                                placeholder="Search company name, TIN, representative, or email..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                style={{ padding: "8px 14px", fontSize: 12 }}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                        <div style={{ overflowX: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+                                <thead>
+                                    <tr style={{ background: "#F8FAFC" }}>
+                                        {["Company & Operating Address", "TIN", "Representative & Role", "Contact & Email", "Business Proof", "Verification Status", "Actions"].map((h) => (
+                                            <th
+                                                key={h}
+                                                style={{
+                                                    padding: "12px 14px",
+                                                    textAlign: h === "Actions" ? "right" : "left",
+                                                    fontSize: 11,
+                                                    fontWeight: 700,
+                                                    letterSpacing: "0.05em",
+                                                    textTransform: "uppercase",
+                                                    color: "#64748B",
+                                                    borderBottom: "1px solid #E2E8F0",
+                                                }}
+                                            >
+                                                {h}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredBusinessCustomers.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={7} style={{ padding: 36, textAlign: "center", color: "#94A3B8", fontSize: 13 }}>
+                                                No Business / Corporate customer accounts matching the current filter.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        filteredBusinessCustomers.map((biz) => (
+                                            <tr key={biz.user_id} style={{ borderTop: "1px solid #F1F5F9" }}>
+                                                <td style={{ padding: "12px 14px", maxWidth: 260 }}>
+                                                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#1E293B" }}>
+                                                        {biz.company_name || "Unnamed Company"}
+                                                    </p>
+                                                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748B" }}>
+                                                        {biz.address}
+                                                    </p>
+                                                </td>
+                                                <td style={{ padding: "12px 14px" }}>
+                                                    <span
+                                                        style={{
+                                                            fontFamily: "monospace",
+                                                            fontSize: 12,
+                                                            fontWeight: 700,
+                                                            padding: "3px 8px",
+                                                            borderRadius: 6,
+                                                            background: "#F1F5F9",
+                                                            color: "#0F172A",
+                                                            border: "1px solid #E2E8F0",
+                                                        }}
+                                                    >
+                                                        {biz.tin || "N/A"}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: "12px 14px" }}>
+                                                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#1E293B" }}>
+                                                        {biz.full_name}
+                                                    </p>
+                                                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#3F7DFF", fontWeight: 600 }}>
+                                                        {biz.representative_role || "Authorized Representative"}
+                                                    </p>
+                                                </td>
+                                                <td style={{ padding: "12px 14px", fontSize: 12, color: "#475569" }}>
+                                                    <p style={{ margin: 0, fontWeight: 600 }}>{biz.email}</p>
+                                                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748B" }}>{biz.contact_number}</p>
+                                                </td>
+                                                <td style={{ padding: "12px 14px", fontSize: 12 }}>
+                                                    {biz.business_permit_url ? (
+                                                        <a
+                                                            href={biz.business_permit_url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                display: "inline-flex",
+                                                                alignItems: "center",
+                                                                gap: 5,
+                                                                padding: "4px 10px",
+                                                                borderRadius: 8,
+                                                                background: "rgba(63,125,255,0.1)",
+                                                                color: "#2563EB",
+                                                                fontWeight: 700,
+                                                                fontSize: 11,
+                                                                textDecoration: "none",
+                                                            }}
+                                                        >
+                                                            <span>View Permit / Proof ↗</span>
+                                                        </a>
+                                                    ) : (
+                                                        <span style={{ fontSize: 11, color: "#94A3B8", fontStyle: "italic" }}>
+                                                            No file attached
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: "12px 14px" }}>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                                        <StatusBadge status={biz.verification_status_label || biz.verification_status} />
+                                                        {biz.resubmission_attempts > 0 && (
+                                                            <span
+                                                                style={{
+                                                                    fontSize: 10,
+                                                                    fontWeight: 700,
+                                                                    padding: "2px 6px",
+                                                                    borderRadius: 4,
+                                                                    background: "#EEF2FF",
+                                                                    color: "#4338CA",
+                                                                    border: "1px solid #C7D2FE",
+                                                                }}
+                                                            >
+                                                                Attempt #{biz.resubmission_attempts}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {biz.verification_status === "rejected" && biz.verification_rejection_reason && (
+                                                        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#DC2626", maxWidth: 180 }}>
+                                                            Reason: {biz.verification_rejection_reason}
+                                                        </p>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                                                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                                                        {biz.verification_status !== "approved" && (
+                                                            <button
+                                                                className="btn-primary"
+                                                                disabled={b2bProcessing}
+                                                                style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, background: "#16A34A" }}
+                                                                onClick={() => handleVerifyBusinessCustomer(biz, "approved")}
+                                                            >
+                                                                ✓ Approve
+                                                            </button>
+                                                        )}
+                                                        {biz.verification_status !== "rejected" && (
+                                                            <button
+                                                                className="btn-danger"
+                                                                disabled={b2bProcessing}
+                                                                style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700 }}
+                                                                onClick={() => {
+                                                                    setB2bActionTarget({ customer: biz, action: "rejected" });
+                                                                    setB2bRejectionReason(biz.verification_rejection_reason || "");
+                                                                }}
+                                                            >
+                                                                ✕ Reject
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Reject B2B Verification Modal with Optional Rejection Reason */}
+                    <Modal
+                        open={Boolean(b2bActionTarget)}
+                        title={`Reject Business Verification for "${b2bActionTarget?.customer?.company_name || "Company"}"?`}
+                        confirmLabel={b2bProcessing ? "Rejecting..." : "Confirm Rejection"}
+                        confirmDisabled={b2bProcessing}
+                        variant="danger"
+                        onConfirm={() =>
+                            handleVerifyBusinessCustomer(
+                                b2bActionTarget?.customer,
+                                "rejected",
+                                b2bRejectionReason
+                            )
+                        }
+                        onCancel={() => {
+                            if (!b2bProcessing) {
+                                setB2bActionTarget(null);
+                                setB2bRejectionReason("");
+                            }
+                        }}
+                    >
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                            <p style={{ margin: 0, fontSize: 13, color: "#64748B" }}>
+                                Rejecting this business registration will keep service bookings locked for{" "}
+                                <strong>{b2bActionTarget?.customer?.company_name}</strong> (TIN:{" "}
+                                <strong>{b2bActionTarget?.customer?.tin}</strong>).
+                            </p>
+                            <div>
+                                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#1E293B", marginBottom: 6 }}>
+                                    Rejection Reason (Optional)
+                                </label>
+                                <textarea
+                                    className="input-field"
+                                    style={{ minHeight: 75, resize: "vertical" }}
+                                    placeholder="e.g. Unable to verify TIN against submitted DTI/SEC registration document..."
+                                    value={b2bRejectionReason}
+                                    onChange={(e) => setB2bRejectionReason(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                    </Modal>
+                </div>
+            ) : (
+            <>
             {/* Role Categories Pill Bar / Tabs */}
             <div
                 style={{
@@ -1091,6 +1483,8 @@ export default function StaffAccounts({ addToast, onDataChanged, endpoints }) {
                     </div>
                 )}
             </div>
+            </>
+            )}
 
             {/* ── Modal: Create / Edit Role Category ──────────────────────────── */}
             <Modal

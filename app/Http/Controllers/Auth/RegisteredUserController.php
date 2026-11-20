@@ -41,43 +41,126 @@ class RegisteredUserController extends Controller
     }
 
     /**
-     * Handle an incoming registration request.
+     * Format a raw TIN string into standard XXX-XXX-XXX or XXX-XXX-XXX-XXX representation.
+     */
+    public static function normalizeTin(?string $rawTin): ?string
+    {
+        $digits = preg_replace('/\D/', '', (string) $rawTin);
+        if ($digits === '' || $digits === null) {
+            return null;
+        }
+
+        $digits = substr($digits, 0, 12);
+        if (strlen($digits) <= 3) {
+            return $digits;
+        }
+        if (strlen($digits) <= 6) {
+            return substr($digits, 0, 3) . '-' . substr($digits, 3);
+        }
+        if (strlen($digits) <= 9) {
+            return substr($digits, 0, 3) . '-' . substr($digits, 3, 3) . '-' . substr($digits, 6);
+        }
+
+        // Pad branch code to 3 digits if 10 or 11 digits provided, or format 12 digits as XXX-XXX-XXX-XXX
+        return substr($digits, 0, 3)
+            . '-' . substr($digits, 3, 3)
+            . '-' . substr($digits, 6, 3)
+            . '-' . substr($digits, 9);
+    }
+
+    /**
+     * Handle an incoming registration request (Individual Customer or Business / Corporate B2B).
      *
      * @throws ValidationException
      */
     public function store(Request $request): RedirectResponse
     {
-        $request->validate([
-            'given_name' => 'required|string|max:255',
-            'middle_name' => 'nullable|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'birthdate' => 'required|date|before:today',
-            'sex' => 'required|in:Male,Female',
-            'street_house' => 'required|string|max:255',
-            'barangay' => 'required|string|max:255',
-            'city' => 'required|string|max:255',
-            'province' => 'required|string|max:255',
-            'landmark' => 'nullable|string|max:255',
-            'address' => [
-                'nullable',
-                'string',
-                'max:1000',
-            ],
-            'contact_number' => ['required', 'string', 'digits:11'],
+        $accountType = $request->input('account_type') === 'business' ? 'business' : 'individual';
+        $isBusiness = $accountType === 'business';
+
+        if ($isBusiness && $request->filled('tin')) {
+            $request->merge([
+                'tin' => static::normalizeTin($request->input('tin')),
+            ]);
+        }
+
+        // If representative_full_name was passed instead of split given_name/last_name, split cleanly
+        if ($isBusiness && (! $request->filled('given_name') || ! $request->filled('last_name')) && $request->filled('representative_name')) {
+            $parts = preg_split('/\s+/', trim((string) $request->input('representative_name')));
+            if (count($parts) === 1) {
+                $request->merge([
+                    'given_name' => $parts[0],
+                    'last_name' => $request->input('last_name') ?: 'Representative',
+                ]);
+            } elseif (count($parts) > 1) {
+                $lastName = array_pop($parts);
+                $request->merge([
+                    'given_name' => implode(' ', $parts),
+                    'last_name' => $lastName,
+                ]);
+            }
+        }
+
+        $rules = [
+            'account_type' => ['nullable', 'string', 'in:individual,business'],
+            'given_name' => ['required', 'string', 'max:100'],
+            'middle_name' => ['nullable', 'string', 'max:100'],
+            'last_name' => ['required', 'string', 'max:100'],
+            'birthdate' => $isBusiness ? ['nullable', 'date', 'before:today'] : ['required', 'date', 'before:today'],
+            'sex' => $isBusiness ? ['nullable', 'in:Male,Female'] : ['required', 'in:Male,Female'],
+            'street_house' => ['required', 'string', 'max:255'],
+            'barangay' => ['required', 'string', 'max:255'],
+            'city' => ['required', 'string', 'max:255'],
+            'province' => ['required', 'string', 'max:255'],
+            'landmark' => ['nullable', 'string', 'max:255'],
+            'address' => ['nullable', 'string', 'max:1000'],
+            'contact_number' => $isBusiness
+                ? ['required', 'string', 'min:7', 'max:20', 'regex:/^[0-9+\-\s()]{7,20}$/']
+                : ['required', 'string', 'digits:11'],
             'email' => [
                 'required',
                 'string',
                 'email',
-                'max:255',
+                'max:150',
                 'unique:users,email',
             ],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
-        ], [
+        ];
+
+        if ($isBusiness) {
+            $rules['company_name'] = ['required', 'string', 'max:255'];
+            $rules['representative_role'] = ['required', 'string', 'max:150'];
+            $rules['tin'] = [
+                'required',
+                'string',
+                'max:50',
+                'regex:/^\d{3}-\d{3}-\d{3}(-\d{3})?$/',
+                'unique:users,tin',
+            ];
+            $rules['business_permit'] = [
+                'nullable',
+                'file',
+                'mimes:pdf,jpg,jpeg,png',
+                'max:5120',
+            ];
+        }
+
+        $request->validate($rules, [
+            'given_name.required' => $isBusiness ? 'Please enter the representative’s first/given name.' : 'The given name field is required.',
+            'last_name.required' => $isBusiness ? 'Please enter the representative’s last name.' : 'The last name field is required.',
+            'company_name.required' => 'Please enter your registered company or business name.',
+            'representative_role.required' => 'Please enter your job title or role in the company (e.g., CEO, Manager, Authorized Representative).',
+            'tin.required' => 'Please enter your company’s Tax Identification Number (TIN).',
+            'tin.regex' => 'Please enter a valid 9-digit or 12-digit TIN formatted as XXX-XXX-XXX or XXX-XXX-XXX-XXX.',
+            'tin.unique' => 'This Tax Identification Number (TIN) is already registered to an existing business account. To prevent business impersonation, duplicate TINs are not allowed. Please contact your company administrator or AC TOWER Customer Support if you need assistance.',
+            'business_permit.mimes' => 'The business registration proof must be a PDF, JPG, or PNG file.',
+            'business_permit.max' => 'The business registration proof must not exceed 5MB.',
             'contact_number.digits' => 'The contact number must be exactly 11 digits.',
-            'street_house.required' => 'Please enter your street or house/building number.',
-            'barangay.required' => 'Please enter and select your barangay.',
-            'city.required' => 'City is required (automatically filled when selecting your barangay).',
-            'province.required' => 'Province is required (automatically filled when selecting your barangay).',
+            'contact_number.regex' => 'Please enter a valid Philippine mobile or landline contact number.',
+            'street_house.required' => $isBusiness ? 'Please enter the company building, unit, or street address.' : 'Please enter your street or house/building number.',
+            'barangay.required' => 'Please enter and select the barangay.',
+            'city.required' => 'City is required (automatically filled when selecting the barangay).',
+            'province.required' => 'Province is required (automatically filled when selecting the barangay).',
         ]);
 
         // Compose standardized full address from street_house, barangay, city, province, and optional landmark
@@ -99,19 +182,73 @@ class RegisteredUserController extends Controller
             $finalAddress = trim((string) $request->address);
         }
 
+        // Handle optional Business Proof / Permit Upload
+        $businessPermitPath = null;
+        if ($isBusiness && $request->hasFile('business_permit')) {
+            $file = $request->file('business_permit');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'pdf');
+            $safeTin = preg_replace('/\D/', '', (string) $request->input('tin'));
+            $filename = 'permit_' . ($safeTin ?: 'biz') . '_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $ext;
+
+            // Store in storage/app/public/uploads/business-permits
+            $storedRelativePath = $file->storeAs('uploads/business-permits', $filename, 'public');
+
+            // Also mirror in public/uploads/business-permits matching existing public/uploads/ convention
+            try {
+                $publicUploadDir = public_path('uploads/business-permits');
+                if (! \Illuminate\Support\Facades\File::exists($publicUploadDir)) {
+                    \Illuminate\Support\Facades\File::makeDirectory($publicUploadDir, 0755, true);
+                }
+                $storageFullPath = storage_path('app/public/' . $storedRelativePath);
+                if (\Illuminate\Support\Facades\File::exists($storageFullPath)) {
+                    \Illuminate\Support\Facades\File::copy($storageFullPath, $publicUploadDir . DIRECTORY_SEPARATOR . $filename);
+                }
+            } catch (\Throwable $e) {
+                // Public storage disk fallback route in routes/web.php will still serve the file
+            }
+
+            $businessPermitPath = 'uploads/business-permits/' . $filename;
+        }
+
         $user = User::create([
             'role_id' => 6,
-            'given_name' => $request->given_name,
-            'middle_name' => $request->middle_name,
-            'last_name' => $request->last_name,
-            'birthdate' => $request->birthdate,
-            'sex' => $request->sex,
+            'account_type' => $accountType,
+            'company_name' => $isBusiness ? trim((string) $request->input('company_name')) : null,
+            'representative_role' => $isBusiness ? trim((string) $request->input('representative_role')) : null,
+            'tin' => $isBusiness ? $request->input('tin') : null,
+            'business_permit_path' => $businessPermitPath,
+            'verification_status' => $isBusiness ? 'pending' : 'approved',
+            'given_name' => trim((string) $request->given_name),
+            'middle_name' => $request->filled('middle_name') ? trim((string) $request->middle_name) : null,
+            'last_name' => trim((string) $request->last_name),
+            'birthdate' => $request->filled('birthdate') ? $request->birthdate : null,
+            'sex' => $request->filled('sex') ? $request->sex : 'Male',
             'address' => $finalAddress,
-            'contact_number' => $request->contact_number,
-            'email' => strtolower($request->email),
+            'contact_number' => trim((string) $request->contact_number),
+            'email' => strtolower(trim((string) $request->email)),
             'password' => Hash::make($request->password),
             'email_verified_at' => now(),
         ]);
+
+        if ($isBusiness) {
+            try {
+                \Illuminate\Support\Facades\DB::table('activity_logs')->insert([
+                    'user_id' => $user->user_id,
+                    'action_type' => 'B2B_REGISTER',
+                    'description' => sprintf(
+                        'Business customer account registered for "%s" (TIN: %s) by %s (%s) — Pending admin verification.',
+                        $user->company_name,
+                        $user->tin,
+                        $user->name,
+                        $user->representative_role
+                    ),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            } catch (\Throwable $e) {
+                // Ignore if activity log fails
+            }
+        }
 
         Auth::login($user);
 

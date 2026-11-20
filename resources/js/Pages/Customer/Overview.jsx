@@ -38,7 +38,14 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
     const [copiedKey, setCopiedKey] = useState(null);
     const [outsideZamboangaAlertOpen, setOutsideZamboangaAlertOpen] = useState(false);
 
+    const user = dashboardData?.user ?? {};
+    const isUnverifiedBusiness =
+        user?.account_type === "business" && (user?.verification_status || "pending") !== "approved";
+
     const handleAttemptBookService = (serviceId = null) => {
+        if (isUnverifiedBusiness) {
+            return;
+        }
         if (serviceId && onSelectServiceToBook) {
             onSelectServiceToBook(serviceId);
         }
@@ -89,7 +96,6 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
         return (dashboardData?.services ?? []).filter(s => s.is_active !== false && s.is_active !== 0);
     }, [dashboardData?.services]);
     const announcements = dashboardData?.announcements ?? [];
-    const user = dashboardData?.user ?? {};
     const upcoming = dashboardData?.upcoming_appointment ?? null;
     const toDoItems = dashboardData?.to_do_items ?? [];
 
@@ -206,12 +212,14 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                             <div className="flex flex-col gap-2.5 shrink-0 self-start md:self-auto">
                                 <button
                                     onClick={() => handleAttemptBookService(null)}
-                                    className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-extrabold shadow-lg shadow-blue-900/40 transition transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                                    disabled={isUnverifiedBusiness}
+                                    title={isUnverifiedBusiness ? "Booking is locked until your Business / Corporate account is verified by an administrator." : undefined}
+                                    className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-extrabold shadow-lg shadow-blue-900/40 transition transform hover:-translate-y-0.5 disabled:opacity-55 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
                                 >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={icons.plus} />
                                     </svg>
-                                    <span>Book a Service Appointment</span>
+                                    <span>{isUnverifiedBusiness ? "Booking Locked (Pending Review)" : "Book a Service Appointment"}</span>
                                 </button>
                                 <button
                                     onClick={() => onNavigate("bookings")}
@@ -373,9 +381,11 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
                                                 <button
                                                     onClick={() => handleAttemptBookService(srv.service_id)}
-                                                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1"
+                                                    disabled={isUnverifiedBusiness}
+                                                    title={isUnverifiedBusiness ? "Booking is locked until your Business / Corporate account is verified." : undefined}
+                                                    className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
                                                 >
-                                                    <span>Request</span>
+                                                    <span>{isUnverifiedBusiness ? "Locked" : "Request"}</span>
                                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d={icons.arrow} />
                                                     </svg>

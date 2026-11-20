@@ -2,7 +2,14 @@ import React from "react";
 
 const cfg = {
     Pending: { bg: "rgba(245,138,7,0.12)", text: "#D97706", dot: "#F58A07" },
+    pending: { bg: "rgba(245,138,7,0.12)", text: "#D97706", dot: "#F58A07" },
+    "Pending Verification": { bg: "rgba(245,138,7,0.12)", text: "#D97706", dot: "#F58A07" },
+    "Under Review": { bg: "rgba(245,138,7,0.12)", text: "#D97706", dot: "#F58A07" },
     Approved: { bg: "rgba(63,125,255,0.12)", text: "#2563EB", dot: "#3F7DFF" },
+    approved: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
+    Verified: { bg: "rgba(34,197,94,0.12)", text: "#16A34A", dot: "#22C55E" },
+    Rejected: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
+    rejected: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
     "Partially Completed": {
         bg: "rgba(13,148,136,0.12)",
         text: "#0F766E",

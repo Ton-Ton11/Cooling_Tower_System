@@ -673,6 +673,24 @@ class CustomerBookingController extends Controller
         $user = $request->user();
         $userId = (int) $user->user_id;
 
+        // Guard: Restrict booking creation for unverified Business / Corporate accounts
+        if (($user->account_type ?? 'individual') === 'business' && ($user->verification_status ?? 'pending') !== 'approved') {
+            $isRejected = ($user->verification_status ?? 'pending') === 'rejected';
+            $reasonSuffix = ($isRejected && ! empty($user->verification_rejection_reason))
+                ? ' Reason: ' . $user->verification_rejection_reason
+                : '';
+            $message = $isRejected
+                ? 'Your Business / Corporate account verification was declined.' . $reasonSuffix . ' Please contact AC TOWER Customer Support for assistance.'
+                : 'Your Business / Corporate account is currently under admin review. Service booking requests will be unlocked as soon as your company details and TIN are verified.';
+
+            return response()->json([
+                'message' => $message,
+                'errors' => [
+                    'verification_status' => [$message],
+                ],
+            ], 403);
+        }
+
         // Auto-heal primary services in database and expire timed-out incomplete payments
         static::ensurePrimaryServicesExist();
         static::autoExpireIncompletePayments();

@@ -2,11 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory;
     use Notifiable;
@@ -18,6 +19,17 @@ class User extends Authenticatable
 
     protected $fillable = [
         'role_id',
+        'account_type',
+        'company_name',
+        'representative_role',
+        'tin',
+        'business_permit_path',
+        'verification_status',
+        'verification_rejection_reason',
+        'resubmission_attempts',
+        'last_resubmitted_at',
+        'verified_at',
+        'verified_by',
         'given_name',
         'middle_name',
         'last_name',
@@ -39,6 +51,11 @@ class User extends Authenticatable
     protected $appends = [
         'name',
         'profile_photo_url',
+        'business_permit_url',
+        'is_business_account',
+        'is_business_verified',
+        'remaining_daily_attempts',
+        'can_resubmit_today',
         'geospatial_alert_acknowledged',
         'is_currently_online',
     ];
@@ -57,7 +74,91 @@ class User extends Authenticatable
         'last_seen_at' => 'datetime',
         'hide_active_status' => 'boolean',
         'geospatial_alert_acknowledged_at' => 'datetime',
+        'resubmission_attempts' => 'integer',
+        'last_resubmitted_at' => 'datetime',
+        'verified_at' => 'datetime',
+        'verified_by' => 'integer',
     ];
+
+    public function verifiedBy()
+    {
+        return $this->belongsTo(self::class, 'verified_by', 'user_id');
+    }
+
+    public function isBusinessCustomer(): bool
+    {
+        return ($this->account_type ?? 'individual') === 'business';
+    }
+
+    public function isBusinessVerified(): bool
+    {
+        if (! $this->isBusinessCustomer()) {
+            return true;
+        }
+
+        return ($this->verification_status ?? 'pending') === 'approved';
+    }
+
+    public function getIsBusinessAccountAttribute(): bool
+    {
+        return $this->isBusinessCustomer();
+    }
+
+    public function getIsBusinessVerifiedAttribute(): bool
+    {
+        return $this->isBusinessVerified();
+    }
+
+    public function getDailyResubmissionAttemptsRemaining(): int
+    {
+        if (! $this->isBusinessCustomer()) {
+            return 0;
+        }
+
+        $maxDailyAttempts = 3;
+
+        if (is_null($this->last_resubmitted_at)) {
+            return $maxDailyAttempts;
+        }
+
+        $tz = config('app.timezone', 'Asia/Manila');
+        $isToday = $this->last_resubmitted_at->timezone($tz)->isToday();
+
+        if (! $isToday) {
+            return $maxDailyAttempts;
+        }
+
+        return max(0, $maxDailyAttempts - (int) ($this->resubmission_attempts ?? 0));
+    }
+
+    public function getRemainingDailyAttemptsAttribute(): int
+    {
+        return $this->getDailyResubmissionAttemptsRemaining();
+    }
+
+    public function getCanResubmitTodayAttribute(): bool
+    {
+        return $this->getDailyResubmissionAttemptsRemaining() > 0;
+    }
+
+    public function getBusinessPermitUrlAttribute(): ?string
+    {
+        if (empty($this->business_permit_path)) {
+            return null;
+        }
+
+        if (str_starts_with($this->business_permit_path, 'http://') || str_starts_with($this->business_permit_path, 'https://')) {
+            return $this->business_permit_path;
+        }
+
+        $relativePath = ltrim(preg_replace('#^/?storage/#i', '', $this->business_permit_path), '/');
+
+        if (\Illuminate\Support\Facades\File::exists(public_path($relativePath))) {
+            return '/' . $relativePath;
+        }
+
+        return '/storage/' . $relativePath;
+    }
 
     public function getIsCurrentlyOnlineAttribute(): bool
     {

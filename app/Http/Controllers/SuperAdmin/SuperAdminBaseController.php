@@ -166,6 +166,93 @@ abstract class SuperAdminBaseController extends Controller
             ]);
     }
 
+    protected function businessCustomersBaseQuery()
+    {
+        return DB::table('users')
+            ->leftJoin('users as verifiers', 'verifiers.user_id', '=', 'users.verified_by')
+            ->where('users.role_id', 6)
+            ->where('users.account_type', 'business')
+            ->select([
+                'users.user_id',
+                'users.role_id',
+                'users.account_type',
+                'users.company_name',
+                'users.representative_role',
+                'users.tin',
+                'users.business_permit_path',
+                'users.verification_status',
+                'users.verification_rejection_reason',
+                'users.resubmission_attempts',
+                'users.last_resubmitted_at',
+                'users.verified_at',
+                'users.verified_by',
+                'users.given_name',
+                'users.middle_name',
+                'users.last_name',
+                'users.address',
+                'users.contact_number',
+                'users.email',
+                'users.is_active',
+                'users.created_at',
+                'users.updated_at',
+                'verifiers.given_name as verifier_given_name',
+                'verifiers.middle_name as verifier_middle_name',
+                'verifiers.last_name as verifier_last_name',
+            ]);
+    }
+
+    protected function mapBusinessCustomers(Collection $rows): Collection
+    {
+        return $rows->map(function ($row) {
+            $permitPath = $row->business_permit_path ?? null;
+            $permitUrl = null;
+            if (! empty($permitPath)) {
+                $clean = ltrim(preg_replace('#^/?storage/#i', '', $permitPath), '/');
+                $permitUrl = \Illuminate\Support\Facades\File::exists(public_path($clean))
+                    ? '/' . $clean
+                    : '/storage/' . $clean;
+            }
+
+            $status = strtolower((string) ($row->verification_status ?? 'pending'));
+            $statusLabel = match ($status) {
+                'approved' => 'Approved',
+                'rejected' => 'Rejected',
+                default => 'Pending',
+            };
+
+            return [
+                'user_id' => (int) $row->user_id,
+                'role_id' => (int) $row->role_id,
+                'account_type' => $row->account_type ?? 'business',
+                'company_name' => $row->company_name,
+                'representative_role' => $row->representative_role,
+                'tin' => $row->tin,
+                'business_permit_path' => $permitPath,
+                'business_permit_url' => $permitUrl,
+                'verification_status' => $status,
+                'verification_status_label' => $statusLabel,
+                'verification_rejection_reason' => $row->verification_rejection_reason,
+                'resubmission_attempts' => (int) ($row->resubmission_attempts ?? 0),
+                'last_resubmitted_at' => $row->last_resubmitted_at ?? null,
+                'verified_at' => $row->verified_at,
+                'verified_by' => $row->verified_by ? (int) $row->verified_by : null,
+                'verified_by_name' => ! empty($row->verifier_given_name)
+                    ? $this->formatName($row->verifier_given_name, $row->verifier_middle_name ?? null, $row->verifier_last_name ?? '')
+                    : null,
+                'given_name' => $row->given_name,
+                'middle_name' => $row->middle_name,
+                'last_name' => $row->last_name,
+                'full_name' => $this->formatName($row->given_name, $row->middle_name, $row->last_name),
+                'address' => $row->address,
+                'contact_number' => $row->contact_number,
+                'email' => $row->email,
+                'is_active' => $row->is_active === null ? true : (bool) $row->is_active,
+                'created_at' => $row->created_at,
+                'updated_at' => $row->updated_at,
+            ];
+        })->values();
+    }
+
     protected function latestPaymentSubquery()
     {
         return DB::table('payment as p1')
