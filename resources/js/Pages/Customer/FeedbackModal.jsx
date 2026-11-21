@@ -107,7 +107,7 @@ export default function FeedbackModal({ booking, isOpen, onClose, onSuccess, add
                         <div className="flex justify-between text-blue-700">
                             <span>Less Reservation Fee</span>
                             <span className="font-bold">
-                                - {formatCurrency(turnover.reservation_down_payment || 300)}
+                                - {formatCurrency(turnover.reservation_down_payment || 50)}
                             </span>
                         </div>
                         <div className="border-t border-dashed border-emerald-300 pt-1.5 flex justify-between items-center text-sm font-extrabold text-emerald-800">

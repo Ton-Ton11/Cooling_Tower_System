@@ -119,7 +119,7 @@ export default function ReschedulePage({
     // Rescheduling is FREE during Approved, Pending, or Reschedule Notice.
     // Reschedule fee applies ONLY during In-Progress status.
     const isFeeRequired = isInProgressStatus && !isManagerNotice;
-    const rescheduleFee = isFeeRequired ? (Number(scheduleConfig?.reschedule_fee) || 150.0) : 0.0;
+    const rescheduleFee = isFeeRequired ? (Number(scheduleConfig?.reschedule_fee) || 50.0) : 0.0;
     const isFreeReschedule = !isFeeRequired;
 
     const minDateStr = useMemo(() => getTodayLocalYmd(), []);

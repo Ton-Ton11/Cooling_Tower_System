@@ -711,12 +711,30 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
         if (!managingChecklist || managingChecklist.status !== "Pending" || !selectedCategoryItem || submittingCategoryItem) return;
 
         const statusLower = (selectedCategoryItem.status || "").toLowerCase();
-        const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+        const isLost = statusLower === "lost";
+        const isDamaged = ["damaged", "broken"].includes(statusLower);
+        const isLostDamaged = statusLower === "lost/damaged";
         const isBorrowed = statusLower === "borrowed";
+
+        if (isLost) {
+            addToast(
+                `"${selectedCategoryItem.item_name}" is marked as lost in inventory and cannot be added to a checklist.`,
+                "error",
+            );
+            return;
+        }
 
         if (isDamaged) {
             addToast(
-                `"${selectedCategoryItem.item_name}" is damaged / lost and cannot be added to a checklist.`,
+                `"${selectedCategoryItem.item_name}" is damaged and cannot be added to a checklist.`,
+                "error",
+            );
+            return;
+        }
+
+        if (isLostDamaged) {
+            addToast(
+                `"${selectedCategoryItem.item_name}" is lost / damaged and cannot be added to a checklist.`,
                 "error",
             );
             return;
@@ -2230,7 +2248,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                                                 : item.status === "damaged"
                                                                                                 ? "#FEE2E2"
                                                                                                 : item.status === "lost"
-                                                                                                ? "#4B5563"
+                                                                                                ? "#FEF3C7"
                                                                                                 : "#F3F4F6",
                                                                                         color:
                                                                                             item.status === "assigned"
@@ -2240,12 +2258,16 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                                                 : item.status === "damaged"
                                                                                                 ? "#991B1B"
                                                                                                 : item.status === "lost"
-                                                                                                ? "#FFFFFF"
+                                                                                                ? "#92400E"
                                                                                                 : "#374151",
                                                                                     }}
                                                                                 >
                                                                                     {item.status === "assigned"
                                                                                         ? "Assigned"
+                                                                                        : item.status === "lost"
+                                                                                        ? "Lost"
+                                                                                        : item.status === "damaged"
+                                                                                        ? "Damaged"
                                                                                         : item.status}
                                                                                 </span>
                                                                             ) : (
@@ -2444,14 +2466,20 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                             </option>
                             {filteredCategoryCatalog.map((catItem) => {
                                 const statusLower = (catItem.status || "").toLowerCase();
-                                const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+                                const isLost = statusLower === "lost";
+                                const isDamaged = ["damaged", "broken"].includes(statusLower);
+                                const isLostDamaged = statusLower === "lost/damaged";
                                 const isBorrowed = statusLower === "borrowed";
                                 const isOutOfStock = Number(catItem.quantity_on_hand) <= 0;
                                 const isArchived = Boolean(catItem.is_archived);
                                 const isUnavailable =
-                                    isArchived || isDamaged || isBorrowed || isOutOfStock;
-                                const statusText = isDamaged
-                                    ? "DAMAGED / BROKEN"
+                                    isArchived || isLost || isDamaged || isLostDamaged || isBorrowed || isOutOfStock;
+                                const statusText = isLost
+                                    ? "LOST"
+                                    : isDamaged
+                                    ? "DAMAGED"
+                                    : isLostDamaged
+                                    ? "LOST / DAMAGED"
                                     : isBorrowed
                                     ? "CURRENTLY IN USE"
                                     : isOutOfStock
@@ -2478,7 +2506,9 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                     {/* Selected Item Stock & Details Preview */}
                     {selectedCategoryItem && (() => {
                         const selStatusLower = (selectedCategoryItem.status || "").toLowerCase();
-                        const selIsDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(selStatusLower);
+                        const selIsLost = selStatusLower === "lost";
+                        const selIsDamaged = ["damaged", "broken"].includes(selStatusLower);
+                        const selIsLostDamaged = selStatusLower === "lost/damaged";
                         const selIsBorrowed = selStatusLower === "borrowed";
 
                         return (
@@ -2487,14 +2517,14 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                     padding: "10px 12px",
                                     borderRadius: 8,
                                     background:
-                                        selIsDamaged || categoryItemAvailableStock <= 0
-                                            ? "#FEF2F2"
+                                        selIsLost || selIsDamaged || selIsLostDamaged || categoryItemAvailableStock <= 0
+                                            ? (selIsLost ? "#FEF3C7" : "#FEF2F2")
                                             : selIsBorrowed
                                             ? "#EFF6FF"
                                             : "#F0FDF4",
                                     border: `1px solid ${
-                                        selIsDamaged || categoryItemAvailableStock <= 0
-                                            ? "#FECACA"
+                                        selIsLost || selIsDamaged || selIsLostDamaged || categoryItemAvailableStock <= 0
+                                            ? (selIsLost ? "#FCD34D" : "#FECACA")
                                             : selIsBorrowed
                                             ? "#BFDBFE"
                                             : "#BBF7D0"
@@ -2530,9 +2560,17 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                         {selectedCategoryItem.sub_category ||
                                             selectedCategoryItem.item_type}
                                     </span>
-                                    {selIsDamaged ? (
+                                    {selIsLost ? (
+                                        <span style={{ color: "#D97706", fontWeight: 700 }}>
+                                            Lost in Inventory
+                                        </span>
+                                    ) : selIsDamaged ? (
                                         <span style={{ color: "#DC2626", fontWeight: 700 }}>
-                                            Damaged / Lost in Inventory
+                                            Damaged in Inventory
+                                        </span>
+                                    ) : selIsLostDamaged ? (
+                                        <span style={{ color: "#DC2626", fontWeight: 700 }}>
+                                            Lost / Damaged in Inventory
                                         </span>
                                     ) : selIsBorrowed ? (
                                         <span style={{ color: "#1E40AF", fontWeight: 700 }}>

@@ -122,7 +122,7 @@ export default function CancelModal({ booking, isOpen, onClose, onSuccess, addTo
                                 <div>
                                     <span className="font-bold text-gray-900 block">Pick Up Instead (Cancel Delivery & Installation)</span>
                                     <span className="text-rose-700 font-semibold text-[11px]">
-                                        Note: Installation booking fee (₱300.00) is non-refundable. Remaining unit balance payable upon store pick up.
+                                        Note: Installation booking fee (₱50.00) is non-refundable. Remaining unit balance payable upon store pick up.
                                     </span>
                                 </div>
                             </label>

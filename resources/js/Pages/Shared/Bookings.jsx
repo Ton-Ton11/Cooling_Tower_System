@@ -1744,7 +1744,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#2563EB", marginBottom: 6 }}>
                                         <span>Less Reservation Fee</span>
                                         <span style={{ fontWeight: 700 }}>
-                                            - {formatCurrency(turnover.reservation_down_payment || 300)}
+                                            - {formatCurrency(turnover.reservation_down_payment || 50)}
                                         </span>
                                     </div>
                                     <div style={{ borderTop: "1px dashed #86EFAC", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 800, color: "#15803D" }}>

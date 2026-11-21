@@ -38,20 +38,19 @@ class ChecklistManagementTest extends TestCase
 
     protected function createTestChecklist(): ToolChecklist
     {
-        // Get or create booking
-        $bookingId = DB::table('bookings')->value('booking_id');
-        if (! $bookingId) {
-            $clientId = DB::table('users')->where('role_id', 6)->value('user_id') ?: 1;
-            $serviceId = DB::table('services')->value('service_id') ?: 1;
-            $bookingId = DB::table('bookings')->insertGetId([
-                'client_id' => $clientId,
-                'service_id' => $serviceId,
-                'scheduled_date' => now()->addDays(2),
-                'booking_status' => 'Pending',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
+        $nonOcularServiceId = DB::table('services')
+            ->where('service_name', 'not like', '%ocular%')
+            ->value('service_id') ?: 1;
+
+        $clientId = DB::table('users')->where('role_id', 6)->value('user_id') ?: 1;
+        $bookingId = DB::table('bookings')->insertGetId([
+            'client_id' => $clientId,
+            'service_id' => $nonOcularServiceId,
+            'scheduled_date' => now()->addDays(2),
+            'booking_status' => 'Pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $techId = DB::table('users')->where('role_id', 5)->value('user_id') ?: 1;
 
@@ -226,6 +225,102 @@ class ChecklistManagementTest extends TestCase
         // Clean up
         DB::table('tool_checklist_items')->where('checklist_id', $checklist->checklist_id)->delete();
         DB::table('inventory_items')->whereIn('item_id', [$materialId, $toolId])->delete();
+        $checklist->delete();
+    }
+
+    public function test_technician_can_batch_update_tool_statuses_in_checklist(): void
+    {
+        $technician = User::where('role_id', 5)->first();
+        if (! $technician) {
+            $technician = User::create([
+                'given_name' => 'Tech',
+                'last_name' => 'Tester',
+                'email' => 'tech.batch@coolingtower.com',
+                'password' => 'password',
+                'role_id' => 5,
+                'is_head_technician' => false,
+                'is_active' => true,
+                'email_verified_at' => now(),
+                'birthdate' => '1992-05-10',
+                'sex' => 'Male',
+                'contact_number' => '09170000005',
+                'address' => 'Field Station',
+            ]);
+        }
+
+        $checklist = $this->createTestChecklist();
+
+        $tool1Id = DB::table('inventory_items')->insertGetId([
+            'item_name' => 'Wrench Set Alpha',
+            'item_type' => 'Tool',
+            'inventory_mode' => 'worker',
+            'tool_subtype' => 'hand',
+            'quantity_on_hand' => 5,
+            'initial_stock' => 5,
+            'reorder_level' => 1,
+            'unit' => 'pcs',
+            'status' => 'Available',
+            'created_at' => now(),
+            'last_updated' => now(),
+        ]);
+
+        $tool2Id = DB::table('inventory_items')->insertGetId([
+            'item_name' => 'Impact Driver Beta',
+            'item_type' => 'Tool',
+            'inventory_mode' => 'worker',
+            'tool_subtype' => 'power',
+            'quantity_on_hand' => 2,
+            'initial_stock' => 2,
+            'reorder_level' => 1,
+            'unit' => 'unit',
+            'status' => 'Available',
+            'created_at' => now(),
+            'last_updated' => now(),
+        ]);
+
+        $item1 = ToolChecklistItem::create([
+            'checklist_id' => $checklist->checklist_id,
+            'item_id' => $tool1Id,
+            'item_type' => 'Tool',
+            'quantity_requested' => 1,
+            'quantity_approved' => 1,
+            'status' => 'assigned',
+        ]);
+
+        $item2 = ToolChecklistItem::create([
+            'checklist_id' => $checklist->checklist_id,
+            'item_id' => $tool2Id,
+            'item_type' => 'Tool',
+            'quantity_requested' => 1,
+            'quantity_approved' => 1,
+            'status' => 'assigned',
+        ]);
+
+        $response = $this->actingAs($technician)
+            ->patchJson("/technician/checklists/{$checklist->checklist_id}/items/batch-status", [
+                'items' => [
+                    [
+                        'item_id' => $item1->id,
+                        'status' => 'returned',
+                    ],
+                    [
+                        'item_id' => $item2->id,
+                        'status' => 'damaged',
+                    ],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'success' => true,
+        ]);
+
+        $this->assertEquals('returned', $item1->fresh()->status);
+        $this->assertEquals('damaged', $item2->fresh()->status);
+
+        // Clean up
+        DB::table('tool_checklist_items')->where('checklist_id', $checklist->checklist_id)->delete();
+        DB::table('inventory_items')->whereIn('item_id', [$tool1Id, $tool2Id])->delete();
         $checklist->delete();
     }
 }

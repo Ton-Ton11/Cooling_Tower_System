@@ -57,20 +57,34 @@ class ExampleDataSeeder extends Seeder
         $manager    = User::where('email', 'manager.maria@coolingtower.com')->first();
         $adminAsst  = User::where('email', 'admin.juan@coolingtower.com')->first();
         $toolsMan   = User::where('email', 'toolsman.pedro@coolingtower.com')->first();
-        $headTech   = User::where('email', 'technician.head@coolingtower.com')->first();
-        $techDanilo = User::where('email', 'technician.first@coolingtower.com')->first();
-        $techArnel  = User::where('email', 'technician.second@coolingtower.com')->first();
-        $customer   = User::where('email', 'customer@coolingtower.com')->first();
+        $headTech    = User::where('email', 'technician.head@coolingtower.com')->first();
+        $techDanilo  = User::where('email', 'technician.first@coolingtower.com')->first();
+        $techArnel   = User::where('email', 'technician.second@coolingtower.com')->first();
+        $techMark    = User::where('email', 'technician.third@coolingtower.com')->first();
+        $techRodel   = User::where('email', 'technician.fourth@coolingtower.com')->first();
+        $techCrisanto= User::where('email', 'technician.fifth@coolingtower.com')->first();
+        $techGilbert = User::where('email', 'technician.sixth@coolingtower.com')->first();
+        $techEduardo = User::where('email', 'technician.seventh@coolingtower.com')->first();
+        $techJomar   = User::where('email', 'technician.eighth@coolingtower.com')->first();
+        $techNestor  = User::where('email', 'technician.ninth@coolingtower.com')->first();
+        $customer    = User::where('email', 'customer@coolingtower.com')->first();
 
-        $adminId    = $superAdmin?->user_id ?? 1;
-        $managerId  = $manager?->user_id ?? 2;
-        $adminAsstId = $adminAsst?->user_id ?? 3;
+        $adminId       = $superAdmin?->user_id ?? 1;
+        $managerId     = $manager?->user_id ?? 2;
+        $adminAsstId   = $adminAsst?->user_id ?? 3;
         $adminAsstName = $adminAsst ? trim($adminAsst->given_name . ' ' . $adminAsst->last_name) : 'Juan Mercado';
-        $toolsManId = $toolsMan?->user_id ?? 4;
-        $headTechId = $headTech?->user_id ?? 5;
-        $daniloId   = $techDanilo?->user_id ?? 6;
-        $arnelId    = $techArnel?->user_id ?? 7;
-        $clientId   = $customer?->user_id ?? 8;
+        $toolsManId    = $toolsMan?->user_id ?? 4;
+        $headTechId    = $headTech?->user_id ?? 5;
+        $daniloId      = $techDanilo?->user_id ?? 6;
+        $arnelId       = $techArnel?->user_id ?? 7;
+        $markId        = $techMark?->user_id ?? 8;
+        $rodelId       = $techRodel?->user_id ?? 9;
+        $crisantoId    = $techCrisanto?->user_id ?? 10;
+        $gilbertId     = $techGilbert?->user_id ?? 11;
+        $eduardoId     = $techEduardo?->user_id ?? 12;
+        $jomarId       = $techJomar?->user_id ?? 13;
+        $nestorId      = $techNestor?->user_id ?? 14;
+        $clientId      = $customer?->user_id ?? 15;
 
         // Clean up obsolete customer/technician/employee accounts from prior seeds safely
         Schema::disableForeignKeyConstraints();
@@ -163,6 +177,55 @@ class ExampleDataSeeder extends Seeder
                 'cert_name' => 'TESDA National Certificate II - Inverter Troubleshooting & PCB',
                 'cert_no' => 'TESDA-INV2-2024-8831',
             ],
+            [
+                'user_id' => $markId,
+                'certificate_expiry' => '2028-01-20',
+                'specialties' => [1, 3, 5],
+                'cert_name' => 'TESDA National Certificate II - RAC Servicing',
+                'cert_no' => 'TESDA-RAC2-2024-5101',
+            ],
+            [
+                'user_id' => $rodelId,
+                'certificate_expiry' => '2027-11-10',
+                'specialties' => [1, 2, 4],
+                'cert_name' => 'TESDA National Certificate III - Commercial HVAC',
+                'cert_no' => 'TESDA-RAC3-2023-3392',
+            ],
+            [
+                'user_id' => $crisantoId,
+                'certificate_expiry' => '2028-04-18',
+                'specialties' => [3, 4, 6],
+                'cert_name' => 'TESDA National Certificate II - Aircon Preventive Maintenance',
+                'cert_no' => 'TESDA-PM2-2024-1188',
+            ],
+            [
+                'user_id' => $gilbertId,
+                'certificate_expiry' => '2027-09-30',
+                'specialties' => [1, 5, 6],
+                'cert_name' => 'TESDA National Certificate III - Chiller & Duct Systems',
+                'cert_no' => 'TESDA-RAC3-2024-7740',
+            ],
+            [
+                'user_id' => $eduardoId,
+                'certificate_expiry' => '2028-05-15',
+                'specialties' => [2, 3, 5],
+                'cert_name' => 'TESDA National Certificate II - Inverter Diagnostics',
+                'cert_no' => 'TESDA-INV2-2023-6621',
+            ],
+            [
+                'user_id' => $jomarId,
+                'certificate_expiry' => '2027-12-01',
+                'specialties' => [1, 2, 3],
+                'cert_name' => 'TESDA National Certificate II - RAC Installation',
+                'cert_no' => 'TESDA-RAC2-2024-9014',
+            ],
+            [
+                'user_id' => $nestorId,
+                'certificate_expiry' => '2028-03-25',
+                'specialties' => [3, 4, 5],
+                'cert_name' => 'TESDA National Certificate II - Chemical Maintenance',
+                'cert_no' => 'TESDA-CM2-2024-4482',
+            ],
         ];
 
         foreach ($technicians as $t) {
@@ -198,49 +261,76 @@ class ExampleDataSeeder extends Seeder
         }
 
         // -------------------------------------------------------------
-        // 4. Technician Teams & Squad Members
+        // 4. Technician Teams & Squad Members (5 Teams for 10 Technicians)
         // -------------------------------------------------------------
-        // Each technician belongs to only one squad at a time.
-        // Team Alpha: Rafael Torres (Lead) + Danilo Ramos (Member)
-        $teamAlpha = TechnicianTeam::updateOrCreate(
-            ['team_name' => 'Alpha Cooling Squad'],
+        // Remove legacy squads if present
+        $legacyTeamIds = TechnicianTeam::whereIn('team_name', ['Alpha Cooling Squad', 'Delta AC Specialists'])->pluck('team_id');
+        if ($legacyTeamIds->isNotEmpty()) {
+            TechnicianTeamMember::whereIn('team_id', $legacyTeamIds)->delete();
+            TechnicianTeam::whereIn('team_id', $legacyTeamIds)->delete();
+        }
+
+        $teamsDefinition = [
             [
+                'team_name' => 'Team 1',
                 'leader_id' => $headTechId,
-                'created_by' => $headTechId,
-                'status' => 'Active',
+                'member_id' => $daniloId,
                 'description' => 'Specializes in cooling tower motor overhauls, chemical flush, and high-rise commercial HVAC systems.',
-            ]
-        );
-
-        TechnicianTeamMember::where('team_id', $teamAlpha->team_id)->delete();
-        TechnicianTeamMember::create([
-            'team_id' => $teamAlpha->team_id,
-            'technician_id' => $headTechId,
-            'role_in_team' => 'Lead',
-        ]);
-        TechnicianTeamMember::create([
-            'team_id' => $teamAlpha->team_id,
-            'technician_id' => $daniloId,
-            'role_in_team' => 'Member',
-        ]);
-
-        // Team Delta: Arnel Castro (Lead)
-        $teamDelta = TechnicianTeam::updateOrCreate(
-            ['team_name' => 'Delta AC Specialists'],
+            ],
             [
+                'team_name' => 'Team 2',
                 'leader_id' => $arnelId,
-                'created_by' => $headTechId,
-                'status' => 'Active',
+                'member_id' => $markId,
                 'description' => 'VRF multi-split diagnostics, precision refrigerant leak repair, and inverter motherboard testing.',
-            ]
-        );
+            ],
+            [
+                'team_name' => 'Team 3',
+                'leader_id' => $rodelId,
+                'member_id' => $crisantoId,
+                'description' => 'Residential and commercial split-type deep chemical wash, preventive maintenance, and thermal efficiency optimization.',
+            ],
+            [
+                'team_name' => 'Team 4',
+                'leader_id' => $gilbertId,
+                'member_id' => $eduardoId,
+                'description' => 'Multi-zone ducting airflow balancing, condenser coil restoration, and chiller maintenance.',
+            ],
+            [
+                'team_name' => 'Team 5',
+                'leader_id' => $jomarId,
+                'member_id' => $nestorId,
+                'description' => 'Emergency rapid-response diagnostics, compressor replacements, and seasonal commissioning.',
+            ],
+        ];
 
-        TechnicianTeamMember::where('team_id', $teamDelta->team_id)->delete();
-        TechnicianTeamMember::create([
-            'team_id' => $teamDelta->team_id,
-            'technician_id' => $arnelId,
-            'role_in_team' => 'Lead',
-        ]);
+        $createdTeams = [];
+        foreach ($teamsDefinition as $tDef) {
+            $team = TechnicianTeam::updateOrCreate(
+                ['team_name' => $tDef['team_name']],
+                [
+                    'leader_id' => $tDef['leader_id'],
+                    'created_by' => $headTechId,
+                    'status' => 'Active',
+                    'description' => $tDef['description'],
+                ]
+            );
+
+            TechnicianTeamMember::where('team_id', $team->team_id)->delete();
+            TechnicianTeamMember::create([
+                'team_id' => $team->team_id,
+                'technician_id' => $tDef['leader_id'],
+                'role_in_team' => 'Lead',
+            ]);
+            TechnicianTeamMember::create([
+                'team_id' => $team->team_id,
+                'technician_id' => $tDef['member_id'],
+                'role_in_team' => 'Member',
+            ]);
+
+            $createdTeams[] = $team;
+        }
+
+        $team1 = $createdTeams[0] ?? null;
 
         // -------------------------------------------------------------
         // 5. Services (Only 3 Primary Booking Services: IDs 1, 2, and 3)
@@ -858,7 +948,7 @@ class ExampleDataSeeder extends Seeder
                 [
                     'booking_id' => $targetBookingId,
                     'technician_id' => $daniloId,
-                    'team_id' => 1,
+                    'team_id' => $team1?->team_id ?? 1,
                     'status' => 'Approved',
                     'notes' => 'Primary tools and equipment for AC maintenance checklist.',
                     'approved_by' => $managerId,
@@ -1073,7 +1163,7 @@ class ExampleDataSeeder extends Seeder
                 'id' => 2,
                 'user_id' => $headTechId,
                 'action_type' => 'CREATE_TEAM',
-                'description' => 'Created technician squads "Alpha Cooling Squad" and "Delta AC Specialists".',
+                'description' => 'Created technician squads "Team 1", "Team 2", "Team 3", "Team 4", and "Team 5".',
                 'created_at' => Carbon::now()->subDays(6),
                 'updated_at' => Carbon::now()->subDays(6),
             ],

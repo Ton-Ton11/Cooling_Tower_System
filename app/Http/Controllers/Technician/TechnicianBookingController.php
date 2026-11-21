@@ -134,6 +134,7 @@ class TechnicianBookingController extends TechnicianBaseController
                     'inventory_items.sub_category',
                     'inventory_items.serial_number',
                     'inventory_items.unit',
+                    'inventory_items.status as inventory_status',
                 ])
                 ->get()
                 ->map(function ($it) {
@@ -141,6 +142,12 @@ class TechnicianBookingController extends TechnicianBaseController
                     $rawSubtype = strtolower((string) ($it->tool_subtype ?? ''));
                     $normalizedSubtype = $isTool ? (str_contains($rawSubtype, 'power') ? 'power' : 'hand') : null;
                     $categoryGroup = ! $isTool ? 'material' : ($normalizedSubtype === 'power' ? 'power_tool' : 'hand_tool');
+
+                    $invStatus = strtolower((string) ($it->inventory_status ?? ''));
+                    $itemStatus = $it->status;
+                    if ($isTool && in_array($invStatus, ['damaged', 'lost', 'lost/damaged'], true) && strtolower((string) $itemStatus) !== 'returned') {
+                        $itemStatus = $invStatus === 'lost/damaged' ? 'damaged' : $invStatus;
+                    }
 
                     return [
                         'id' => (int) $it->id,
@@ -155,7 +162,8 @@ class TechnicianBookingController extends TechnicianBaseController
                         'unit' => $it->unit ?? 'pc',
                         'quantity_requested' => (int) $it->quantity_requested,
                         'quantity_approved' => (int) $it->quantity_approved,
-                        'status' => $it->status,
+                        'status' => $itemStatus,
+                        'inventory_status' => $it->inventory_status,
                         'notes' => $it->notes,
                     ];
                 })
@@ -527,7 +535,7 @@ class TechnicianBookingController extends TechnicianBaseController
             'ac_brand' => ['nullable', 'string', 'max:100'],
             'ac_type' => ['nullable', 'string', 'max:100'],
             'unit_serial_number' => ['nullable', 'string', 'max:100'],
-            'total_service_price' => ['required', 'numeric', 'min:300'],
+            'total_service_price' => ['required', 'numeric', 'min:50'],
             'delivery_fee' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['required', 'string', 'in:Cash,GCash,Bank Transfer'],
             'reference_number' => ['nullable', 'string', 'max:40'],
@@ -580,7 +588,7 @@ class TechnicianBookingController extends TechnicianBaseController
         }
 
         $installationFee = (float) $validated['total_service_price'];
-        $downPayment = 300.00;
+        $downPayment = (float) ($booking->booking_fee ?? 50.00);
         $remainingInstallationFee = max(0.0, $installationFee - $downPayment);
         $unitRemainingBalance = $linkedUnitOrder ? (float) $linkedUnitOrder->remaining_unit_balance : 0.0;
         $deliveryFee = $linkedUnitOrder
@@ -617,7 +625,7 @@ class TechnicianBookingController extends TechnicianBaseController
             'invalid_reason' => null,
         ];
 
-        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $installationFee, $deliveryFee) {
+        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $installationFee, $deliveryFee, $downPayment) {
             if ($linkedUnitOrder) {
                 DB::table('ac_unit_orders')
                     ->where('order_id', (int) $linkedUnitOrder->order_id)
@@ -633,8 +641,9 @@ class TechnicianBookingController extends TechnicianBaseController
                 'service_payment_method' => $validated['payment_method'],
                 'service_details' => json_encode($serviceDetails),
                 'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
-                    '[Technician Payment Turnover]: Total Service ₱%.2f less ₱300.00 down payment = ₱%.2f collected via %s%s. Handed over to Manager for completion.',
+                    '[Technician Payment Turnover]: Total Service ₱%.2f less ₱%.2f down payment = ₱%.2f collected via %s%s. Handed over to Manager for completion.',
                     $totalServicePrice,
+                    $downPayment,
                     $netCollected,
                     $validated['payment_method'],
                     ! empty($validated['reference_number']) ? " (Ref: {$validated['reference_number']})" : ''
@@ -672,7 +681,7 @@ class TechnicianBookingController extends TechnicianBaseController
                     'payment_method' => $validated['payment_method'],
                     'payment_type' => 'Service Balance Payment',
                     'reference_number' => $validated['payment_method'] === 'GCash' ? ($validated['reference_number'] ?? null) : null,
-                    'notes' => 'Collected by technician after service (₱300 reservation deducted) and turned over to Manager.',
+                    'notes' => sprintf('Collected by technician after service (₱%.2f reservation deducted) and turned over to Manager.', $downPayment),
                     'payment_date' => now(),
                     'created_at' => now(),
                     'updated_at' => now(),
@@ -708,9 +717,10 @@ class TechnicianBookingController extends TechnicianBaseController
                 $userId,
                 'JOB_REPORT_AND_PAYMENT_TURNOVER',
                 sprintf(
-                    'Technician submitted service report and turned over ₱%.2f (%s, after ₱300 down payment deduction) to Manager for Booking #%d.',
+                    'Technician submitted service report and turned over ₱%.2f (%s, after ₱%.2f down payment deduction) to Manager for Booking #%d.',
                     $netCollected,
                     $validated['payment_method'],
+                    $downPayment,
                     $bookingId
                 )
             );

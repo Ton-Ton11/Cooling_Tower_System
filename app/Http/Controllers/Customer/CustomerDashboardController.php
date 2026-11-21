@@ -178,7 +178,7 @@ class CustomerDashboardController extends Controller
                     'service_name' => $s->service_name,
                     'description' => $s->description,
                     'category' => $s->category,
-                    'booking_fee' => (float) ($s->booking_fee ?? 300.00),
+                    'booking_fee' => (float) ($s->booking_fee ?? 50.00),
                     'is_active' => (bool) $s->is_active,
                 ];
             });

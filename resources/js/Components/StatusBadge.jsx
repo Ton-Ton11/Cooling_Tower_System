@@ -51,6 +51,11 @@ const cfg = {
         text: "#D97706",
         dot: "#F58A07",
     },
+    Damaged: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
+    damaged: { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
+    Lost: { bg: "rgba(245,158,11,0.12)", text: "#D97706", dot: "#F59E0B" },
+    lost: { bg: "rgba(245,158,11,0.12)", text: "#D97706", dot: "#F59E0B" },
+    "Damaged / Lost": { bg: "rgba(239,68,68,0.12)", text: "#DC2626", dot: "#EF4444" },
     "Lost/Damaged": {
         bg: "rgba(239,68,68,0.12)",
         text: "#DC2626",

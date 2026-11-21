@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import {
     TECHNICIAN_ENDPOINTS,
@@ -26,6 +27,30 @@ const PackageIcon = ({ size = 14, color = "currentColor" }) => (
     </svg>
 );
 
+const ACTION_CONFIG = {
+    returned: {
+        label: "Return",
+        accent: "#16A34A",
+        badgeBg: "#DCFCE7",
+        ring: "rgba(22, 163, 74, 0.25)",
+        rowBg: "#F0FDF4",
+    },
+    damaged: {
+        label: "Damaged",
+        accent: "#DC2626",
+        badgeBg: "#FEE2E2",
+        ring: "rgba(220, 38, 38, 0.25)",
+        rowBg: "#FEF2F2",
+    },
+    lost: {
+        label: "Lost",
+        accent: "#D97706",
+        badgeBg: "#FEF3C7",
+        ring: "rgba(217, 119, 6, 0.25)",
+        rowBg: "#FFFBEB",
+    },
+};
+
 const getItemGroup = (item) => {
     const type = (item?.item_type || "").toLowerCase();
     if (type !== "tool") return "material";
@@ -41,6 +66,9 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
     const [searchQuery, setSearchQuery] = useState("");
     const [catalogCategoryFilter, setCatalogCategoryFilter] = useState("All"); // 'All' | 'hand_tool' | 'power_tool' | 'material'
     const [updatingToolItemId, setUpdatingToolItemId] = useState(null);
+    const [toolActions, setToolActions] = useState({}); // { [toolChecklistItemId]: 'returned' | 'damaged' | 'lost' }
+    const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
 
     const fetchChecklists = useCallback(async (showLoader = true) => {
         if (showLoader) setLoading(true);
@@ -137,6 +165,102 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
         [issuedTools]
     );
 
+    // Active pending tools requiring inspection
+    const pendingTools = useMemo(() => {
+        return issuedTools.filter(
+            (t) =>
+                t.status === "assigned" &&
+                (t.checklist_status || "").toLowerCase() === "approved"
+        );
+    }, [issuedTools]);
+
+    const totalPendingCount = pendingTools.length;
+
+    const checkedCount = useMemo(() => {
+        return pendingTools.filter((t) => Boolean(toolActions[t.id])).length;
+    }, [pendingTools, toolActions]);
+
+    const isAllChecked = totalPendingCount > 0 && checkedCount === totalPendingCount;
+
+    const actionCounts = useMemo(() => {
+        let returned = 0;
+        let damaged = 0;
+        let lost = 0;
+        pendingTools.forEach((t) => {
+            const action = toolActions[t.id];
+            if (action === "returned") returned += 1;
+            else if (action === "damaged") damaged += 1;
+            else if (action === "lost") lost += 1;
+        });
+        return { returned, damaged, lost };
+    }, [pendingTools, toolActions]);
+
+    const handleSelectAction = (toolId, action) => {
+        setToolActions((prev) => {
+            const next = { ...prev };
+            // If already selected, clicking again deselects
+            if (next[toolId] === action) {
+                delete next[toolId];
+            } else {
+                next[toolId] = action;
+            }
+            return next;
+        });
+    };
+
+    const handleMarkAllReturn = () => {
+        const next = { ...toolActions };
+        pendingTools.forEach((t) => {
+            next[t.id] = "returned";
+        });
+        setToolActions(next);
+    };
+
+    const handleResetChecks = () => {
+        setToolActions({});
+    };
+
+    const handleSubmitChecklist = async () => {
+        if (!isAllChecked || submitting) return;
+        setSubmitting(true);
+        try {
+            // Group pending items by checklist_id
+            const itemsByChecklist = {};
+            pendingTools.forEach((tool) => {
+                const cid = tool.checklist_id;
+                if (!itemsByChecklist[cid]) itemsByChecklist[cid] = [];
+                itemsByChecklist[cid].push({
+                    item_id: tool.id,
+                    status: toolActions[tool.id],
+                    notes: null,
+                });
+            });
+
+            const promises = Object.entries(itemsByChecklist).map(([cid, items]) => {
+                return window.axios.patch(
+                    TECHNICIAN_ENDPOINTS.updateChecklistBatchStatus(cid),
+                    { items }
+                );
+            });
+
+            await Promise.all(promises);
+
+            addToast(
+                `Tool checklist submitted to Tools Man (${actionCounts.returned} returned, ${actionCounts.damaged} damaged, ${actionCounts.lost} lost).`,
+                "success"
+            );
+            setConfirmModalOpen(false);
+            setToolActions({});
+            await fetchChecklists(false);
+            await fetchCatalog();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Failed to submit tool checklist."), "error");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     const isCatalogItemLowStock = useCallback((item) => {
         if (typeof item?.low_stock === "boolean") return item.low_stock;
         const qty = Number(item?.quantity_on_hand ?? 0);
@@ -170,6 +294,85 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
             );
         });
     }, [catalog, searchQuery, catalogCategoryFilter, isCatalogItemLowStock]);
+
+    const renderActionCheckbox = (tool, action, config) => {
+        const isAssigned =
+            tool.checklist_status === "Approved" && tool.status === "assigned";
+
+        if (!isAssigned) {
+            const isCurrent = (tool.status || "").toLowerCase() === action;
+            return (
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                    {isCurrent ? (
+                        <span
+                            style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: 22,
+                                height: 22,
+                                borderRadius: 6,
+                                background: config.badgeBg,
+                                color: config.accent,
+                                fontSize: 12,
+                                fontWeight: 700,
+                            }}
+                        >
+                            ✓
+                        </span>
+                    ) : (
+                        <span style={{ color: "#CBD5E1", fontSize: 13 }}>—</span>
+                    )}
+                </div>
+            );
+        }
+
+        const isChecked = toolActions[tool.id] === action;
+
+        return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+                <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => handleSelectAction(tool.id, action)}
+                    title={`Mark as ${config.label}`}
+                    aria-label={`Mark ${tool.item_name} as ${config.label}`}
+                    style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        border: isChecked
+                            ? `2px solid ${config.accent}`
+                            : "2px solid #CBD5E1",
+                        background: isChecked ? config.accent : "#FFFFFF",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: submitting ? "not-allowed" : "pointer",
+                        transition: "all 0.15s ease",
+                        outline: "none",
+                        boxShadow: isChecked ? `0 0 0 3px ${config.ring}` : "none",
+                        padding: 0,
+                    }}
+                >
+                    {isChecked && (
+                        <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="#FFFFFF"
+                            strokeWidth="3.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        >
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                    )}
+                </button>
+            </div>
+        );
+    };
 
     const renderToolSection = (title, icon, badgeBg, badgeColor, toolsList) => (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -212,33 +415,117 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                             <tr style={{ borderBottom: "1px solid #E2E8F0", background: "#FFFFFF" }}>
-                                {["Tool", "Booking", "Qty", "Status", "Action"].map((h) => (
-                                    <th
-                                        key={h}
-                                        style={{
-                                            padding: "10px 14px",
-                                            textAlign: "left",
-                                            fontSize: 11,
-                                            fontWeight: 700,
-                                            color: "#64748B",
-                                            textTransform: "uppercase",
-                                        }}
-                                    >
-                                        {h}
-                                    </th>
-                                ))}
+                                <th
+                                    style={{
+                                        padding: "10px 14px",
+                                        textAlign: "left",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#64748B",
+                                        textTransform: "uppercase",
+                                    }}
+                                >
+                                    Tool
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 14px",
+                                        textAlign: "left",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#64748B",
+                                        textTransform: "uppercase",
+                                    }}
+                                >
+                                    Booking
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 14px",
+                                        textAlign: "left",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#64748B",
+                                        textTransform: "uppercase",
+                                        width: 80,
+                                    }}
+                                >
+                                    Qty
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 14px",
+                                        textAlign: "left",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#64748B",
+                                        textTransform: "uppercase",
+                                        width: 95,
+                                    }}
+                                >
+                                    Status
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 10px",
+                                        textAlign: "center",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#15803D",
+                                        textTransform: "uppercase",
+                                        width: 80,
+                                    }}
+                                >
+                                    Return
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 10px",
+                                        textAlign: "center",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#DC2626",
+                                        textTransform: "uppercase",
+                                        width: 80,
+                                    }}
+                                >
+                                    Damaged
+                                </th>
+                                <th
+                                    style={{
+                                        padding: "10px 10px",
+                                        textAlign: "center",
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        color: "#D97706",
+                                        textTransform: "uppercase",
+                                        width: 80,
+                                    }}
+                                >
+                                    Lost
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
                             {toolsList.map((tool) => {
-                                const isUpdating = updatingToolItemId === tool.id;
-                                const canUpdate =
-                                    tool.checklist_status === "Approved" &&
-                                    tool.status === "assigned";
+                                const selectedAction = toolActions[tool.id];
+                                const rowBg =
+                                    selectedAction === "returned"
+                                        ? "#F0FDF4"
+                                        : selectedAction === "damaged"
+                                        ? "#FEF2F2"
+                                        : selectedAction === "lost"
+                                        ? "#FFFBEB"
+                                        : "transparent";
+
                                 return (
                                     <tr
                                         key={`${tool.checklist_id}-${tool.id}`}
-                                        style={{ borderBottom: "1px solid #F1F5F9" }}
+                                        style={{
+                                            borderBottom: "1px solid #F1F5F9",
+                                            background: rowBg,
+                                            transition: "background 0.15s ease",
+                                        }}
                                     >
                                         <td style={{ padding: "12px 14px" }}>
                                             <div style={{ fontSize: 13, fontWeight: 700, color: "#1E2F5F" }}>
@@ -272,96 +559,32 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                                                     background:
                                                         tool.status === "returned"
                                                             ? "#DCFCE7"
-                                                            : tool.status === "damaged" || tool.status === "lost"
+                                                            : tool.status === "damaged"
                                                             ? "#FEE2E2"
+                                                            : tool.status === "lost"
+                                                            ? "#FEF3C7"
                                                             : "#DBEAFE",
                                                     color:
                                                         tool.status === "returned"
                                                             ? "#15803D"
-                                                            : tool.status === "damaged" || tool.status === "lost"
+                                                            : tool.status === "damaged"
                                                             ? "#B91C1C"
+                                                            : tool.status === "lost"
+                                                            ? "#92400E"
                                                             : "#1D4ED8",
                                                 }}
                                             >
                                                 {tool.status === "assigned" ? "In Use" : tool.status}
                                             </span>
                                         </td>
-                                        <td style={{ padding: "12px 14px" }}>
-                                            {canUpdate ? (
-                                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                                    <button
-                                                        type="button"
-                                                        disabled={isUpdating}
-                                                        onClick={() =>
-                                                            handleReturnToolStatus(
-                                                                tool.checklist_id,
-                                                                tool.id,
-                                                                "returned"
-                                                            )
-                                                        }
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: "4px 10px",
-                                                            borderRadius: 6,
-                                                            border: "1px solid #86EFAC",
-                                                            background: "#DCFCE7",
-                                                            color: "#15803D",
-                                                            fontWeight: 700,
-                                                            cursor: "pointer",
-                                                        }}
-                                                    >
-                                                        Returned
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={isUpdating}
-                                                        onClick={() =>
-                                                            handleReturnToolStatus(
-                                                                tool.checklist_id,
-                                                                tool.id,
-                                                                "damaged"
-                                                            )
-                                                        }
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: "4px 10px",
-                                                            borderRadius: 6,
-                                                            border: "1px solid #FCA5A5",
-                                                            background: "#FEE2E2",
-                                                            color: "#DC2626",
-                                                            fontWeight: 700,
-                                                            cursor: "pointer",
-                                                        }}
-                                                    >
-                                                        Damaged
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        disabled={isUpdating}
-                                                        onClick={() =>
-                                                            handleReturnToolStatus(
-                                                                tool.checklist_id,
-                                                                tool.id,
-                                                                "lost"
-                                                            )
-                                                        }
-                                                        style={{
-                                                            fontSize: 11,
-                                                            padding: "4px 10px",
-                                                            borderRadius: 6,
-                                                            border: "1px solid #CBD5E1",
-                                                            background: "#F1F5F9",
-                                                            color: "#475569",
-                                                            fontWeight: 700,
-                                                            cursor: "pointer",
-                                                        }}
-                                                    >
-                                                        Lost
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <span style={{ fontSize: 11, color: "#94A3B8" }}>—</span>
-                                            )}
+                                        <td style={{ padding: "10px", textAlign: "center" }}>
+                                            {renderActionCheckbox(tool, "returned", ACTION_CONFIG.returned)}
+                                        </td>
+                                        <td style={{ padding: "10px", textAlign: "center" }}>
+                                            {renderActionCheckbox(tool, "damaged", ACTION_CONFIG.damaged)}
+                                        </td>
+                                        <td style={{ padding: "10px", textAlign: "center" }}>
+                                            {renderActionCheckbox(tool, "lost", ACTION_CONFIG.lost)}
                                         </td>
                                     </tr>
                                 );
@@ -450,6 +673,150 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                     </div>
                 ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                        {totalPendingCount > 0 && (
+                            <div
+                                className="card"
+                                style={{
+                                    padding: "12px 16px",
+                                    background: isAllChecked ? "#F0FDF4" : "#F8FAFC",
+                                    border: isAllChecked ? "1px solid #86EFAC" : "1px solid #E2E8F0",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    gap: 12,
+                                    flexWrap: "wrap",
+                                    transition: "all 0.2s ease",
+                                }}
+                            >
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <span
+                                            style={{
+                                                fontSize: 12,
+                                                fontWeight: 700,
+                                                color: isAllChecked ? "#15803D" : "#1E293B",
+                                            }}
+                                        >
+                                            Checklist Inspection:
+                                        </span>
+                                        <span
+                                            style={{
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                                padding: "2px 8px",
+                                                borderRadius: 999,
+                                                background: isAllChecked ? "#DCFCE7" : "#E2E8F0",
+                                                color: isAllChecked ? "#15803D" : "#475569",
+                                            }}
+                                        >
+                                            {checkedCount} / {totalPendingCount} Checked
+                                        </span>
+                                    </div>
+
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <button
+                                            type="button"
+                                            disabled={submitting}
+                                            onClick={handleMarkAllReturn}
+                                            style={{
+                                                fontSize: 11,
+                                                fontWeight: 600,
+                                                padding: "4px 10px",
+                                                borderRadius: 6,
+                                                border: "1px solid #86EFAC",
+                                                background: "#FFFFFF",
+                                                color: "#15803D",
+                                                cursor: "pointer",
+                                            }}
+                                        >
+                                            Mark all Return
+                                        </button>
+                                        {checkedCount > 0 && (
+                                            <button
+                                                type="button"
+                                                disabled={submitting}
+                                                onClick={handleResetChecks}
+                                                style={{
+                                                    fontSize: 11,
+                                                    fontWeight: 600,
+                                                    padding: "4px 8px",
+                                                    borderRadius: 6,
+                                                    border: "1px solid #E2E8F0",
+                                                    background: "#FFFFFF",
+                                                    color: "#64748B",
+                                                    cursor: "pointer",
+                                                }}
+                                            >
+                                                Clear
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    {!isAllChecked && (
+                                        <span style={{ fontSize: 11, color: "#64748B" }}>
+                                            Check all items to submit
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        disabled={!isAllChecked || submitting}
+                                        onClick={() => setConfirmModalOpen(true)}
+                                        style={{
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            padding: "7px 16px",
+                                            borderRadius: 7,
+                                            border: "none",
+                                            background: isAllChecked ? "#16A34A" : "#CBD5E1",
+                                            color: "#FFFFFF",
+                                            cursor: isAllChecked ? "pointer" : "not-allowed",
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            gap: 6,
+                                            boxShadow: isAllChecked ? "0 2px 4px rgba(22, 163, 74, 0.25)" : "none",
+                                            transition: "all 0.15s ease",
+                                        }}
+                                    >
+                                        {submitting ? (
+                                            <>
+                                                <svg
+                                                    className="animate-spin"
+                                                    width="13"
+                                                    height="13"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2.5"
+                                                >
+                                                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                                                    <path d="M12 2a10 10 0 0110 10" />
+                                                </svg>
+                                                Submitting...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg
+                                                    width="13"
+                                                    height="13"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2.5"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                >
+                                                    <polyline points="20 6 9 17 4 12" />
+                                                </svg>
+                                                Submit to Tools Man
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {renderToolSection(
                             "Hand Tools",
                             <WrenchIcon size={15} color="#1D4ED8" />,
@@ -613,6 +980,71 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                     </div>
                 </div>
             )}
+
+            {/* Checklist Submission Confirmation Modal */}
+            <Modal
+                show={confirmModalOpen}
+                onClose={() => !submitting && setConfirmModalOpen(false)}
+                title="Submit Checklist to Tools Man"
+                maxWidth="sm"
+            >
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <p style={{ fontSize: 13, color: "#475569", margin: 0 }}>
+                        Submit condition inspection for <strong>{checkedCount}</strong> tools to Tools Man?
+                    </p>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                        <div style={{ padding: "10px", borderRadius: 8, background: "#F0FDF4", border: "1px solid #BBF7D0", textAlign: "center" }}>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#15803D" }}>{actionCounts.returned}</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#166534" }}>Return</div>
+                        </div>
+                        <div style={{ padding: "10px", borderRadius: 8, background: "#FEF2F2", border: "1px solid #FECACA", textAlign: "center" }}>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#DC2626" }}>{actionCounts.damaged}</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#991B1B" }}>Damaged</div>
+                        </div>
+                        <div style={{ padding: "10px", borderRadius: 8, background: "#FFFBEB", border: "1px solid #FDE68A", textAlign: "center" }}>
+                            <div style={{ fontSize: 18, fontWeight: 800, color: "#D97706" }}>{actionCounts.lost}</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#92400E" }}>Lost</div>
+                        </div>
+                    </div>
+
+                    <p style={{ fontSize: 12, color: "#64748B", margin: 0 }}>
+                        Tools Man will review the submitted items to complete and close the checklist.
+                    </p>
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={submitting}
+                            onClick={() => setConfirmModalOpen(false)}
+                            style={{ fontSize: 12 }}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={handleSubmitChecklist}
+                            style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                                padding: "8px 16px",
+                                borderRadius: 7,
+                                border: "none",
+                                background: "#16A34A",
+                                color: "#FFFFFF",
+                                cursor: submitting ? "not-allowed" : "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 6,
+                            }}
+                        >
+                            {submitting ? "Submitting..." : "Confirm & Submit"}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }

@@ -95,7 +95,7 @@ export default function MyBookings({
         setPaymentSubmitting(true);
         const fd = new FormData();
         fd.append("reference_number", paymentRefNumber.trim());
-        fd.append("amount_paid", 300);
+        fd.append("amount_paid", completePaymentBooking?.booking_fee_paid || completePaymentBooking?.service?.booking_fee || 50);
         if (paymentSenderName.trim()) fd.append("sender_name", paymentSenderName.trim());
         if (paymentSenderNumber.trim()) fd.append("sender_number", paymentSenderNumber.trim());
         if (paymentReceiptFile) fd.append("receipt_image", paymentReceiptFile);
@@ -366,7 +366,7 @@ export default function MyBookings({
                                                 <span className="text-emerald-700 font-semibold">
                                                     {isOcular || Number(b.booking_fee_paid) === 0
                                                         ? "Booking Fee: Free (₱0.00)"
-                                                        : `Reservation Fee: ₱${Number(b.booking_fee_paid ?? 300).toFixed(2)}`}
+                                                        : `Reservation Fee: ₱${Number(b.booking_fee_paid ?? 50).toFixed(2)}`}
                                                 </span>
                                             </p>
                                         </div>
@@ -417,7 +417,7 @@ export default function MyBookings({
                                             >
                                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                                 {b.booking_status === "In-Progress"
-                                                    ? `Reschedule (₱${Number(scheduleConfig?.reschedule_fee ?? 150).toFixed(0)})`
+                                                    ? `Reschedule (₱${Number(scheduleConfig?.reschedule_fee ?? 50).toFixed(0)})`
                                                     : "Reschedule (Free)"}
                                             </button>
                                         )}
@@ -573,7 +573,7 @@ export default function MyBookings({
                                         <span className="text-xs font-mono font-bold text-emerald-700 mt-1 block">
                                             {isOcular || Number(b.booking_fee_paid) === 0
                                                 ? "Free (₱0.00)"
-                                                : `₱${Number(b.booking_fee_paid ?? 300).toFixed(2)} (Ref: ${b.reference_number || "N/A"})`}
+                                                : `₱${Number(b.booking_fee_paid ?? 50).toFixed(2)} (Ref: ${b.reference_number || "N/A"})`}
                                         </span>
                                     </div>
 
@@ -756,7 +756,7 @@ export default function MyBookings({
                         </div>
                         <form onSubmit={handleCompletePaymentSubmit} className="p-5 space-y-4 text-xs">
                             <p className="text-gray-600 leading-relaxed">
-                                Please submit your valid 13-digit GCash reference number and receipt proof to complete your ₱300.00 reservation payment before the 10-minute timer expires.
+                                Please submit your valid 13-digit GCash reference number and receipt proof to complete your ₱{Number(completePaymentBooking?.booking_fee_paid || completePaymentBooking?.service?.booking_fee || 50).toFixed(2)} reservation payment before the 10-minute timer expires.
                             </p>
                             <div>
                                 <label className="block font-bold text-gray-700 uppercase mb-1">
@@ -987,17 +987,24 @@ export default function MyBookings({
                                         </div>
 
                                         {/* Reservation Fee Deduction */}
-                                        <div className="flex items-center justify-between text-emerald-700 font-medium">
-                                            <span>Less: Appointment Reservation Fee Paid</span>
-                                            <span>- {formatCurrency(300)}</span>
-                                        </div>
+                                        {(() => {
+                                            const paidFee = Number(viewDetailsBooking.booking_fee_paid ?? (viewDetailsBooking.is_ocular ? 0 : 50));
+                                            return (
+                                                <>
+                                                    <div className="flex items-center justify-between text-emerald-700 font-medium">
+                                                        <span>Less: Appointment Reservation Fee Paid</span>
+                                                        <span>- {formatCurrency(paidFee)}</span>
+                                                    </div>
 
-                                        <div className="border-t-2 border-blue-600 pt-2 flex items-center justify-between text-sm font-extrabold text-blue-950">
-                                            <span>Net Payable Balance</span>
-                                            <span className="text-base text-blue-700">
-                                                {formatCurrency((viewDetailsBooking.quotation_data.total || 0) - 300)}
-                                            </span>
-                                        </div>
+                                                    <div className="border-t-2 border-blue-600 pt-2 flex items-center justify-between text-sm font-extrabold text-blue-950">
+                                                        <span>Net Payable Balance</span>
+                                                        <span className="text-base text-blue-700">
+                                                            {formatCurrency(Math.max(0, (viewDetailsBooking.quotation_data.total || 0) - paidFee))}
+                                                        </span>
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
 
                                     {viewDetailsBooking.quotation_data.terms && (

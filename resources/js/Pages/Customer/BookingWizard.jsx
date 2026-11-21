@@ -405,7 +405,7 @@ export default function BookingWizard({
     }, [scheduleConfig]);
 
     // Step 4: Appointment Reservation Fee & GCash Payment
-    const BOOKING_FEE = 300.00;
+    const BOOKING_FEE = 50.00;
     const [refNumber, setRefNumber] = useState("");
     const [senderName, setSenderName] = useState(dashboardData?.user?.full_name || "");
     const [senderNumber, setSenderNumber] = useState(dashboardData?.user?.contact_number || "");
@@ -495,7 +495,7 @@ export default function BookingWizard({
     const isOcularInspection = serviceCategory === "ocular";
     const serviceFeeNumber = currentService?.booking_fee !== undefined && currentService?.booking_fee !== null
         ? Number(currentService.booking_fee)
-        : (policyData?.amount ? Number(policyData.amount) : 300.0);
+        : (policyData?.amount ? Number(policyData.amount) : 50.0);
     const effectiveBookingFee = isOcularInspection ? 0.0 : serviceFeeNumber;
     const isFeeExempt = isOcularInspection || effectiveBookingFee === 0;
 
@@ -926,7 +926,7 @@ export default function BookingWizard({
                                 <p className="font-bold text-emerald-700 mt-0.5">
                                     {submittedBooking.is_ocular || Number(submittedBooking.booking_fee) === 0
                                         ? "Free (₱0.00) — No Booking Fee"
-                                        : `₱${Number(submittedBooking.booking_fee || 300).toFixed(2)} Paid (Ref: ${submittedBooking.ref_number})`}
+                                        : `₱${Number(submittedBooking.booking_fee || 50).toFixed(2)} Paid (Ref: ${submittedBooking.ref_number})`}
                                 </p>
                             </div>
                         </div>
@@ -1219,7 +1219,7 @@ export default function BookingWizard({
                                             <div className="mt-5 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
                                                 <span className="font-semibold text-gray-400">Booking Fee</span>
                                                 <span className={`font-bold px-2 py-0.5 rounded-md ${isOcularSrv || Number(srv.booking_fee) === 0 ? "text-emerald-700 bg-emerald-50" : "text-blue-700 bg-blue-50"}`}>
-                                                    {isOcularSrv || Number(srv.booking_fee) === 0 ? "Free (₱0.00)" : `₱${Number(srv.booking_fee ?? 300).toFixed(2)}`}
+                                                    {isOcularSrv || Number(srv.booking_fee) === 0 ? "Free (₱0.00)" : `₱${Number(srv.booking_fee ?? 50).toFixed(2)}`}
                                                 </span>
                                             </div>
                                         </div>

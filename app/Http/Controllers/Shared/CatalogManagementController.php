@@ -32,7 +32,7 @@ class CatalogManagementController extends Controller
             ->orderBy('name')
             ->get();
 
-        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
+        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 50.00);
 
         return response()->json([
             'services' => $services,
@@ -78,7 +78,7 @@ class CatalogManagementController extends Controller
             'service_name' => $validated['service_name'],
             'description' => $validated['description'] ?? null,
             'base_price' => $validated['base_price'],
-            'booking_fee' => isset($validated['booking_fee']) && $validated['booking_fee'] !== '' ? (float) $validated['booking_fee'] : 300.00,
+            'booking_fee' => isset($validated['booking_fee']) && $validated['booking_fee'] !== '' ? (float) $validated['booking_fee'] : 50.00,
             'category' => $validated['category'] ?? 'General',
             'display_order' => $validated['display_order'] ?? 0,
             'is_active' => $request->has('is_active') ? $request->boolean('is_active') : true,
@@ -672,7 +672,7 @@ class CatalogManagementController extends Controller
     public function getSettings(): JsonResponse
     {
         return response()->json([
-            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 150.00),
+            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 50.00),
         ]);
     }
 

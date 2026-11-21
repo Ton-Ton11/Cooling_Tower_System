@@ -38,6 +38,7 @@ export const SUPER_ADMIN_ENDPOINTS = {
     updateChecklistItems: (id) => `/super-admin/checklists/${id}/items`,
     removeChecklistItems: (id) => `/super-admin/checklists/${id}/items`,
     updateToolStatus: (checklistId, itemId) => `/super-admin/checklists/${checklistId}/items/${itemId}/status`,
+    updateChecklistBatchStatus: (checklistId) => `/super-admin/checklists/${checklistId}/items/batch-status`,
     completeChecklist: (id) => `/super-admin/checklists/${id}/complete`,
 
     // Dynamic Roles
@@ -232,6 +233,7 @@ export const ADMIN_ASSISTANT_ENDPOINTS = {
     removeChecklistItems: (id) => `/admin-assistant/checklists/${id}/items`,
     updateChecklistItemStatus: (checklistId, itemId) => `/admin-assistant/checklists/${checklistId}/items/${itemId}/status`,
     updateToolStatus: (checklistId, itemId) => `/admin-assistant/checklists/${checklistId}/items/${itemId}/status`,
+    updateChecklistBatchStatus: (checklistId) => `/admin-assistant/checklists/${checklistId}/items/batch-status`,
     availableCatalog: "/admin-assistant/available-catalog",
     spareParts: "/admin-assistant/spare-parts",
     updateSparePart: (id) => `/admin-assistant/spare-parts/${id}`,
@@ -291,6 +293,7 @@ export const TOOLS_MAN_ENDPOINTS = {
     updateChecklistItems: (id) => `/tools-man/checklists/${id}/items`,
     removeChecklistItems: (id) => `/tools-man/checklists/${id}/items`,
     updateToolStatus: (checklistId, itemId) => `/tools-man/checklists/${checklistId}/items/${itemId}/status`,
+    updateChecklistBatchStatus: (checklistId) => `/tools-man/checklists/${checklistId}/items/batch-status`,
     completeChecklist: (id) => `/tools-man/checklists/${id}/complete`,
 
     // Inventory Checkout & Usage Tracking
@@ -328,6 +331,7 @@ export const TECHNICIAN_ENDPOINTS = {
     updateChecklist: (id) => `/technician/checklists/${id}`,
     removeChecklistItems: (id) => `/technician/checklists/${id}/items`,
     updateChecklistItemStatus: (checklistId, itemId) => `/technician/checklists/${checklistId}/items/${itemId}/status`,
+    updateChecklistBatchStatus: (checklistId) => `/technician/checklists/${checklistId}/items/batch-status`,
     availableCatalog: "/technician/available-catalog",
     announcements: "/technician/announcements",
     performance: "/technician/performance",
@@ -356,6 +360,7 @@ export const HEAD_TECHNICIAN_ENDPOINTS = {
     updateChecklist: (id) => `/head-technician/checklists/${id}`,
     removeChecklistItems: (id) => `/head-technician/checklists/${id}/items`,
     updateChecklistItemStatus: (checklistId, itemId) => `/head-technician/checklists/${checklistId}/items/${itemId}/status`,
+    updateChecklistBatchStatus: (checklistId) => `/head-technician/checklists/${checklistId}/items/batch-status`,
     availableCatalog: "/head-technician/available-catalog",
     announcements: "/head-technician/announcements",
     performance: "/head-technician/performance",
@@ -453,6 +458,12 @@ export const AC_TYPE_OPTIONS = [
     "Cassette",
     "Floor Mounted",
     "Ceiling Suspended",
+    "Ducted / Concealed",
+    "Central / Package Unit",
+    "VRF / VRV System",
+    "Multi-Split",
+    "Portable AC",
+    "Other",
 ];
 
 export const AC_MOTOR_TYPE_OPTIONS = [

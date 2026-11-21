@@ -20,7 +20,7 @@ class CustomerControllerTest extends TestCase
         parent::setUp();
 
         // Ensure roles exist
-        DB::table('roles')->insert([
+        DB::table('roles')->insertOrIgnore([
             ['role_id' => 1, 'role_name' => 'Super Admin'],
             ['role_id' => 2, 'role_name' => 'Manager'],
             ['role_id' => 3, 'role_name' => 'Admin Assistant'],
@@ -30,7 +30,7 @@ class CustomerControllerTest extends TestCase
         ]);
 
         // Ensure service exists
-        DB::table('services')->insert([
+        DB::table('services')->insertOrIgnore([
             ['service_id' => 1, 'service_name' => 'Basic Cleaning & Filter Wash', 'description' => 'Comprehensive aircon cleaning', 'base_price' => 750.00],
         ]);
     }
@@ -66,7 +66,7 @@ class CustomerControllerTest extends TestCase
         $response = $this->actingAs($customer)->getJson(route('customer.services'));
 
         $response->assertStatus(200)
-            ->assertJsonFragment(['service_name' => 'Basic Cleaning & Filter Wash']);
+            ->assertJsonFragment(['service_name' => 'Installation']);
     }
 
     public function test_customer_can_create_booking_with_gcash_booking_fee(): void
@@ -81,18 +81,18 @@ class CustomerControllerTest extends TestCase
             'unit_quantity' => 2,
             'scheduled_date' => $futureDate,
             'service_payment_method' => 'Cash',
-            'booking_fee' => 300.00,
-            'reference_number' => 'GCASH123456789',
+            'booking_fee' => 50.00,
+            'reference_number' => '1234567890123',
             'sender_name' => 'Juan Dela Cruz',
             'sender_number' => '09171234567',
             'notes' => 'Please bring ladder.',
-            'service_address' => 'Unit 1002 Tower 1, Taguig City',
+            'service_address' => 'Tetuan, Zamboanga City, Zamboanga del Sur',
         ];
 
         $response = $this->actingAs($customer)->postJson(route('customer.bookings.store'), $payload);
 
         $response->assertStatus(201)
-            ->assertJsonFragment(['message' => 'Your service booking request has been submitted successfully! Please wait for admin approval and technician assignment.']);
+            ->assertJsonFragment(['message' => 'Your service request and appointment reservation have been received! Our staff will review your request and prepare an official quotation.']);
 
         $this->assertDatabaseHas('bookings', [
             'client_id' => $customer->user_id,
@@ -102,9 +102,9 @@ class CustomerControllerTest extends TestCase
         ]);
 
         $this->assertDatabaseHas('payment', [
-            'amount_paid' => 300.00,
-            'reference_number' => 'GCASH123456789',
-            'payment_type' => 'Booking Fee',
+            'amount_paid' => 50.00,
+            'reference_number' => '1234567890123',
+            'payment_type' => 'Appointment Reservation Fee',
             'payment_method' => 'GCash',
         ]);
     }
@@ -119,7 +119,7 @@ class CustomerControllerTest extends TestCase
             'client_id' => $customer->user_id,
             'service_id' => 1,
             'scheduled_date' => $originalDate,
-            'booking_status' => 'Pending',
+            'booking_status' => 'In-Progress',
             'service_payment_method' => 'Cash',
             'created_at' => now(),
             'updated_at' => now(),
@@ -127,8 +127,8 @@ class CustomerControllerTest extends TestCase
 
         $payload = [
             'new_scheduled_date' => $newDate,
-            'reschedule_fee' => 150.00,
-            'reference_number' => 'RESCHED9876543',
+            'reschedule_fee' => 50.00,
+            'reference_number' => '9876543210123',
             'sender_name' => 'Juan Dela Cruz',
             'reschedule_reason' => 'Doctor appointment conflict',
         ];
@@ -144,8 +144,8 @@ class CustomerControllerTest extends TestCase
         $this->assertDatabaseHas('payment', [
             'booking_id' => $booking->booking_id,
             'payment_type' => 'Reschedule Fee',
-            'reference_number' => 'RESCHED9876543',
-            'amount_paid' => 150.00,
+            'reference_number' => '9876543210123',
+            'amount_paid' => 50.00,
         ]);
     }
 

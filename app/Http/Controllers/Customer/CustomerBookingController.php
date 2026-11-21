@@ -81,7 +81,7 @@ class CustomerBookingController extends Controller
                 DB::table('services')->insert(
                     array_merge($ps, [
                         'service_id' => $id,
-                        'booking_fee' => $id === 4 ? 0.00 : 300.00,
+                        'booking_fee' => $id === 4 ? 0.00 : 50.00,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ])
@@ -244,8 +244,8 @@ class CustomerBookingController extends Controller
             'Not Sure',
         ];
 
-        $defaultBookingFee = (float) ($services->firstWhere('service_id', 1)?->booking_fee ?? 300.00);
-        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
+        $defaultBookingFee = (float) ($services->firstWhere('service_id', 1)?->booking_fee ?? 50.00);
+        $rescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 50.00);
         $policy = [
             'fee_name' => 'Appointment Reservation Fee',
             'amount' => $defaultBookingFee,
@@ -618,7 +618,7 @@ class CustomerBookingController extends Controller
                 'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
                 'payment_status' => $latestPay?->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
                 'payment_method' => $latestPay?->payment_method ?? ($isOcular ? 'Free Service' : 'GCash'),
-                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? ($b->service?->booking_fee ?? 300)),
+                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? ($b->service?->booking_fee ?? 50)),
                 'reference_number' => $reservationPay?->reference_number ?? $latestPay?->reference_number,
                 'payments' => $b->payments->map(function ($p) {
                     return [
@@ -723,7 +723,7 @@ class CustomerBookingController extends Controller
         }
 
         $targetService = Service::active()->find((int) $request->input('service_id'));
-        $targetBookingFee = $targetService ? (float) ($targetService->booking_fee ?? 300.00) : 300.00;
+        $targetBookingFee = $targetService ? (float) ($targetService->booking_fee ?? 50.00) : 50.00;
         $isOcularRequest = ((int) $request->input('service_id') === 4)
             || ($targetService && stripos((string) $targetService->service_name, 'ocular') !== false)
             || $targetBookingFee == 0.0;
@@ -802,7 +802,7 @@ class CustomerBookingController extends Controller
 
         $service = Service::active()->findOrFail($validated['service_id']);
         $isOcularInspection = ((int) $service->service_id === 4) || stripos((string) $service->service_name, 'ocular') !== false;
-        $configuredFee = (float) ($service->booking_fee ?? ($isOcularInspection ? 0.00 : 300.00));
+        $configuredFee = (float) ($service->booking_fee ?? ($isOcularInspection ? 0.00 : 50.00));
         $bookingFee = $isOcularInspection
             ? 0.00
             : (isset($validated['booking_fee']) && is_numeric($validated['booking_fee'])
@@ -1183,7 +1183,7 @@ class CustomerBookingController extends Controller
             Payment::create([
                 'booking_id' => $booking->booking_id,
                 'booking_price' => 0.00,
-                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : 300.00,
+                'amount_paid' => isset($validated['amount_paid']) ? (float) $validated['amount_paid'] : (float) ($booking->service?->booking_fee ?? 50.00),
                 'payment_status' => 'Paid',
                 'payment_method' => 'GCash',
                 'payment_type' => 'Appointment Reservation Fee (Completed)',
@@ -1330,7 +1330,7 @@ class CustomerBookingController extends Controller
             $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
         }
 
-        $defaultRescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 150.00);
+        $defaultRescheduleFee = (float) BookingSetting::getValue('reschedule_fee', 50.00);
         $rescheduleFee = $isFreeReschedule
             ? 0.00
             : (isset($validated['reschedule_fee']) && (float) $validated['reschedule_fee'] > 0
@@ -2103,7 +2103,7 @@ class CustomerBookingController extends Controller
             'bookings_by_date' => $bookingsByDate,
             'full_dates' => $fullDates,
             'disabled_dates' => $disabledDates,
-            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 150.00),
+            'reschedule_fee' => (float) BookingSetting::getValue('reschedule_fee', 50.00),
             'regular' => $regular,
             'differential' => $differential,
         ];

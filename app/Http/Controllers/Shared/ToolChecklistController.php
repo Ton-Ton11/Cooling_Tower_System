@@ -53,15 +53,21 @@ class ToolChecklistController extends Controller
             $initial = (int) ($item->initial_stock !== null ? $item->initial_stock : $onHand);
             $reorder = (int) ($item->reorder_level ?? 0);
 
-            $isDamaged = in_array($statusLower, ['lost/damaged', 'damaged', 'lost', 'broken'], true);
+            $isLost = $statusLower === 'lost';
+            $isDamaged = in_array($statusLower, ['damaged', 'broken'], true);
+            $isLostDamaged = $statusLower === 'lost/damaged';
             $isBorrowed = $statusLower === 'borrowed';
             $isOutOfStock = $onHand <= 0;
 
-            $isAvailable = ! $isDamaged && ! $isBorrowed && ! $isOutOfStock;
+            $isAvailable = ! $isLost && ! $isDamaged && ! $isLostDamaged && ! $isBorrowed && ! $isOutOfStock;
             $unavailableReason = null;
 
-            if ($isDamaged) {
-                $unavailableReason = 'Damaged / Broken';
+            if ($isLost) {
+                $unavailableReason = 'Lost';
+            } elseif ($isDamaged) {
+                $unavailableReason = 'Damaged';
+            } elseif ($isLostDamaged) {
+                $unavailableReason = 'Lost / Damaged';
             } elseif ($isBorrowed) {
                 $unavailableReason = 'Currently In Use';
             } elseif ($isOutOfStock) {
@@ -1219,9 +1225,83 @@ class ToolChecklistController extends Controller
         $previousStatus = $item->status;
         $newStatus = $validated['status'];
 
+        DB::transaction(function () use ($item, $newStatus, $validated) {
+            $this->applyToolStatusChange($item, $newStatus, array_key_exists('notes', $validated) && $validated['notes'] !== null ? $validated['notes'] : $item->notes);
+        });
+
+        return response()->json([
+            'message' => sprintf('Tool status updated to "%s".', $newStatus),
+            'data' => $item->fresh(['inventoryItem']),
+        ]);
+    }
+
+    /**
+     * Batch update tool statuses for a checklist.
+     */
+    public function batchUpdateToolStatus(Request $request, $checklistId): JsonResponse
+    {
+        $checklistId = (int) $checklistId;
+        if ($checklistId <= 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid checklist ID.',
+            ], 422);
+        }
+
+        $user = $request->user();
+        if (! $user || ! in_array((int) $user->role_id, [1, 2, 3, 4, 5, 7], true)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $validated = $request->validate([
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.item_id' => ['required', 'integer'],
+            'items.*.status' => ['required', 'string', Rule::in(['assigned', 'returned', 'damaged', 'lost', 'borrowed'])],
+            'items.*.notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem'])
+            ->findOrFail($checklistId);
+
+        DB::transaction(function () use ($checklist, $validated) {
+            foreach ($validated['items'] as $itData) {
+                $itemId = (int) $itData['item_id'];
+                $newStatus = strtolower($itData['status']) === 'borrowed' ? 'assigned' : $itData['status'];
+                $notes = $itData['notes'] ?? null;
+
+                $item = ToolChecklistItem::with(['checklist.booking.client', 'checklist.booking.service', 'checklist.team', 'checklist.technician', 'inventoryItem'])
+                    ->where('checklist_id', $checklist->checklist_id)
+                    ->where('id', $itemId)
+                    ->first();
+
+                if (! $item || strtolower($item->item_type ?? '') !== 'tool') {
+                    continue;
+                }
+
+                $this->applyToolStatusChange($item, $newStatus, $notes);
+            }
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Checklist tools updated successfully.',
+            'data' => $this->formatChecklist($checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy', 'completedBy'])),
+        ]);
+    }
+
+    /**
+     * Apply individual tool status change and sync inventory & tool checkouts.
+     */
+    protected function applyToolStatusChange(ToolChecklistItem $item, string $newStatus, ?string $notes = null): ToolChecklistItem
+    {
+        $previousStatus = $item->status;
+        if ($previousStatus === $newStatus && ($notes === null || $notes === $item->notes)) {
+            return $item;
+        }
+
         $item->update([
             'status' => $newStatus,
-            'notes' => array_key_exists('notes', $validated) && $validated['notes'] !== null ? $validated['notes'] : $item->notes,
+            'notes' => $notes !== null ? $notes : $item->notes,
         ]);
 
         // Synchronize tool_checkouts and inventory status
@@ -1372,10 +1452,7 @@ class ToolChecklistController extends Controller
             }
         }
 
-        return response()->json([
-            'message' => sprintf('Tool status updated to "%s".', $newStatus),
-            'data' => $item->fresh(['inventoryItem']),
-        ]);
+        return $item;
     }
 
     /**
@@ -1660,6 +1737,12 @@ class ToolChecklistController extends Controller
                 $normalizedSubtype = $isTool ? (str_contains($rawSubtype, 'power') ? 'power' : 'hand') : null;
                 $categoryGroup = ! $isTool ? 'material' : ($normalizedSubtype === 'power' ? 'power_tool' : 'hand_tool');
 
+                $invStatus = strtolower((string) ($item->inventoryItem?->status ?? ''));
+                $itemStatus = $item->status;
+                if ($isTool && in_array($invStatus, ['damaged', 'lost', 'lost/damaged'], true) && strtolower((string) $itemStatus) !== 'returned') {
+                    $itemStatus = $invStatus === 'lost/damaged' ? 'damaged' : $invStatus;
+                }
+
                 return [
                     'id' => (int) $item->id,
                     'item_id' => (int) $item->item_id,
@@ -1672,7 +1755,8 @@ class ToolChecklistController extends Controller
                     'unit' => $item->inventoryItem?->unit ?? 'pc',
                     'quantity_requested' => (int) $item->quantity_requested,
                     'quantity_approved' => (int) $item->quantity_approved,
-                    'status' => $item->status,
+                    'status' => $itemStatus,
+                    'inventory_status' => $item->inventoryItem?->status,
                     'notes' => $item->notes,
                 ];
             })->values(),

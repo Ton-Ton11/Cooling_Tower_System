@@ -40,7 +40,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
         services: [],
         unit_types: [],
         brands: [],
-        settings: { reschedule_fee: 150 },
+        settings: { reschedule_fee: 50 },
         stats: {},
     });
 
@@ -53,7 +53,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
     const [brandModal, setBrandModal] = useState({ open: false, mode: "create", data: null });
     const [archiveModal, setArchiveModal] = useState({ open: false, type: "", id: null, title: "", action: "archive" });
     const [deleteModal, setDeleteModal] = useState({ open: false, type: "", id: null, title: "", hasBookings: false });
-    const [rescheduleFeeModal, setRescheduleFeeModal] = useState({ open: false, fee: 150 });
+    const [rescheduleFeeModal, setRescheduleFeeModal] = useState({ open: false, fee: 50 });
     const [submitting, setSubmitting] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [savingFee, setSavingFee] = useState(false);
@@ -143,7 +143,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
     const openRescheduleFeeModal = () => {
         setRescheduleFeeModal({
             open: true,
-            fee: catalogData.settings?.reschedule_fee ?? 150,
+            fee: catalogData.settings?.reschedule_fee ?? 50,
         });
     };
 
@@ -187,7 +187,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                 service_name: service.service_name,
                 category: service.category || "Cleaning",
                 base_price: service.base_price,
-                booking_fee: service.booking_fee !== null && service.booking_fee !== undefined ? service.booking_fee : 300.00,
+                booking_fee: service.booking_fee !== null && service.booking_fee !== undefined ? service.booking_fee : 50.00,
                 description: service.description || "",
                 display_order: service.display_order ?? 0,
                 is_active: Boolean(service.is_active),
@@ -198,7 +198,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                 service_name: "",
                 category: "Cleaning",
                 base_price: "",
-                booking_fee: 300.00,
+                booking_fee: 50.00,
                 description: "",
                 display_order: (catalogData.services?.length || 0) + 1,
                 is_active: true,
@@ -601,7 +601,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                 <div>
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs font-bold text-gray-800">In-Progress Reschedule Fee:</span>
-                                        <span className="text-sm font-extrabold text-blue-700">₱{Number(catalogData.settings?.reschedule_fee ?? 150).toFixed(2)}</span>
+                                        <span className="text-sm font-extrabold text-blue-700">₱{Number(catalogData.settings?.reschedule_fee ?? 50).toFixed(2)}</span>
                                     </div>
                                     <p className="text-[11px] text-gray-500">Approved bookings reschedule for free. In-progress reschedules charge this fee.</p>
                                 </div>
@@ -1037,7 +1037,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                         type="number"
                                         step="0.01"
                                         min="0"
-                                        placeholder="300.00"
+                                        placeholder="50.00"
                                         value={serviceForm.booking_fee}
                                         onChange={(e) => setServiceForm({ ...serviceForm, booking_fee: e.target.value })}
                                         className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-semibold focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
@@ -1362,7 +1362,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                 Edit Reschedule Fee
                             </h3>
                             <button
-                                onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 150 })}
+                                onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 50 })}
                                 className="text-gray-400 hover:text-gray-600 font-bold text-lg"
                             >
                                 ✕
@@ -1384,7 +1384,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                                         value={rescheduleFeeModal.fee}
                                         onChange={(e) => setRescheduleFeeModal((prev) => ({ ...prev, fee: e.target.value }))}
                                         className="w-full pl-8 pr-3.5 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition font-bold text-gray-900"
-                                        placeholder="150"
+                                        placeholder="50"
                                     />
                                 </div>
                                 <span className="text-[11px] text-gray-400 mt-1.5 block">
@@ -1395,7 +1395,7 @@ export default function ServiceCatalog({ addToast, onDataChanged, endpoints = SU
                             <div className="pt-4 border-t border-gray-100 flex items-center justify-end gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 150 })}
+                                    onClick={() => setRescheduleFeeModal({ open: false, fee: catalogData.settings?.reschedule_fee ?? 50 })}
                                     className="px-4 py-2 rounded-xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition"
                                 >
                                     Cancel

@@ -12,8 +12,7 @@ class TechnicianTeamTest extends TestCase
 {
     protected function getHeadTechnician(): User
     {
-        $user = User::where('role_id', 7)->first() 
-            ?? User::where('is_head_technician', true)->first();
+        $user = User::where('role_id', 7)->first();
         if (!$user) {
             $user = User::create([
                 'given_name' => 'Rafael',
@@ -21,7 +20,6 @@ class TechnicianTeamTest extends TestCase
                 'email' => 'rafael.torres.test@coolingtower.com',
                 'password' => 'password',
                 'role_id' => 7,
-                'is_head_technician' => true,
                 'is_active' => true,
                 'email_verified_at' => now(),
                 'birthdate' => '1990-01-01',
@@ -39,7 +37,7 @@ class TechnicianTeamTest extends TestCase
 
     protected function getTechnician(): User
     {
-        $user = User::where('role_id', 5)->where('is_head_technician', false)->first();
+        $user = User::where('role_id', 5)->first();
         if (!$user) {
             $user = User::create([
                 'given_name' => 'Danilo',
@@ -47,7 +45,6 @@ class TechnicianTeamTest extends TestCase
                 'email' => 'danilo.ramos.test@coolingtower.com',
                 'password' => 'password',
                 'role_id' => 5,
-                'is_head_technician' => false,
                 'is_active' => true,
                 'email_verified_at' => now(),
                 'birthdate' => '1992-02-02',

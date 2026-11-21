@@ -60,7 +60,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'supplier_name' => ['nullable', 'string', 'max:150'],
             'managed_by' => ['nullable', 'string', 'max:150'],
-            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
         $validated['inventory_mode'] = 'worker';
@@ -147,7 +147,7 @@ class ToolsManInventoryController extends ToolsManBaseController
             'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'supplier_name' => ['nullable', 'string', 'max:150'],
             'managed_by' => ['sometimes', 'nullable', 'string', 'max:150'],
-            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
         // When stock is added via added_stock, automatically increment both quantity_on_hand and initial_stock
@@ -194,6 +194,27 @@ class ToolsManInventoryController extends ToolsManBaseController
 
         if (! empty($validated)) {
             DB::table('inventory_items')->where('item_id', $itemId)->update(array_merge($validated, ['last_updated' => now()]));
+
+            // If item status was specifically set to Damaged or Lost, synchronize active unreturned checklist items
+            if (isset($validated['status'])) {
+                $statusLower = strtolower($validated['status']);
+                if (in_array($statusLower, ['damaged', 'lost'], true)) {
+                    DB::table('tool_checklist_items')
+                        ->where('item_id', $itemId)
+                        ->whereNotIn('status', ['returned'])
+                        ->update([
+                            'status' => $statusLower,
+                            'updated_at' => now(),
+                        ]);
+                    DB::table('tool_checkouts')
+                        ->where('item_id', $itemId)
+                        ->whereNotIn('status', ['Returned'])
+                        ->update([
+                            'status' => ucfirst($statusLower),
+                            'updated_at' => now(),
+                        ]);
+                }
+            }
         }
 
         $this->logActivity((int) $request->user()->user_id, 'INVENTORY', sprintf('Updated inventory item %s.', $item->item_name));

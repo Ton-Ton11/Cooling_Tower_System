@@ -136,6 +136,7 @@ Route::prefix('super-admin')
             Route::patch('/checklists/{checklistId}/items', 'toolsManUpdateItems')->name('checklists.items.update');
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
             Route::post('/checklists/{checklistId}/complete', 'complete')->name('checklists.complete');
         });
 
@@ -501,6 +502,7 @@ Route::prefix('admin-assistant')
             Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -575,6 +577,7 @@ Route::prefix('tools-man')
             Route::patch('/checklists/{checklistId}/items', 'toolsManUpdateItems')->name('checklists.items.update');
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
             Route::post('/checklists/{checklistId}/complete', 'complete')->name('checklists.complete');
         });
 
@@ -613,6 +616,7 @@ Route::prefix('technician')
             Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -668,6 +672,7 @@ Route::prefix('head-technician')
             Route::patch('/checklists/{checklistId}', 'update')->name('checklists.update');
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
+            Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 

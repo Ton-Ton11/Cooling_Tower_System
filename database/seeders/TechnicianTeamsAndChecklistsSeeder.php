@@ -13,6 +13,7 @@ class TechnicianTeamsAndChecklistsSeeder extends Seeder
     public function run(): void
     {
         // All squad management, technician assignments, and checklist seeds
-        // have been merged into ExampleDataSeeder.php.
+        // are maintained in ExampleDataSeeder.php.
+        $this->call(ExampleDataSeeder::class);
     }
 }

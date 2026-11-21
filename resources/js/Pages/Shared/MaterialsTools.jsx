@@ -895,6 +895,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         if (status === 'Available' || status === 'Returned') return { bg: 'rgba(22,163,74,0.1)', color: '#16A34A' };
         if (status === 'Borrowed' || status === 'Checked Out') return { bg: 'rgba(63,125,255,0.1)', color: '#3F7DFF' };
         if (status === 'Used / Consumed') return { bg: 'rgba(147,51,234,0.1)', color: '#9333EA' };
+        if (status === 'Lost') return { bg: 'rgba(245,158,11,0.12)', color: '#D97706' };
+        if (status === 'Damaged') return { bg: 'rgba(239,68,68,0.1)', color: '#DC2626' };
         return { bg: 'rgba(239,68,68,0.1)', color: '#EF4444' };
     };
 
@@ -4667,6 +4669,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 <select className="input-field" value={editPTForm.status} onChange={e => setEditPTForm(p => ({ ...p, status: e.target.value }))}>
                                     <option value="Available">Available</option>
                                     <option value="Borrowed">Borrowed</option>
+                                    <option value="Damaged">Damaged</option>
+                                    <option value="Lost">Lost</option>
                                     <option value="Lost/Damaged">Lost/Damaged</option>
                                 </select>
                             </div>

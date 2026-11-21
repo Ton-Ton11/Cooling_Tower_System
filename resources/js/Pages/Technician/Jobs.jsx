@@ -12,6 +12,45 @@ import {
 
 const tabs = ["All", "Approved", "In-Progress", "Completed"];
 
+const WORK_PERFORMED_SERVICES = [
+    "Installation",
+    "Repair / Check-up",
+    "Cleaning / Preventive Maintenance",
+    "Ocular Inspection",
+];
+
+const COMPLETE_AC_TYPES = [
+    { value: "Split", label: "Split Type (Wall-Mounted)" },
+    { value: "Window", label: "Window Type" },
+    { value: "Cassette", label: "Ceiling Cassette" },
+    { value: "Floor Mounted", label: "Floor Mounted / Standing Tower" },
+    { value: "Ceiling Suspended", label: "Ceiling Suspended" },
+    { value: "Ducted / Concealed", label: "Ducted / Concealed Ceiling" },
+    { value: "Central / Package Unit", label: "Central / Package Unit" },
+    { value: "VRF / VRV System", label: "VRF / VRV Multi-Split System" },
+    { value: "Multi-Split", label: "Multi-Split System" },
+    { value: "Portable AC", label: "Portable Air Conditioner" },
+    { value: "Other", label: "Other / Not Listed" },
+];
+
+const normalizeAcType = (rawType) => {
+    if (!rawType) return "Split";
+    const str = String(rawType).trim();
+    const lower = str.toLowerCase();
+    if (lower.includes("multi-split") || lower.includes("multisplit")) return "Multi-Split";
+    if (lower.includes("split")) return "Split";
+    if (lower.includes("window")) return "Window";
+    if (lower.includes("cassette")) return "Cassette";
+    if (lower.includes("floor")) return "Floor Mounted";
+    if (lower.includes("suspended")) return "Ceiling Suspended";
+    if (lower.includes("duct") || lower.includes("conceal")) return "Ducted / Concealed";
+    if (lower.includes("central") || lower.includes("package")) return "Central / Package Unit";
+    if (lower.includes("vrf") || lower.includes("vrv")) return "VRF / VRV System";
+    if (lower.includes("portable")) return "Portable AC";
+    if (lower.includes("other") || lower.includes("sure")) return "Other";
+    return str;
+};
+
 const Icon = ({ d, size = 16 }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
         <path d={d} />
@@ -109,7 +148,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
     const [completing, setCompleting] = useState(false);
     const [reportForm, setReportForm] = useState({
         diagnosis: "",
-        work_done: "",
+        work_done: "Installation",
         parts_replaced: "",
         ac_brand: "",
         ac_type: "Split",
@@ -272,13 +311,19 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
 
         if (catalogItem) {
             const statusLower = (catalogItem.status || "").toLowerCase();
-            const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+            const isLost = statusLower === "lost";
+            const isDamaged = ["damaged", "broken"].includes(statusLower);
+            const isLostDamaged = statusLower === "lost/damaged";
             const isBorrowed = statusLower === "borrowed";
             const isOutOfStock = Number(catalogItem.quantity_on_hand) <= 0;
 
-            if (!catalogItem.is_available || isDamaged || isBorrowed || isOutOfStock) {
-                const reason = isDamaged
+            if (!catalogItem.is_available || isLost || isDamaged || isLostDamaged || isBorrowed || isOutOfStock) {
+                const reason = isLost
+                    ? "marked as lost"
+                    : isDamaged
                     ? "damaged or broken"
+                    : isLostDamaged
+                    ? "lost or damaged"
                     : isBorrowed
                     ? "in use / borrowed"
                     : "out of stock";
@@ -375,11 +420,22 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             const catItem = catalog.find((c) => Number(c.item_id) === Number(it.item_id));
             if (catItem) {
                 const statusLower = (catItem.status || "").toLowerCase();
-                const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+                const isLost = statusLower === "lost";
+                const isDamaged = ["damaged", "broken"].includes(statusLower);
+                const isLostDamaged = statusLower === "lost/damaged";
                 const isBorrowed = statusLower === "borrowed";
                 const isOutOfStock = Number(catItem.quantity_on_hand) <= 0;
-                if (!catItem.is_available || isDamaged || isBorrowed || isOutOfStock) {
-                    addToast(`"${catItem.item_name}" is currently unavailable. Please remove it.`, "error");
+                if (!catItem.is_available || isLost || isDamaged || isLostDamaged || isBorrowed || isOutOfStock) {
+                    const reason = isLost
+                        ? "marked as lost"
+                        : isDamaged
+                        ? "damaged or broken"
+                        : isLostDamaged
+                        ? "lost or damaged"
+                        : isBorrowed
+                        ? "currently in use"
+                        : "currently unavailable";
+                    addToast(`Cannot submit checklist: "${catItem.item_name}" is ${reason}. Please remove it.`, "error");
                     return;
                 }
             }
@@ -472,8 +528,9 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             return;
         }
         const totalSvcPrice = Number(reportForm.total_service_price);
-        if (!Number.isFinite(totalSvcPrice) || totalSvcPrice < 300) {
-            addToast("Please enter a valid total service fee (minimum ₱300.00).", "error");
+        const reservationDownPayment = Number(completeModal?.payment_turnover?.reservation_down_payment ?? (completeModal?.service?.booking_fee ?? 50));
+        if (!Number.isFinite(totalSvcPrice) || totalSvcPrice < reservationDownPayment) {
+            addToast(`Please enter a valid total service fee (minimum ₱${reservationDownPayment.toFixed(2)}).`, "error");
             return;
         }
         if (reportForm.payment_method === "GCash") {
@@ -517,7 +574,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             setCompleteModal(null);
             setReportForm({
                 diagnosis: "",
-                work_done: "",
+                work_done: "Installation",
                 parts_replaced: "",
                 ac_brand: "",
                 ac_type: "Split",
@@ -676,10 +733,12 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     const qty = entry?.quantity || 1;
 
                                     const statusLower = (item.status || "").toLowerCase();
-                                    const isDamaged = ["lost/damaged", "damaged", "lost", "broken"].includes(statusLower);
+                                    const isLost = statusLower === "lost";
+                                    const isDamaged = ["damaged", "broken"].includes(statusLower);
+                                    const isLostDamaged = statusLower === "lost/damaged";
                                     const isBorrowed = statusLower === "borrowed";
                                     const isOutOfStock = Number(item.quantity_on_hand) <= 0;
-                                    const isUnavailable = !item.is_available || isDamaged || isBorrowed || isOutOfStock;
+                                    const isUnavailable = !item.is_available || isLost || isDamaged || isLostDamaged || isBorrowed || isOutOfStock;
                                     const isPowerTool = getItemCategoryGroup(item) === "power_tool";
 
                                     return (
@@ -714,8 +773,16 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                     <div style={{ fontSize: 11, color: "#64748B", marginTop: 2, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                                         {item.serial_number && <span>S/N: {item.serial_number}</span>}
                                                         {isUnavailable ? (
-                                                            <span style={{ color: "#DC2626", fontWeight: 600 }}>
-                                                                {isDamaged ? "Damaged" : isBorrowed ? "In Use" : "Out of Stock"}
+                                                            <span style={{ color: isLost ? "#D97706" : "#DC2626", fontWeight: 600 }}>
+                                                                {isLost
+                                                                    ? "Lost"
+                                                                    : isDamaged
+                                                                    ? "Damaged"
+                                                                    : isLostDamaged
+                                                                    ? "Lost / Damaged"
+                                                                    : isBorrowed
+                                                                    ? "In Use"
+                                                                    : "Out of Stock"}
                                                             </span>
                                                         ) : (
                                                             <span style={{ color: "#059669", fontWeight: 600 }}>
@@ -1296,13 +1363,24 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                         }
                                                         const prevTurnover = job.payment_turnover || {};
                                                         const prevReport = job.service_report || {};
+                                                        const bookingService = job.service_name || job.service?.service_name || "Installation";
+                                                        const rawWorkDone = prevTurnover.work_done || prevReport.work_done || bookingService;
+                                                        const matchedWorkDone = WORK_PERFORMED_SERVICES.find(
+                                                            (s) => s.toLowerCase() === (rawWorkDone || "").trim().toLowerCase()
+                                                        ) || (WORK_PERFORMED_SERVICES.find(
+                                                            (s) => (rawWorkDone || "").toLowerCase().includes(s.toLowerCase()) || s.toLowerCase().includes((rawWorkDone || "").toLowerCase())
+                                                        )) || rawWorkDone || "Installation";
+
+                                                        const rawAcType = prevTurnover.ac_type || prevReport.ac_type || job.ac_unit_order?.unit_type || job.units_data?.[0]?.unit_type || "Split";
+                                                        const matchedAcType = normalizeAcType(rawAcType);
+
                                                         setCompleteModal(job);
                                                         setReportForm({
-                                                            diagnosis: prevTurnover.diagnosis || prevReport.diagnosis || "",
-                                                            work_done: prevTurnover.work_done || prevReport.work_done || "",
+                                                            diagnosis: prevTurnover.diagnosis || prevReport.diagnosis || "None",
+                                                            work_done: matchedWorkDone,
                                                             parts_replaced: prevTurnover.parts_replaced || prevReport.parts_replaced || "",
-                                                            ac_brand: prevTurnover.ac_brand || prevReport.ac_brand || job.ac_unit_order?.brand || "",
-                                                            ac_type: prevTurnover.ac_type || prevReport.ac_type || "Split",
+                                                            ac_brand: prevTurnover.ac_brand || prevReport.ac_brand || job.ac_unit_order?.brand || job.units_data?.[0]?.brand || "",
+                                                            ac_type: matchedAcType,
                                                             unit_serial_number: prevReport.unit_serial_number || "",
                                                             total_service_price: String(
                                                                 prevTurnover.total_service_price ||
@@ -1587,21 +1665,23 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                                 background:
                                                                     item.status === "assigned" ? "#DBEAFE" :
                                                                     item.status === "returned" ? "#D1FAE5" :
-                                                                    item.status === "damaged" ? "#FEE2E2" : "#E5E7EB",
+                                                                    item.status === "damaged" ? "#FEE2E2" :
+                                                                    item.status === "lost" ? "#FEF3C7" : "#E5E7EB",
                                                                 color:
                                                                     item.status === "assigned" ? "#1E40AF" :
                                                                     item.status === "returned" ? "#065F46" :
-                                                                    item.status === "damaged" ? "#991B1B" : "#1F2937",
+                                                                    item.status === "damaged" ? "#991B1B" :
+                                                                    item.status === "lost" ? "#92400E" : "#1F2937",
                                                             }}
                                                         >
-                                                            {item.status}
+                                                            {item.status === "assigned" ? "In Use" : item.status === "damaged" ? "Damaged" : item.status === "lost" ? "Lost" : item.status === "returned" ? "Returned" : item.status}
                                                         </span>
                                                         {viewChecklistModal.status === "Approved" && (
                                                             <div style={{ display: "inline-flex", gap: 4 }}>
                                                                 {[
                                                                     { key: "returned", label: "Returned", bg: "#DCFCE7", color: "#166534", border: "#86EFAC" },
                                                                     { key: "damaged", label: "Damaged", bg: "#FEE2E2", color: "#991B1B", border: "#FCA5A5" },
-                                                                    { key: "lost", label: "Lost", bg: "#F3F4F6", color: "#1F2937", border: "#D1D5DB" },
+                                                                    { key: "lost", label: "Lost", bg: "#FEF3C7", color: "#92400E", border: "#FCD34D" },
                                                                 ].map((opt) => (
                                                                     <button
                                                                         key={opt.key}
@@ -1687,7 +1767,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         </label>
                                         <input
                                             type="number"
-                                            min="300"
+                                            min={Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50))}
                                             step="0.01"
                                             className="input-field"
                                             value={reportForm.total_service_price}
@@ -1759,19 +1839,26 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         <span>Total Service Price:</span>
                                         <strong>₱{Number(reportForm.total_service_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                                     </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
-                                        <span>Less Reservation Fee:</span>
-                                        <strong>- ₱300.00</strong>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
-                                        <span>Net Balance to Turn Over:</span>
-                                        <span>
-                                            ₱{(
-                                                Math.max(0, Number(reportForm.total_service_price || 0) - 300) +
-                                                (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0)
-                                            ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})
-                                        </span>
-                                    </div>
+                                    {(() => {
+                                        const downPaymentAmt = Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50));
+                                        return (
+                                            <>
+                                                <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
+                                                    <span>Less Reservation Fee:</span>
+                                                    <strong>- ₱{downPaymentAmt.toFixed(2)}</strong>
+                                                </div>
+                                                <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
+                                                    <span>Net Balance to Turn Over:</span>
+                                                    <span>
+                                                        ₱{(
+                                                            Math.max(0, Number(reportForm.total_service_price || 0) - downPaymentAmt) +
+                                                            (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0)
+                                                        ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})
+                                                    </span>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -1792,13 +1879,20 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                 <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 }}>
                                     Work Performed *
                                 </label>
-                                <textarea
+                                <select
                                     className="input-field"
-                                    rows={2}
-                                    placeholder="Steps taken during service..."
                                     value={reportForm.work_done}
                                     onChange={(e) => setReportForm({ ...reportForm, work_done: e.target.value })}
-                                />
+                                >
+                                    {WORK_PERFORMED_SERVICES.map((svc) => (
+                                        <option key={svc} value={svc}>
+                                            {svc}
+                                        </option>
+                                    ))}
+                                    {!WORK_PERFORMED_SERVICES.includes(reportForm.work_done) && reportForm.work_done && (
+                                        <option value={reportForm.work_done}>{reportForm.work_done}</option>
+                                    )}
+                                </select>
                             </div>
 
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -1821,11 +1915,14 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         value={reportForm.ac_type}
                                         onChange={(e) => setReportForm({ ...reportForm, ac_type: e.target.value })}
                                     >
-                                        <option value="Split">Split Type</option>
-                                        <option value="Window">Window Type</option>
-                                        <option value="Cassette">Cassette Type</option>
-                                        <option value="Floor Mounted">Floor Mounted</option>
-                                        <option value="Ceiling Suspended">Ceiling Suspended</option>
+                                        {COMPLETE_AC_TYPES.map((type) => (
+                                            <option key={type.value} value={type.value}>
+                                                {type.label}
+                                            </option>
+                                        ))}
+                                        {!COMPLETE_AC_TYPES.some((t) => t.value === reportForm.ac_type) && reportForm.ac_type && (
+                                            <option value={reportForm.ac_type}>{reportForm.ac_type}</option>
+                                        )}
                                     </select>
                                 </div>
                             </div>
