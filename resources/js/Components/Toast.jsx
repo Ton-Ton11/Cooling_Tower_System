@@ -60,6 +60,7 @@ function ToastItem({ toast, onDismiss }) {
             }}
         >
             <span
+                aria-hidden="true"
                 style={{
                     width: 24,
                     height: 24,
@@ -113,6 +114,9 @@ function Toast({ toasts, onDismiss }) {
     if (toasts.length === 0) return null;
     return (
         <div
+            role="region"
+            aria-label="Notifications"
+            aria-live="polite"
             style={{
                 position: "fixed",
                 bottom: 24,

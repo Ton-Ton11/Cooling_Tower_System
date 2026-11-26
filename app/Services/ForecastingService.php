@@ -35,9 +35,28 @@ class ForecastingService
                 $table->integer('adjusted_interval_days')->default(120);
                 $table->decimal('wear_factor', 4, 2)->default(1.00);
                 $table->string('urgency_level', 40)->default('Upcoming');
+                $table->unsignedInteger('cycle_count')->default(0);
+                $table->date('last_reminded_due_date')->nullable();
                 $table->text('recommendation_reason')->nullable();
                 $table->timestamp('reminder_sent_at')->nullable();
+                $table->timestamp('alert_acknowledged_at')->nullable();
                 $table->timestamps();
+            });
+        } elseif (
+            ! Schema::hasColumn('service_forecasts', 'cycle_count')
+            || ! Schema::hasColumn('service_forecasts', 'last_reminded_due_date')
+            || ! Schema::hasColumn('service_forecasts', 'alert_acknowledged_at')
+        ) {
+            Schema::table('service_forecasts', function (Blueprint $table) {
+                if (! Schema::hasColumn('service_forecasts', 'cycle_count')) {
+                    $table->unsignedInteger('cycle_count')->default(0)->after('urgency_level');
+                }
+                if (! Schema::hasColumn('service_forecasts', 'last_reminded_due_date')) {
+                    $table->date('last_reminded_due_date')->nullable()->after('cycle_count');
+                }
+                if (! Schema::hasColumn('service_forecasts', 'alert_acknowledged_at')) {
+                    $table->timestamp('alert_acknowledged_at')->nullable()->after('reminder_sent_at');
+                }
             });
         }
 
@@ -512,49 +531,277 @@ class ForecastingService
     }
 
     /**
-     * Check if a forecast's 1-week reminder window has passed without booking,
-     * and automatically restart another 3-month countdown cycle.
+     * Check whether a completed-booking forecast currently has an unacknowledged due alert.
      */
-    public function syncAndRolloverForecast(ServiceForecast $forecast): bool
+    public function isForecastAlertActive(ServiceForecast $forecast, bool $hasActiveBooking = false): bool
     {
+        return ! $hasActiveBooking
+            && $forecast->urgency_level !== 'Dismissed'
+            && $forecast->reminder_sent_at !== null
+            && $forecast->last_reminded_due_date !== null
+            && $forecast->alert_acknowledged_at === null;
+    }
+
+    /**
+     * Dispatch a notification to the customer when their completed-booking countdown ends
+     * and the next 3-month maintenance cycle starts.
+     */
+    protected function notifyCustomerForecastCycleReached(
+        ServiceForecast $forecast,
+        Carbon $reachedDueDate,
+        Carbon $nextDueDate,
+        int $newCycleNumber
+    ): bool {
+        $forecast->loadMissing('customer');
+        if (! $forecast->customer) {
+            return false;
+        }
+
+        $unitLabel = $forecast->unit_summary ?: 'your serviced AC unit';
+        $title = "Maintenance Due: {$forecast->recommended_service_name}";
+        $msg = "3-month countdown ended ({$reachedDueDate->format('M d, Y')}) for {$unitLabel}. Next 3-month countdown started (due {$nextDueDate->format('M d, Y')}).";
+
+        try {
+            if (Schema::hasTable('notifications')) {
+                $forecast->customer->notify(new ForecastReminderNotification(
+                    'customer_maintenance',
+                    $title,
+                    $msg,
+                    [
+                        'forecast_id'            => (int) $forecast->forecast_id,
+                        'source_booking_id'      => $forecast->source_booking_id ? (int) $forecast->source_booking_id : null,
+                        'recommended_service_id' => $forecast->recommended_service_id ? (int) $forecast->recommended_service_id : null,
+                        'cycle_number'           => $newCycleNumber,
+                        'reached_due_date'       => $reachedDueDate->toDateString(),
+                        'next_due_date'          => $nextDueDate->toDateString(),
+                        'cycle'                  => '3_months',
+                    ]
+                ));
+
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // Continue gracefully if notifications table isn't migrated
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a completed booking's 3-month countdown has reached the end,
+     * notify & flag a visible customer alert, and immediately loop to start the next 3-month countdown.
+     */
+    public function syncAndRolloverForecast(ServiceForecast $forecast, bool $allowTodayEndGrace = false): bool
+    {
+        if ($forecast->urgency_level === 'Dismissed') {
+            return false;
+        }
+
+        // Strict scope guard: looped countdown only applies to eligible completed bookings.
+        if ($forecast->source_booking_id) {
+            $sourceBooking = Booking::with('service')->find($forecast->source_booking_id);
+            if (! $sourceBooking || $sourceBooking->booking_status !== 'Completed' || ! $this->isServiceEligibleForMaintenance($sourceBooking)) {
+                return false;
+            }
+        }
+
+        $tz = config('app.timezone', 'Asia/Manila');
+        $now = Carbon::now($tz);
+
         $hasActiveBooking = Booking::where('client_id', $forecast->user_id)
             ->whereIn('service_id', [2, 3])
             ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
             ->exists();
 
         if ($hasActiveBooking) {
+            $updates = [];
             if ($forecast->urgency_level !== 'Scheduled') {
-                $forecast->update(['urgency_level' => 'Scheduled']);
+                $updates['urgency_level'] = 'Scheduled';
+            }
+            if ($forecast->alert_acknowledged_at === null && $forecast->reminder_sent_at !== null) {
+                $updates['alert_acknowledged_at'] = $now;
+            }
+            if (! empty($updates)) {
+                $forecast->update($updates);
             }
             return false;
         }
 
-        $dueDate = Carbon::parse($forecast->predicted_due_date)->startOfDay();
-        $daysRemaining = (int) now()->startOfDay()->diffInDays($dueDate, false);
+        $cycleDays = max(1, (int) ($forecast->adjusted_interval_days ?: 90));
+        $lastDate = $forecast->last_service_date
+            ? Carbon::parse($forecast->last_service_date, $tz)->startOfDay()
+            : $now->copy()->startOfDay();
+        $dueDate = $forecast->predicted_due_date
+            ? Carbon::parse($forecast->predicted_due_date, $tz)->startOfDay()
+            : $lastDate->copy()->addDays($cycleDays);
 
-        // If 1 week has passed since the due date (overdue by more than 7 days) and customer hasn't booked:
-        // Automatically start another 3 months to count!
-        if ($daysRemaining < -7) {
-            $newDueDate = now()->startOfDay()->addDays(90);
+        $cutoff = $allowTodayEndGrace ? $now->copy()->addMinutes(5) : $now;
+
+        $rolled = false;
+        $loopsAdded = 0;
+        $lastReachedDueDate = null;
+        $guard = 0;
+        while ($dueDate->copy()->setTime(8, 0, 0)->lessThanOrEqualTo($cutoff) && $guard < 48) {
+            $lastReachedDueDate = $dueDate->copy();
+            $lastDate = $dueDate->copy();
+            $dueDate = $lastDate->copy()->addDays($cycleDays);
+            $rolled = true;
+            $loopsAdded++;
+            $guard++;
+        }
+
+        if ($rolled && $lastReachedDueDate) {
+            $reachedDateString = $lastReachedDueDate->toDateString();
+            $prevRemindedDate = $forecast->last_reminded_due_date
+                ? Carbon::parse($forecast->last_reminded_due_date, $tz)->toDateString()
+                : null;
+            $isNewCycleAlert = ($prevRemindedDate !== $reachedDateString);
+            $newCycleCount = (int) ($forecast->cycle_count ?? 0) + $loopsAdded;
+            $nextUrgency = $this->computeUrgencyLevel($dueDate, false);
 
             $forecast->update([
-                'predicted_due_date'    => $newDueDate->toDateString(),
-                'base_interval_days'    => 90,
-                'adjusted_interval_days'=> 90,
-                'urgency_level'         => 'Upcoming',
-                'reminder_sent_at'      => null, // Reset reminder flag so it notifies once when next 3-month due date arrives
-                'recommendation_reason' => '3-month maintenance countdown renewed after 1-week reminder window. Routine maintenance scheduled every 3 months.',
+                'last_service_date'      => $lastDate->toDateString(),
+                'predicted_due_date'     => $dueDate->toDateString(),
+                'base_interval_days'     => 90,
+                'adjusted_interval_days' => $cycleDays,
+                'urgency_level'          => $nextUrgency,
+                'cycle_count'            => $newCycleCount,
+                'last_reminded_due_date' => $reachedDateString,
+                'reminder_sent_at'       => $isNewCycleAlert ? $now : ($forecast->reminder_sent_at ?? $now),
+                'alert_acknowledged_at'  => $isNewCycleAlert ? null : $forecast->alert_acknowledged_at,
+                'recommendation_reason'  => "Maintenance due reached ({$lastReachedDueDate->format('M d, Y')}). Cycle #" . ($newCycleCount + 1) . " started.",
             ]);
+
+            if ($isNewCycleAlert) {
+                $this->notifyCustomerForecastCycleReached($forecast, $lastReachedDueDate, $dueDate, $newCycleCount + 1);
+            }
 
             return true;
         }
 
         $urgency = $this->computeUrgencyLevel($dueDate, false);
-        if ($forecast->urgency_level !== $urgency && $forecast->urgency_level !== 'Dismissed') {
+        if ($forecast->urgency_level !== $urgency) {
             $forecast->update(['urgency_level' => $urgency]);
         }
 
         return false;
+    }
+
+    /**
+     * Serialize a completed-booking forecast into the frontend reminder payload.
+     */
+    protected function formatBookingReminderPayload(ServiceForecast $forecast, int $bookingId, bool $hasActiveFollowUp): array
+    {
+        $tz = config('app.timezone', 'Asia/Manila');
+        $today = Carbon::now($tz)->startOfDay();
+
+        $cycleDays = max(1, (int) ($forecast->adjusted_interval_days ?: 90));
+        $lastDate = $forecast->last_service_date
+            ? Carbon::parse($forecast->last_service_date, $tz)->startOfDay()
+            : $today->copy();
+        $dueDate = $forecast->predicted_due_date
+            ? Carbon::parse($forecast->predicted_due_date, $tz)->startOfDay()
+            : $lastDate->copy()->addDays($cycleDays);
+
+        $daysRemaining = (int) $today->diffInDays($dueDate, false);
+        $elapsedDays = max(0, min($cycleDays, (int) $lastDate->diffInDays($today, false)));
+        $progressPercent = max(0, min(100, (int) round((($cycleDays - $elapsedDays) / $cycleDays) * 100)));
+
+        if ($hasActiveFollowUp) {
+            $status = 'Scheduled';
+        } elseif ($daysRemaining <= 0) {
+            $status = 'Due Now';
+        } elseif ($daysRemaining <= 7) {
+            $status = 'Due Soon';
+        } else {
+            $status = 'Upcoming';
+        }
+
+        $dueTimeStr = '08:00:00';
+        $targetTimestamp = $dueDate->copy()->setTime(8, 0, 0);
+        $cycleCount = (int) ($forecast->cycle_count ?? 0);
+        $lastRemindedDate = $forecast->last_reminded_due_date
+            ? Carbon::parse($forecast->last_reminded_due_date, $tz)
+            : null;
+        $isAlertActive = $this->isForecastAlertActive($forecast, $hasActiveFollowUp);
+
+        return [
+            'forecast_id'              => (int) $forecast->forecast_id,
+            'booking_id'               => $bookingId,
+            'source_service_name'      => $forecast->source_service_name,
+            'recommended_service_id'   => (int) ($forecast->recommended_service_id ?: 3),
+            'recommended_service_name' => $forecast->recommended_service_name ?: 'Cleaning / Preventive Maintenance',
+            'cleaning_service_id'      => 3,
+            'repair_service_id'        => 2,
+            'unit_summary'             => $forecast->unit_summary,
+            'cycle_days'               => $cycleDays,
+            'cycle_label'              => '3 Months',
+            'cycle_count'              => $cycleCount,
+            'cycle_number'             => $cycleCount + 1,
+            'last_service_date'        => $lastDate->toDateString(),
+            'last_service_formatted'   => $lastDate->format('M d, Y'),
+            'due_date'                 => $dueDate->toDateString(),
+            'due_time'                 => $dueTimeStr,
+            'due_date_formatted'       => $dueDate->format('M d, Y'),
+            'due_datetime_formatted'   => $targetTimestamp->format('M d, Y • h:i A'),
+            'target_iso'               => $targetTimestamp->toIso8601String(),
+            'time_zone'                => $tz,
+            'days_remaining'           => $daysRemaining,
+            'progress_percent'         => $progressPercent,
+            'status'                   => $status,
+            'reminder_sent'            => (bool) $forecast->reminder_sent_at,
+            'reminder_sent_at'         => $forecast->reminder_sent_at?->toIso8601String(),
+            'last_reminded_due_date'   => $lastRemindedDate?->toDateString(),
+            'last_reminded_formatted'  => $lastRemindedDate?->format('M d, Y'),
+            'alert_acknowledged_at'    => $forecast->alert_acknowledged_at?->toIso8601String(),
+            'is_alert_active'          => $isAlertActive,
+        ];
+    }
+
+    /**
+     * Trigger or synchronize a cycle rollover when a completed booking's countdown reaches 0 in real time.
+     */
+    public function completeCustomerForecastCycle(int $userId, int $forecastId): array
+    {
+        $this->ensureTablesExist();
+
+        $forecast = ServiceForecast::where('user_id', $userId)
+            ->where('forecast_id', $forecastId)
+            ->firstOrFail();
+
+        $rolledOver = $this->syncAndRolloverForecast($forecast, true);
+        $forecast->refresh();
+
+        $hasActiveBooking = Booking::where('client_id', $userId)
+            ->whereIn('service_id', [2, 3])
+            ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
+            ->exists();
+
+        $bookingId = (int) ($forecast->source_booking_id ?: 0);
+
+        return [
+            'rolled_over' => $rolledOver,
+            'reminder'    => $this->formatBookingReminderPayload($forecast, $bookingId, $hasActiveBooking),
+        ];
+    }
+
+    /**
+     * Dismiss/acknowledge the visible due alert banner for a completed booking forecast
+     * without stopping the newly restarted 3-month countdown loop.
+     */
+    public function acknowledgeCustomerForecastAlert(int $userId, int $forecastId): ServiceForecast
+    {
+        $this->ensureTablesExist();
+
+        $forecast = ServiceForecast::where('user_id', $userId)
+            ->where('forecast_id', $forecastId)
+            ->firstOrFail();
+
+        $forecast->update([
+            'alert_acknowledged_at' => now(),
+        ]);
+
+        return $forecast->fresh();
     }
 
     /**
@@ -631,81 +878,10 @@ class ForecastingService
             $clientId = (int) ($row->client_id ?? $forecast->user_id ?? 0);
             $hasActiveFollowUp = isset($activeFollowUpClientLookup[$clientId]);
 
-            $cycleDays = max(1, (int) ($forecast->adjusted_interval_days ?: 90));
-            $lastDate = $forecast->last_service_date
-                ? Carbon::parse($forecast->last_service_date, $tz)->startOfDay()
-                : ($row->scheduled_date ? Carbon::parse($row->scheduled_date, $tz)->startOfDay() : (clone $today));
-            $dueDate = $forecast->predicted_due_date
-                ? Carbon::parse($forecast->predicted_due_date, $tz)->startOfDay()
-                : (clone $lastDate)->addDays($cycleDays);
+            $this->syncAndRolloverForecast($forecast);
+            $forecast->refresh();
 
-            if (! $hasActiveFollowUp) {
-                $rolled = false;
-                $guard = 0;
-                while ((int) $today->diffInDays($dueDate, false) < -7 && $guard < 24) {
-                    $lastDate = (clone $dueDate);
-                    $dueDate = (clone $lastDate)->addDays($cycleDays);
-                    $rolled = true;
-                    $guard++;
-                }
-
-                if ($rolled) {
-                    $forecast->update([
-                        'last_service_date'      => $lastDate->toDateString(),
-                        'predicted_due_date'     => $dueDate->toDateString(),
-                        'base_interval_days'     => 90,
-                        'adjusted_interval_days' => $cycleDays,
-                        'urgency_level'          => 'Upcoming',
-                        'reminder_sent_at'       => null,
-                    ]);
-                }
-            }
-
-            $daysRemaining = (int) $today->diffInDays($dueDate, false);
-            $elapsedDays = max(0, min($cycleDays, (int) $lastDate->diffInDays($today, false)));
-            $progressPercent = max(0, min(100, (int) round((($cycleDays - $elapsedDays) / $cycleDays) * 100)));
-
-            if ($hasActiveFollowUp) {
-                $status = 'Scheduled';
-            } elseif ($daysRemaining <= 0 && $daysRemaining >= -7) {
-                $status = 'Due Now';
-            } elseif ($daysRemaining <= 7) {
-                $status = 'Due Soon';
-            } else {
-                $status = 'Upcoming';
-            }
-
-            $dueTimeStr = '08:00:00';
-            $targetTimestamp = (clone $dueDate)->setTime(8, 0, 0);
-            if ($targetTimestamp->lessThanOrEqualTo($now) && $daysRemaining >= 0) {
-                $dueTimeStr = '23:59:59';
-                $targetTimestamp = (clone $dueDate)->endOfDay();
-            }
-
-            $result[$bid] = [
-                'forecast_id'              => (int) $forecast->forecast_id,
-                'booking_id'               => $bid,
-                'source_service_name'      => $forecast->source_service_name,
-                'recommended_service_id'   => (int) ($forecast->recommended_service_id ?: 3),
-                'recommended_service_name' => $forecast->recommended_service_name ?: 'Cleaning / Preventive Maintenance',
-                'cleaning_service_id'      => 3,
-                'repair_service_id'        => 2,
-                'unit_summary'             => $forecast->unit_summary,
-                'cycle_days'               => $cycleDays,
-                'cycle_label'              => '3 Months',
-                'last_service_date'        => $lastDate->toDateString(),
-                'last_service_formatted'   => $lastDate->format('M d, Y'),
-                'due_date'                 => $dueDate->toDateString(),
-                'due_time'                 => $dueTimeStr,
-                'due_date_formatted'       => $dueDate->format('M d, Y'),
-                'due_datetime_formatted'   => $targetTimestamp->format('M d, Y • h:i A'),
-                'target_iso'               => $targetTimestamp->toIso8601String(),
-                'time_zone'                => $tz,
-                'days_remaining'           => $daysRemaining,
-                'progress_percent'         => $progressPercent,
-                'status'                   => $status,
-                'reminder_sent'            => (bool) $forecast->reminder_sent_at,
-            ];
+            $result[$bid] = $this->formatBookingReminderPayload($forecast, $bid, $hasActiveFollowUp);
         }
 
         return $result;
@@ -762,10 +938,13 @@ class ForecastingService
             return [];
         }
 
-        return $forecasts->map(function (ServiceForecast $f) use ($hasActiveBooking) {
-            $dueDate = Carbon::parse($f->predicted_due_date)->startOfDay();
-            $lastDate = Carbon::parse($f->last_service_date)->startOfDay();
-            $daysRemaining = (int) now()->startOfDay()->diffInDays($dueDate, false);
+        $tz = config('app.timezone', 'Asia/Manila');
+        $today = Carbon::now($tz)->startOfDay();
+
+        return $forecasts->map(function (ServiceForecast $f) use ($hasActiveBooking, $tz, $today) {
+            $dueDate = Carbon::parse($f->predicted_due_date, $tz)->startOfDay();
+            $lastDate = Carbon::parse($f->last_service_date, $tz)->startOfDay();
+            $daysRemaining = (int) $today->diffInDays($dueDate, false);
             $urgency = $this->computeUrgencyLevel($dueDate, $hasActiveBooking);
 
             if ($f->urgency_level !== $urgency && $f->urgency_level !== 'Dismissed') {
@@ -774,8 +953,15 @@ class ForecastingService
 
             // Compute estimated unit health percentage (100% right after service -> decays toward due date)
             $totalSpan = max(1, $f->adjusted_interval_days);
-            $elapsed = max(0, (int) $lastDate->diffInDays(now()->startOfDay(), false));
+            $elapsed = max(0, (int) $lastDate->diffInDays($today, false));
             $healthScore = max(35, min(100, (int) round(100 - (($elapsed / $totalSpan) * 55))));
+
+            $targetTimestamp = $dueDate->copy()->setTime(8, 0, 0);
+            $cycleCount = (int) ($f->cycle_count ?? 0);
+            $lastRemindedDate = $f->last_reminded_due_date
+                ? Carbon::parse($f->last_reminded_due_date, $tz)
+                : null;
+            $isAlertActive = $this->isForecastAlertActive($f, $hasActiveBooking);
 
             return [
                 'forecast_id'              => $f->forecast_id,
@@ -785,8 +971,12 @@ class ForecastingService
                 'recommended_service_name' => $f->recommended_service_name,
                 'unit_summary'             => $f->unit_summary,
                 'last_service_date'        => $lastDate->format('M d, Y'),
+                'last_service_raw'         => $lastDate->toDateString(),
                 'predicted_due_date'       => $dueDate->format('M d, Y'),
                 'predicted_due_date_raw'   => $dueDate->toDateString(),
+                'target_iso'               => $targetTimestamp->toIso8601String(),
+                'due_datetime_formatted'   => $targetTimestamp->format('M d, Y • h:i A'),
+                'time_zone'                => $tz,
                 'days_remaining'           => $daysRemaining,
                 'base_interval_days'       => $f->base_interval_days,
                 'adjusted_interval_days'   => $f->adjusted_interval_days,
@@ -795,9 +985,16 @@ class ForecastingService
                 'urgency_level'            => $urgency,
                 'recommendation_reason'    => $f->recommendation_reason,
                 'cycle_label'              => '3 Months',
+                'cycle_count'              => $cycleCount,
+                'cycle_number'             => $cycleCount + 1,
                 'is_due_this_week'         => ($urgency === 'Due This Week'),
+                'is_alert_active'          => $isAlertActive,
+                'reminder_sent_at'         => $f->reminder_sent_at?->toIso8601String(),
+                'last_reminded_due_date'   => $lastRemindedDate?->toDateString(),
+                'last_reminded_formatted'  => $lastRemindedDate?->format('M d, Y'),
+                'alert_acknowledged_at'    => $f->alert_acknowledged_at?->toIso8601String(),
             ];
-        })->values()->all();
+        })->sortByDesc(fn ($item) => ! empty($item['is_alert_active']) ? 1 : 0)->values()->all();
     }
 
     /**
@@ -2162,69 +2359,28 @@ class ForecastingService
     {
         $this->ensureTablesExist();
 
+        $startedAt = now();
         // Sync completed bookings & technician certifications before evaluating
         $this->getManagerForecastAnalytics();
 
         $customerRemindersSent = 0;
         $techRemindersSent = 0;
 
-        // 1. Evaluate Customer Maintenance Forecasts (3-Month Standard Count & 1-Week Active Reminder Rule)
+        // 1. Evaluate Completed-Booking Maintenance Forecasts (loop + notify immediately when countdown ends)
         $dueForecasts = ServiceForecast::with('customer')
             ->whereNotIn('urgency_level', ['Dismissed'])
             ->get();
 
         foreach ($dueForecasts as $forecast) {
-            // Check if 1-week reminder window has passed without booking; if so, automatically restarts another 3 months
-            $rolledOver = $this->syncAndRolloverForecast($forecast);
-            if ($rolledOver || $forecast->urgency_level === 'Scheduled') {
-                continue;
-            }
+            $this->syncAndRolloverForecast($forecast, true);
+        }
 
-            $due = Carbon::parse($forecast->predicted_due_date)->startOfDay();
-            $daysLeft = (int) now()->startOfDay()->diffInDays($due, false);
-
-            // Active reminder window: 3-month countdown reached (daysLeft between 0 and -7)
-            $isInReminderWindow = ($daysLeft <= 0 && $daysLeft >= -7);
-
-            // Rule: "The system's reminder should notify the customer one in week"
-            $alreadySentInWeek = false;
-            if ($forecast->reminder_sent_at) {
-                $daysSinceSent = (int) Carbon::parse($forecast->reminder_sent_at)->startOfDay()->diffInDays(now()->startOfDay(), false);
-                if ($daysSinceSent >= 0 && $daysSinceSent < 7) {
-                    $alreadySentInWeek = true;
-                }
-            }
-
-            if ($isInReminderWindow && ! $alreadySentInWeek) {
-                $forecast->update([
-                    'urgency_level'    => 'Due This Week',
-                    'reminder_sent_at' => now(),
-                ]);
-
-                if ($forecast->customer) {
-                    $title = "Maintenance Reminder: {$forecast->recommended_service_name} Due";
-                    $msg = "Your 3-month maintenance reminder for {$forecast->unit_summary} is active. Scheduling routine care helps prevent breakdowns and maintain peak cooling.";
-
-                    try {
-                        if (Schema::hasTable('notifications')) {
-                            $forecast->customer->notify(new ForecastReminderNotification(
-                                'customer_maintenance',
-                                $title,
-                                $msg,
-                                [
-                                    'forecast_id'            => $forecast->forecast_id,
-                                    'recommended_service_id' => $forecast->recommended_service_id,
-                                    'cycle'                  => '3_months',
-                                ]
-                            ));
-                        }
-                    } catch (\Throwable $e) {
-                        // Continue gracefully if notifications table isn't migrated
-                    }
-
-                    $customerRemindersSent++;
-                }
-            }
+        if (Schema::hasTable('notifications')) {
+            $customerRemindersSent = (int) DB::table('notifications')
+                ->where('type', ForecastReminderNotification::class)
+                ->where('data', 'like', '%customer_maintenance%')
+                ->where('created_at', '>=', $startedAt)
+                ->count();
         }
 
         // 2. Evaluate Technician Certifications expiring within 1 week (7 days)

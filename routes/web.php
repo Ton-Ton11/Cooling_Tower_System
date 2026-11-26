@@ -840,6 +840,8 @@ Route::prefix('customer')
         Route::controller(\App\Http\Controllers\Shared\ForecastingController::class)->group(function () {
             Route::get('/warranty-tracking/context', 'customerWarrantyContext')->name('warranty.context');
             Route::match(['get', 'post'], '/warranty-tracking/track', 'trackAcWarranty')->name('warranty.track');
+            Route::post('/forecasts/{forecastId}/complete-cycle', 'completeCustomerForecastCycle')->name('forecasts.complete-cycle');
+            Route::post('/forecasts/{forecastId}/acknowledge', 'acknowledgeCustomerForecastAlert')->name('forecasts.acknowledge');
         });
     });
 

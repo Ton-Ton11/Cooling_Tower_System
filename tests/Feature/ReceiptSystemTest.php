@@ -539,4 +539,59 @@ class ReceiptSystemTest extends TestCase
             'action_type' => 'RECEIPT_VOID_APPROVED',
         ]);
     }
+
+    public function test_sales_records_returns_all_transaction_receipts_for_receipt_invoice_dropdown(): void
+    {
+        $superAdmin = $this->makeUser(1, ['given_name' => 'Georgita', 'last_name' => 'Apostol']);
+        $assistant = $this->makeUser(3, ['given_name' => 'Desk', 'last_name' => 'Staff']);
+        $customer = $this->makeUser(6, ['given_name' => 'Carlo', 'last_name' => 'Reyes']);
+
+        $booking = Booking::create([
+            'client_id' => $customer->user_id,
+            'service_id' => 1,
+            'scheduled_date' => now()->subDay(),
+            'booking_status' => 'Completed',
+            'total_amount' => 1500.00,
+        ]);
+
+        $dpPayment = Payment::create([
+            'booking_id' => $booking->booking_id,
+            'amount_paid' => 50.00,
+            'payment_status' => 'Paid',
+            'payment_method' => 'GCash',
+            'payment_type' => 'Appointment Reservation Fee',
+            'reference_number' => 'SRDP' . random_int(100000, 999999),
+            'payment_date' => now()->subDay(),
+        ]);
+        $ar = $this->receiptService->issueForBookingPayment($booking, $dpPayment, $assistant);
+        $this->assertNotNull($ar);
+
+        $finalPayment = Payment::create([
+            'booking_id' => $booking->booking_id,
+            'amount_paid' => 1500.00,
+            'booking_price' => 1500.00,
+            'payment_status' => 'Paid',
+            'payment_method' => 'Cash',
+            'payment_type' => 'Full Service Balance',
+            'payment_date' => now(),
+        ]);
+        $inv = $this->receiptService->issueForBookingPayment($booking, $finalPayment, $superAdmin);
+        $this->assertNotNull($inv);
+
+        $saResp = $this->actingAs($superAdmin)->getJson('/super-admin/sales-records');
+        $saResp->assertOk();
+        $row = collect($saResp->json('data'))->firstWhere('booking_id', $booking->booking_id);
+        $this->assertNotNull($row);
+
+        $receiptNumbers = collect($row['receipts'] ?? [])->pluck('receipt_number')->all();
+        $this->assertContains($ar->receipt_number, $receiptNumbers);
+        $this->assertContains($inv->receipt_number, $receiptNumbers);
+
+        $aaResp = $this->actingAs($assistant)->getJson('/admin-assistant/sales-records');
+        $aaResp->assertOk();
+        $aaRow = collect($aaResp->json('data'))->firstWhere('booking_id', $booking->booking_id);
+        $this->assertNotNull($aaRow);
+        $aaReceiptNumbers = collect($aaRow['receipts'] ?? [])->pluck('receipt_number')->all();
+        $this->assertSame($receiptNumbers, $aaReceiptNumbers);
+    }
 }

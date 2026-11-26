@@ -452,6 +452,8 @@ export const CUSTOMER_ENDPOINTS = {
     announcements: "/customer/announcements",
     warrantyContext: "/customer/warranty-tracking/context",
     trackWarranty: "/customer/warranty-tracking/track",
+    completeForecastCycle: (forecastId) => `/customer/forecasts/${forecastId}/complete-cycle`,
+    acknowledgeForecastAlert: (forecastId) => `/customer/forecasts/${forecastId}/acknowledge`,
     receiptPrint: (receiptId) => `/customer/receipts/${receiptId}/print`,
     receiptPdf: (receiptId) => `/customer/receipts/${receiptId}/pdf`,
     resubmitBusinessVerification: "/customer/business-verification/resubmit",

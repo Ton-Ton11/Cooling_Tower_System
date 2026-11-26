@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import ReceiptActionButton from "../../Components/ReceiptActionButton";
-import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
+import MaintenanceReminderCountdown, { CompletedBookingDueAlertBanner } from "../../Components/MaintenanceReminderCountdown";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
 
@@ -26,6 +26,10 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
         fetchCompletedBookings();
     }, [fetchCompletedBookings]);
 
+    const dueAlerts = bookings
+        .map((b) => b.maintenance_reminder)
+        .filter((r) => Boolean(r?.is_alert_active));
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -35,6 +39,22 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
                     Review your completed airconditioning service history and provide feedback on our technicians' performance.
                 </p>
             </div>
+
+            {dueAlerts.length > 0 && (
+                <CompletedBookingDueAlertBanner
+                    alerts={dueAlerts}
+                    onBookService={(serviceId) => {
+                        if (onSelectServiceToBook) {
+                            onSelectServiceToBook(serviceId);
+                        }
+                        if (onNavigate) {
+                            onNavigate("book");
+                        }
+                    }}
+                    onDismissed={() => fetchCompletedBookings()}
+                    addToast={addToast}
+                />
+            )}
 
             {loading ? (
                 <div className="bg-white rounded-xl p-12 text-center text-[#64748B] border border-[#E2E8F0]">
@@ -167,6 +187,9 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
                                 <MaintenanceReminderCountdown
                                     reminder={b.maintenance_reminder}
                                     variant="card"
+                                    addToast={addToast}
+                                    onCycleRolledOver={() => fetchCompletedBookings()}
+                                    onAlertDismissed={() => fetchCompletedBookings()}
                                     onBookService={(serviceId) => {
                                         if (onSelectServiceToBook) {
                                             onSelectServiceToBook(serviceId);

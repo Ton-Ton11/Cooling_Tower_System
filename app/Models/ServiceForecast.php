@@ -27,8 +27,11 @@ class ServiceForecast extends Model
         'adjusted_interval_days',
         'wear_factor',
         'urgency_level',
+        'cycle_count',
+        'last_reminded_due_date',
         'recommendation_reason',
         'reminder_sent_at',
+        'alert_acknowledged_at',
     ];
 
     protected $casts = [
@@ -41,7 +44,10 @@ class ServiceForecast extends Model
         'base_interval_days' => 'integer',
         'adjusted_interval_days' => 'integer',
         'wear_factor' => 'float',
+        'cycle_count' => 'integer',
+        'last_reminded_due_date' => 'date',
         'reminder_sent_at' => 'datetime',
+        'alert_acknowledged_at' => 'datetime',
     ];
 
     public function customer()

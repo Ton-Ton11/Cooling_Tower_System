@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import StatusBadge from "../../Components/StatusBadge";
 import Modal from "../../Components/Modal";
+import SalesReceiptDropdown from "../../Components/SalesReceiptDropdown";
 import {
     SUPER_ADMIN_ENDPOINTS,
     buildAnnualRevenue,
@@ -467,6 +468,9 @@ function SalesRecords({ addToast, endpoints }) {
                     rec.recorded_by,
                     rec.receipt_reference_number,
                     rec.receipt?.receipt_number,
+                    ...(Array.isArray(rec.receipts)
+                        ? rec.receipts.map((r) => r?.receipt_number)
+                        : []),
                 ]
                     .filter(Boolean)
                     .join(" ")
@@ -1596,16 +1600,23 @@ function SalesRecords({ addToast, endpoints }) {
                                                 }}
                                             >
                                                 <div>#{record.booking_id || record.sale_id}</div>
-                                                {record.receipt?.receipt_number && (
-                                                    <div className="mt-1 flex items-center gap-1.5">
-                                                        <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[10.5px] font-mono font-bold text-slate-700">
-                                                            {record.receipt.receipt_number}
-                                                        </span>
-                                                        {record.receipt.status !== "Issued" && (
-                                                            <StatusBadge status={record.receipt.status} />
-                                                        )}
-                                                    </div>
-                                                )}
+                                                {record.receipt?.receipt_number && (() => {
+                                                    const nonIssued =
+                                                        (Array.isArray(record.receipts)
+                                                            ? record.receipts.find((r) => r?.status && r.status !== "Issued")
+                                                            : null) ||
+                                                        (record.receipt.status !== "Issued" ? record.receipt : null);
+                                                    return (
+                                                        <div className="mt-1 flex items-center gap-1.5">
+                                                            <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[10.5px] font-mono font-bold text-slate-700">
+                                                                {record.receipt.receipt_number}
+                                                            </span>
+                                                            {nonIssued && (
+                                                                <StatusBadge status={nonIssued.status} />
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
 
                                             {/* Category */}
@@ -1980,71 +1991,20 @@ function SalesRecords({ addToast, endpoints }) {
                                                     textAlign: "right",
                                                 }}
                                             >
-                                                <div className="inline-flex items-center justify-end gap-1.5">
-                                                    {record.receipt && (
-                                                        <>
-                                                            <a
-                                                                href={
-                                                                    ep.receiptPdf
-                                                                        ? ep.receiptPdf(record.receipt.receipt_id)
-                                                                        : `/super-admin/receipts/${record.receipt.receipt_id}/pdf`
-                                                                }
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="px-2.5 py-1 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-semibold transition"
-                                                            >
-                                                                View PDF
-                                                            </a>
-
-                                                            {record.receipt.status === "Issued" && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        setVoidModalReceipt(record.receipt);
-                                                                        setVoidReason("");
-                                                                    }}
-                                                                    className="px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold transition cursor-pointer"
-                                                                >
-                                                                    Void
-                                                                </button>
-                                                            )}
-
-                                                            {record.receipt.status === "Void Requested" &&
-                                                                canApproveVoid &&
-                                                                Number(currentUser?.user_id) !==
-                                                                    Number(record.receipt.issued_by_user_id) && (
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={
-                                                                            approvingReceiptId ===
-                                                                            record.receipt.receipt_id
-                                                                        }
-                                                                        onClick={() =>
-                                                                            handleApproveVoid(record.receipt)
-                                                                        }
-                                                                        className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold transition cursor-pointer disabled:opacity-50"
-                                                                    >
-                                                                        {approvingReceiptId ===
-                                                                        record.receipt.receipt_id
-                                                                            ? "Approving..."
-                                                                            : "Approve Void"}
-                                                                    </button>
-                                                                )}
-                                                        </>
-                                                    )}
-                                                    <button
-                                                        type="button"
-                                                        className="btn-secondary"
-                                                        style={{
-                                                            padding: "4px 10px",
-                                                            fontSize: 11,
+                                                <div className="inline-flex items-center justify-end">
+                                                    <SalesReceiptDropdown
+                                                        record={record}
+                                                        endpoints={ep}
+                                                        currentUser={currentUser}
+                                                        canApproveVoid={canApproveVoid}
+                                                        approvingReceiptId={approvingReceiptId}
+                                                        onRequestVoid={(rcp) => {
+                                                            setVoidModalReceipt(rcp);
+                                                            setVoidReason("");
                                                         }}
-                                                        onClick={() =>
-                                                            setSelectedRecord(record)
-                                                        }
-                                                    >
-                                                        Details
-                                                    </button>
+                                                        onApproveVoid={handleApproveVoid}
+                                                        onViewSummary={setSelectedRecord}
+                                                    />
                                                 </div>
                                             </td>
                                         </tr>
@@ -3057,24 +3017,31 @@ function SalesRecords({ addToast, endpoints }) {
                             style={{
                                 display: "flex",
                                 justifyContent: "flex-end",
+                                flexWrap: "wrap",
                                 gap: 8,
                             }}
                         >
-                            {selectedRecord.receipt ? (
+                            {(Array.isArray(selectedRecord.receipts) && selectedRecord.receipts.length > 0
+                                ? selectedRecord.receipts
+                                : selectedRecord.receipt
+                                ? [selectedRecord.receipt]
+                                : []
+                            ).map((rcp) => (
                                 <a
+                                    key={rcp.receipt_id}
                                     href={
                                         ep.receiptPdf
-                                            ? ep.receiptPdf(selectedRecord.receipt.receipt_id)
-                                            : `/super-admin/receipts/${selectedRecord.receipt.receipt_id}/pdf`
+                                            ? ep.receiptPdf(rcp.receipt_id)
+                                            : `/super-admin/receipts/${rcp.receipt_id}/pdf`
                                     }
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="btn-secondary"
                                     style={{ textDecoration: "none" }}
                                 >
-                                    View PDF
+                                    {rcp.document_kind !== "acknowledgement_receipt" ? "Invoice" : "Receipt"} ({rcp.receipt_number})
                                 </a>
-                            ) : null}
+                            ))}
                             <button
                                 type="button"
                                 className="btn-primary"

@@ -24,7 +24,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
         $soldItems = [];
         if (\Illuminate\Support\Facades\Schema::hasTable('inventory_sales')) {
             $soldItems = DB::table('inventory_sales')
-                ->where('sale_type', 'tools_materials')
+                ->whereIn('sale_type', ['tools_materials', 'spare_part'])
                 ->orderByDesc('sold_at')
                 ->orderByDesc('sale_id')
                 ->get()
@@ -59,7 +59,9 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'supplier_name' => ['nullable', 'string', 'max:150'],
             'managed_by' => ['nullable', 'string', 'max:150'],
-            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'expected_arrival' => ['sometimes', 'nullable', 'date'],
+            'reservation_source' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'status' => ['sometimes', Rule::in(['Available', 'Available / On Hand', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
         $validated['inventory_mode'] = $validated['inventory_mode'] ?? 'worker';
@@ -151,20 +153,22 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             'selling_price' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'supplier_name' => ['nullable', 'string', 'max:150'],
             'managed_by' => ['sometimes', 'nullable', 'string', 'max:150'],
-            'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
+            'expected_arrival' => ['sometimes', 'nullable', 'date'],
+            'reservation_source' => ['sometimes', 'nullable', 'string', 'max:30'],
+            'status' => ['sometimes', Rule::in(['Available', 'Available / On Hand', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
         $hasAddedStock = $request->has('added_stock');
-        $isPowerTool = $this->isPowerToolInventoryItem(
+        $isSerialTracked = $this->isSerialTrackedInventoryItem(
             $validated['item_type'] ?? $item->item_type,
             array_key_exists('tool_subtype', $validated) ? $validated['tool_subtype'] : $item->tool_subtype
         );
 
-        // Reject stacking stock via added_stock on individual Power Tools; otherwise add stock for materials/hand tools
+        // Reject stacking stock via added_stock on individual serial-tracked items (Power Tools & Spare Parts)
         if ($hasAddedStock) {
-            if ($isPowerTool) {
+            if ($isSerialTracked) {
                 throw ValidationException::withMessages([
-                    'added_stock' => ['Power tools are tracked individually by serial number and cannot be stacked by stock quantity.'],
+                    'added_stock' => ['Serial-tracked items (power tools and spare parts) cannot be stacked by stock quantity.'],
                 ]);
             }
             $added = (int) $request->input('added_stock');

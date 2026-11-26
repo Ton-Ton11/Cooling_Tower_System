@@ -193,8 +193,9 @@ class CustomerDashboardController extends Controller
 
         if (! empty($serviceForecasts)) {
             $primaryForecast = $serviceForecasts[0];
-            $isDueWeek = ($primaryForecast['urgency_level'] ?? '') === 'Due This Week';
-            $badgeColor = match ($primaryForecast['urgency_level'] ?? '') {
+            $isAlertActive = ! empty($primaryForecast['is_alert_active']);
+            $isDueWeek = ($primaryForecast['urgency_level'] ?? '') === 'Due This Week' || $isAlertActive;
+            $badgeColor = $isAlertActive ? 'amber' : match ($primaryForecast['urgency_level'] ?? '') {
                 'Due This Week' => 'amber',
                 'Scheduled'     => 'emerald',
                 'Due Soon'      => 'orange',
@@ -202,11 +203,15 @@ class CustomerDashboardController extends Controller
             };
             array_unshift($toDoItems, [
                 'id' => 'forecast_' . ($primaryForecast['forecast_id'] ?? 0),
-                'title' => 'Maintenance Reminder: ' . $primaryForecast['recommended_service_name'] . ' (' . $primaryForecast['unit_summary'] . ')',
-                'sub' => ($isDueWeek ? 'Due this week • ' : 'Next due on ') . $primaryForecast['predicted_due_date'] . ' (3-Month Cycle)',
+                'title' => ($isAlertActive ? 'Maintenance Due: ' : 'Maintenance Reminder: ')
+                    . $primaryForecast['recommended_service_name']
+                    . ($primaryForecast['unit_summary'] ? ' (' . $primaryForecast['unit_summary'] . ')' : ''),
+                'sub' => $isAlertActive
+                    ? 'Cycle #' . ($primaryForecast['cycle_number'] ?? 1) . ' started • Next due ' . $primaryForecast['predicted_due_date']
+                    : ($isDueWeek ? 'Due soon • ' : 'Next due ') . $primaryForecast['predicted_due_date'] . ' (3-Month Cycle)',
                 'target' => 'book',
                 'recommended_service_id' => $primaryForecast['recommended_service_id'],
-                'badge' => $primaryForecast['urgency_level'],
+                'badge' => $isAlertActive ? 'Maintenance Due' : $primaryForecast['urgency_level'],
                 'badge_color' => $badgeColor,
             ]);
         }

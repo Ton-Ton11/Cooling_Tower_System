@@ -297,27 +297,37 @@ class TopbarWidgetController extends Controller
 
         if (! $isHeadTech && $roleId === 6) {
             // CUSTOMER NOTIFICATIONS:
-            // 1. 3-Month Maintenance Forecast Reminders (notify customer within 1-week due window or countdown)
+            // 1. Completed-Booking 3-Month Maintenance Reminders (notify on end of countdown + loop to next cycle)
             $forecasts = $this->forecastingService->getCustomerForecasts($userId);
             foreach (array_slice($forecasts, 0, 4) as $f) {
-                $createdAt = now()->subHours(2);
-                $isDueWeek = ($f['urgency_level'] === 'Due This Week');
-                $badgeColor = match ($f['urgency_level']) {
+                $isAlertActive = ! empty($f['is_alert_active']);
+                $isDueWeek = ($f['urgency_level'] === 'Due This Week') || $isAlertActive;
+                $eventTime = ! empty($f['reminder_sent_at'])
+                    ? Carbon::parse($f['reminder_sent_at'])
+                    : now()->subDays(1);
+                $badgeColor = $isAlertActive ? 'amber' : match ($f['urgency_level']) {
                     'Due This Week' => 'amber',
                     'Due Soon'      => 'orange',
                     'Scheduled'     => 'emerald',
                     default         => 'indigo',
                 };
+                $cycleNumber = (int) ($f['cycle_number'] ?? 1);
+                $isUnread = ! empty($f['reminder_sent_at'])
+                    ? (! $lastReadAt || $eventTime->gt($lastReadAt))
+                    : (! $lastReadAt && $isDueWeek);
+
                 $items[] = [
-                    'id'          => 'cust_forecast_' . ($f['forecast_id'] ?? 0),
+                    'id'          => 'cust_forecast_' . ($f['forecast_id'] ?? 0) . '_c' . $cycleNumber,
                     'type'        => 'forecast',
-                    'badge'       => $isDueWeek ? '3-Month Due This Week' : $f['urgency_level'],
+                    'badge'       => $isAlertActive ? 'Maintenance Due' : ($isDueWeek ? 'Due Soon' : $f['urgency_level']),
                     'badge_color' => $badgeColor,
-                    'title'       => ($isDueWeek ? 'Maintenance Due This Week: ' : 'Maintenance Countdown: ') . $f['recommended_service_name'],
-                    'message'     => "Suggested by {$f['predicted_due_date']} for {$f['unit_summary']} (following your {$f['source_service_name']}).",
-                    'time_ago'    => $f['days_remaining'] <= 0 ? 'Due this week' : "{$f['days_remaining']} days left",
+                    'title'       => ($isAlertActive ? 'Maintenance Due: ' : 'Maintenance Reminder: ') . $f['recommended_service_name'],
+                    'message'     => $isAlertActive
+                        ? "3-month countdown ended (" . ($f['last_reminded_formatted'] ?? 'today') . ") for {$f['unit_summary']}. Cycle #{$cycleNumber} started (due {$f['predicted_due_date']})."
+                        : "Due {$f['predicted_due_date']} for {$f['unit_summary']} ({$f['source_service_name']}).",
+                    'time_ago'    => ! empty($f['reminder_sent_at']) ? $eventTime->diffForHumans() : ($f['days_remaining'] <= 0 ? 'Due today' : "{$f['days_remaining']} days left"),
                     'target_page' => 'book',
-                    'unread'      => ! $lastReadAt || $createdAt->gt($lastReadAt),
+                    'unread'      => $isUnread,
                 ];
             }
 

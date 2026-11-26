@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             RolesAndAccountsSeeder::class,
             ExampleDataSeeder::class,
             WorkerInventorySeeder::class,
+            ForSaleInventorySeeder::class,
         ]);
     }
 }

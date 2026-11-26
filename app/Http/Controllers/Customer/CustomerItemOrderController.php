@@ -135,7 +135,7 @@ class CustomerItemOrderController extends Controller
         $user = $request->user();
         $userId = (int) $user->user_id;
 
-        $excludedStatuses = ['Defect', 'Damaged', 'Lost', 'Lost/Damaged', 'Sold', 'Borrowed', 'Warranty Reserved'];
+        $excludedStatuses = ['defect', 'damaged', 'lost', 'lost/damaged', 'broken', 'sold', 'borrowed', 'warranty reserved'];
 
         $rawItems = DB::table('inventory_items')
             ->where('is_archived', false)
@@ -143,10 +143,13 @@ class CustomerItemOrderController extends Controller
             ->get();
 
         $catalogItems = [];
+        $groupedSerialCatalog = [];
+
         foreach ($rawItems as $item) {
             $status = trim((string) ($item->status ?? 'Available'));
-            $isWarrantyReserved = (bool) ($item->is_warranty_reserved ?? false) || $status === 'Warranty Reserved';
-            if ($isWarrantyReserved || in_array($status, $excludedStatuses, true)) {
+            $subCategoryLower = strtolower(trim((string) ($item->sub_category ?? '')));
+            $isWarrantyReserved = (bool) ($item->is_warranty_reserved ?? false) || strtolower($status) === 'warranty reserved';
+            if ($isWarrantyReserved || in_array(strtolower($status), $excludedStatuses, true) || $subCategoryLower === 'damaged / lost') {
                 continue;
             }
 
@@ -156,8 +159,8 @@ class CustomerItemOrderController extends Controller
                 : ((float) ($item->capital ?? 0) + (float) ($item->profit ?? 0));
 
             if ($item->item_type === 'Spare Part') {
-                $isOrderBase = ($item->reservation_source === 'order_base') || ($status === 'Order Base');
-                $isOnHand = ! $isOrderBase && $qtyOnHand > 0 && $status !== 'Out of Stock';
+                $isOrderBase = ($item->reservation_source === 'order_base') || (strtolower($status) === 'order base');
+                $isOnHand = ! $isOrderBase && $qtyOnHand > 0 && strtolower($status) !== 'out of stock';
 
                 if (! $isOrderBase && ! $isOnHand) {
                     continue;
@@ -166,48 +169,102 @@ class CustomerItemOrderController extends Controller
                 $brands = ! empty($item->compatible_brands)
                     ? array_values(array_filter(array_map('trim', explode(',', (string) $item->compatible_brands))))
                     : [];
+                $subCategory = $item->sub_category ?: 'Spare Parts';
 
-                $catalogItems[] = [
-                    'item_id' => (int) $item->item_id,
-                    'item_name' => $item->item_name,
-                    'item_category' => 'spare_part',
-                    'item_type' => 'Spare Part',
-                    'tool_subtype' => null,
-                    'sub_category' => $item->sub_category ?: 'Spare Parts',
-                    'compatible_brands' => $brands,
-                    'quantity_on_hand' => $qtyOnHand,
-                    'unit' => $item->unit ?: 'pc',
-                    'unit_price' => round($unitPrice, 2),
-                    'is_order_base' => $isOrderBase,
-                    'availability_badge' => $isOrderBase ? 'Order Base' : 'Available',
-                ];
+                if ($isOrderBase) {
+                    $catalogItems[] = [
+                        'item_id' => (int) $item->item_id,
+                        'item_name' => $item->item_name,
+                        'item_category' => 'spare_part',
+                        'item_type' => 'Spare Part',
+                        'tool_subtype' => null,
+                        'sub_category' => $subCategory,
+                        'compatible_brands' => $brands,
+                        'quantity_on_hand' => $qtyOnHand,
+                        'unit' => $item->unit ?: 'pc',
+                        'unit_price' => round($unitPrice, 2),
+                        'is_order_base' => true,
+                        'expected_arrival' => $item->expected_arrival ?? null,
+                        'availability_badge' => 'Order Base',
+                    ];
+                } else {
+                    // Aggregate on-hand Spare Parts by type/name/price so quantity_on_hand equals registered on-hand serial count
+                    $sortedBrands = $brands;
+                    sort($sortedBrands);
+                    $groupKey = implode('|', ['spare_part', strtolower(trim((string) $item->item_name)), strtolower(trim((string) $subCategory)), number_format($unitPrice, 2, '.', ''), strtolower(implode(',', $sortedBrands))]);
+                    if (! isset($groupedSerialCatalog[$groupKey])) {
+                        $groupedSerialCatalog[$groupKey] = [
+                            'item_id' => (int) $item->item_id,
+                            'item_name' => $item->item_name,
+                            'item_category' => 'spare_part',
+                            'item_type' => 'Spare Part',
+                            'tool_subtype' => null,
+                            'sub_category' => $subCategory,
+                            'compatible_brands' => $brands,
+                            'quantity_on_hand' => 0,
+                            'unit' => $item->unit ?: 'pc',
+                            'unit_price' => round($unitPrice, 2),
+                            'is_order_base' => false,
+                            'availability_badge' => 'Available',
+                        ];
+                    }
+                    $groupedSerialCatalog[$groupKey]['quantity_on_hand'] += max(1, $qtyOnHand);
+                }
             } elseif (($item->inventory_mode ?? 'worker') === 'sale' && in_array($item->item_type, ['Material', 'Tool'], true)) {
-                $isOrderBase = ($item->reservation_source === 'order_base') || ($status === 'Order Base');
+                $isOrderBase = ($item->reservation_source === 'order_base') || (strtolower($status) === 'order base');
                 // Strictly on-hand only for Materials & Tools (no order-base)
-                if ($isOrderBase || $qtyOnHand <= 0 || $status === 'Out of Stock') {
+                if ($isOrderBase || $qtyOnHand <= 0 || strtolower($status) === 'out of stock') {
                     continue;
                 }
 
                 $isTool = $item->item_type === 'Tool';
                 $rawSubtype = strtolower((string) ($item->tool_subtype ?? ''));
                 $toolSubtype = $isTool ? (str_contains($rawSubtype, 'power') ? 'power' : 'hand') : null;
+                $subCategory = $item->sub_category ?: ($isTool ? ($toolSubtype === 'power' ? 'Power Tools' : 'Hand Tools') : 'Materials');
 
-                $catalogItems[] = [
-                    'item_id' => (int) $item->item_id,
-                    'item_name' => $item->item_name,
-                    'item_category' => $isTool ? 'tool' : 'material',
-                    'item_type' => $item->item_type,
-                    'tool_subtype' => $toolSubtype,
-                    'sub_category' => $item->sub_category ?: ($isTool ? ($toolSubtype === 'power' ? 'Power Tools' : 'Hand Tools') : 'Materials'),
-                    'compatible_brands' => [],
-                    'quantity_on_hand' => $qtyOnHand,
-                    'unit' => $item->unit ?: 'pc',
-                    'unit_price' => round($unitPrice, 2),
-                    'is_order_base' => false,
-                    'availability_badge' => 'Available',
-                ];
+                if ($isTool && $toolSubtype === 'power') {
+                    // Aggregate on-hand For-Sale Power Tools by model/type so quantity_on_hand equals registered serial count
+                    $groupKey = implode('|', ['power_tool', strtolower(trim((string) $item->item_name)), strtolower(trim((string) $subCategory)), number_format($unitPrice, 2, '.', '')]);
+                    if (! isset($groupedSerialCatalog[$groupKey])) {
+                        $groupedSerialCatalog[$groupKey] = [
+                            'item_id' => (int) $item->item_id,
+                            'item_name' => $item->item_name,
+                            'item_category' => 'tool',
+                            'item_type' => $item->item_type,
+                            'tool_subtype' => 'power',
+                            'sub_category' => $subCategory,
+                            'compatible_brands' => [],
+                            'quantity_on_hand' => 0,
+                            'unit' => $item->unit ?: 'unit',
+                            'unit_price' => round($unitPrice, 2),
+                            'is_order_base' => false,
+                            'availability_badge' => 'Available',
+                        ];
+                    }
+                    $groupedSerialCatalog[$groupKey]['quantity_on_hand'] += max(1, $qtyOnHand);
+                } else {
+                    $catalogItems[] = [
+                        'item_id' => (int) $item->item_id,
+                        'item_name' => $item->item_name,
+                        'item_category' => $isTool ? 'tool' : 'material',
+                        'item_type' => $item->item_type,
+                        'tool_subtype' => $toolSubtype,
+                        'sub_category' => $subCategory,
+                        'compatible_brands' => [],
+                        'quantity_on_hand' => $qtyOnHand,
+                        'unit' => $item->unit ?: 'pc',
+                        'unit_price' => round($unitPrice, 2),
+                        'is_order_base' => false,
+                        'availability_badge' => 'Available',
+                    ];
+                }
             }
         }
+
+        $catalogItems = collect(array_merge($catalogItems, array_values($groupedSerialCatalog)))
+            ->sortBy('item_name', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values()
+            ->all();
 
         $orders = [];
         if (Schema::hasTable('item_orders')) {
@@ -337,6 +394,20 @@ class CustomerItemOrderController extends Controller
             $category = null;
             $isOrderBase = false;
 
+            $status = trim((string) ($item->status ?? 'Available'));
+            $subCategoryLower = strtolower(trim((string) ($item->sub_category ?? '')));
+            $excludedStatuses = ['defect', 'damaged', 'lost', 'lost/damaged', 'broken', 'sold', 'borrowed', 'warranty reserved'];
+            if (
+                (bool) ($item->is_archived ?? false)
+                || (bool) ($item->is_warranty_reserved ?? false)
+                || in_array(strtolower($status), $excludedStatuses, true)
+                || $subCategoryLower === 'damaged / lost'
+            ) {
+                throw ValidationException::withMessages([
+                    'item_id' => ['This item is currently unavailable for purchase.'],
+                ]);
+            }
+
             if ($item->item_type === 'Spare Part') {
                 $category = 'spare_part';
                 if (! $request->boolean('technician_consulted_acknowledged')) {
@@ -345,21 +416,49 @@ class CustomerItemOrderController extends Controller
                     ]);
                 }
 
-                $isOrderBase = ($item->reservation_source === 'order_base') || ($status === 'Order Base');
-                if (! $isOrderBase && (int) $item->quantity_on_hand < $qty) {
-                    throw ValidationException::withMessages([
-                        'quantity' => ["Only {$item->quantity_on_hand} {$item->unit} available on hand."],
-                    ]);
+                $isOrderBase = ($item->reservation_source === 'order_base') || (strtolower($status) === 'order base');
+                if (! $isOrderBase) {
+                    $availablePoolQty = (int) DB::table('inventory_items')
+                        ->where('item_type', 'Spare Part')
+                        ->where('item_name', $item->item_name)
+                        ->where('is_archived', false)
+                        ->where(function ($q) {
+                            $q->whereNull('is_warranty_reserved')->orWhere('is_warranty_reserved', false);
+                        })
+                        ->whereNotIn(DB::raw("LOWER(COALESCE(status, 'available'))"), ['order base', 'warranty reserved', 'sold', 'damaged', 'lost', 'lost/damaged', 'defect', 'broken', 'out of stock'])
+                        ->sum('quantity_on_hand');
+
+                    if ($availablePoolQty < $qty) {
+                        throw ValidationException::withMessages([
+                            'quantity' => ["Only {$availablePoolQty} {$item->unit} available on hand."],
+                        ]);
+                    }
                 }
             } elseif (($item->inventory_mode ?? 'worker') === 'sale' && in_array($item->item_type, ['Material', 'Tool'], true)) {
                 $category = $item->item_type === 'Tool' ? 'tool' : 'material';
-                $isOrderBaseItem = ($item->reservation_source === 'order_base') || ($status === 'Order Base');
-                if ($isOrderBaseItem || $status === 'Out of Stock') {
+                $isOrderBaseItem = ($item->reservation_source === 'order_base') || (strtolower($status) === 'order base');
+                if ($isOrderBaseItem || strtolower($status) === 'out of stock') {
                     throw ValidationException::withMessages([
                         'item_id' => ['Order-base items are not available for Materials or Tools.'],
                     ]);
                 }
-                if ((int) $item->quantity_on_hand < $qty) {
+
+                $isPowerTool = $item->item_type === 'Tool' && str_contains(strtolower((string) ($item->tool_subtype ?? '')), 'power');
+                if ($isPowerTool) {
+                    $availablePoolQty = (int) DB::table('inventory_items')
+                        ->where('inventory_mode', 'sale')
+                        ->where('item_type', 'Tool')
+                        ->where('tool_subtype', 'power')
+                        ->where('item_name', $item->item_name)
+                        ->where('is_archived', false)
+                        ->whereNotIn(DB::raw("LOWER(COALESCE(status, 'available'))"), ['order base', 'warranty reserved', 'sold', 'damaged', 'lost', 'lost/damaged', 'defect', 'broken', 'out of stock'])
+                        ->sum('quantity_on_hand');
+                    if ($availablePoolQty < $qty) {
+                        throw ValidationException::withMessages([
+                            'quantity' => ["Only {$availablePoolQty} {$item->unit} available in stock."],
+                        ]);
+                    }
+                } elseif ((int) $item->quantity_on_hand < $qty) {
                     throw ValidationException::withMessages([
                         'quantity' => ["Only {$item->quantity_on_hand} {$item->unit} available in stock."],
                     ]);

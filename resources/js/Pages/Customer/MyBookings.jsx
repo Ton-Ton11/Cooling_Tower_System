@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import ReceiptActionButton from "../../Components/ReceiptActionButton";
-import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
+import MaintenanceReminderCountdown, { CompletedBookingDueAlertBanner } from "../../Components/MaintenanceReminderCountdown";
 import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
@@ -184,6 +184,14 @@ export default function MyBookings({
         }
     };
 
+    const dueAlerts = useMemo(
+        () =>
+            bookings
+                .filter((b) => b.booking_status === "Completed" && b.maintenance_reminder?.is_alert_active)
+                .map((b) => b.maintenance_reminder),
+        [bookings],
+    );
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -204,6 +212,22 @@ export default function MyBookings({
                     New Service Request
                 </button>
             </div>
+
+            {dueAlerts.length > 0 && (
+                <CompletedBookingDueAlertBanner
+                    alerts={dueAlerts}
+                    onBookService={(serviceId) => {
+                        if (onSelectServiceToBook) {
+                            onSelectServiceToBook(serviceId);
+                        }
+                        if (onNavigate) {
+                            onNavigate("book");
+                        }
+                    }}
+                    onDismissed={() => fetchBookings(false)}
+                    addToast={addToast}
+                />
+            )}
 
             {/* Filter Tabs & Search Bar */}
             <div className="bg-white rounded-xl p-4 border border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -476,7 +500,7 @@ export default function MyBookings({
                                             onClick={() => setViewDetailsBooking(b)}
                                             className="px-3.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-bold transition"
                                         >
-                                            View Details & Quotation
+                                            View Details
                                         </button>
                                     </div>
                                 </div>
@@ -711,6 +735,9 @@ export default function MyBookings({
                                     <MaintenanceReminderCountdown
                                         reminder={b.maintenance_reminder}
                                         variant="card"
+                                        addToast={addToast}
+                                        onCycleRolledOver={() => fetchBookings(false)}
+                                        onAlertDismissed={() => fetchBookings(false)}
                                         onBookService={(serviceId) => {
                                             if (onSelectServiceToBook) {
                                                 onSelectServiceToBook(serviceId);
@@ -896,6 +923,9 @@ export default function MyBookings({
                             <MaintenanceReminderCountdown
                                 reminder={viewDetailsBooking.maintenance_reminder}
                                 variant="card"
+                                addToast={addToast}
+                                onCycleRolledOver={() => fetchBookings(false)}
+                                onAlertDismissed={() => fetchBookings(false)}
                                 onBookService={(serviceId) => {
                                     setViewDetailsBooking(null);
                                     if (onSelectServiceToBook) {

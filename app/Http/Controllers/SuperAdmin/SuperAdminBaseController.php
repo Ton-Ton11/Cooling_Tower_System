@@ -1004,8 +1004,19 @@ abstract class SuperAdminBaseController extends Controller
                 );
             }
 
+            $serviceItemOrderIds = $rows->map(function ($r) {
+                if (empty($r->service_details)) {
+                    return null;
+                }
+                $details = is_string($r->service_details)
+                    ? (json_decode($r->service_details, true) ?: [])
+                    : (array) $r->service_details;
+                return ! empty($details['item_order_id']) ? (int) $details['item_order_id'] : null;
+            });
+
             $itemOrderIds = $salesByBookingId
                 ->pluck('item_order_id')
+                ->concat($serviceItemOrderIds)
                 ->filter()
                 ->map(fn ($id) => (int) $id)
                 ->unique()
@@ -1305,6 +1316,9 @@ abstract class SuperAdminBaseController extends Controller
             if ($invSale && ! empty($invSale->item_order_id)) {
                 $mergedReceipts = $mergedReceipts->concat($receiptsByItemOrderId[(int) $invSale->item_order_id] ?? []);
             }
+            if (! empty($serviceDetails['item_order_id'])) {
+                $mergedReceipts = $mergedReceipts->concat($receiptsByItemOrderId[(int) $serviceDetails['item_order_id']] ?? []);
+            }
             $mergedReceipts = $mergedReceipts->concat($receiptsByAcOrderId['booking_' . (int) $row->booking_id] ?? []);
             if ($invSale && ! empty($invSale->ac_unit_id)) {
                 $mergedReceipts = $mergedReceipts->concat($receiptsByAcOrderId['unit_' . (int) $invSale->ac_unit_id] ?? []);
@@ -1591,8 +1605,7 @@ abstract class SuperAdminBaseController extends Controller
         $profit = $item->profit !== null ? (float) $item->profit : 0.0;
         $sellingPrice = $item->selling_price !== null ? (float) $item->selling_price : ($capital + $profit);
 
-        $isTool = strtolower($item->item_type ?? '') === 'tool';
-        $isPowerTool = $this->isPowerToolInventoryItem($item->item_type ?? null, $item->tool_subtype ?? null);
+        $isSerialTracked = $this->isSerialTrackedInventoryItem($item->item_type ?? null, $item->tool_subtype ?? null);
 
         return (object) [
             'item_id' => (int) $item->item_id,
@@ -1603,8 +1616,8 @@ abstract class SuperAdminBaseController extends Controller
             'compatible_brands' => $brands,
             'serial_number' => $item->serial_number ?? null,
             'quantity_on_hand' => (int) $item->quantity_on_hand,
-            'initial_stock' => $isPowerTool ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
-            'reorder_level' => $isPowerTool ? 0 : (int) $item->reorder_level,
+            'initial_stock' => $isSerialTracked ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
+            'reorder_level' => $isSerialTracked ? 0 : (int) $item->reorder_level,
             'unit' => $item->unit,
             'capital' => $capital,
             'profit' => $profit,
@@ -1613,12 +1626,18 @@ abstract class SuperAdminBaseController extends Controller
             'folder_id' => $item->folder_id !== null ? (int) $item->folder_id : null,
             'sub_category' => $item->sub_category ?? null,
             'status' => $item->status ?? 'Available',
+            'reservation_source' => $item->reservation_source ?? null,
+            'is_warranty_reserved' => (bool) ($item->is_warranty_reserved ?? false),
+            'reserved_for_ac_unit_id' => isset($item->reserved_for_ac_unit_id) && $item->reserved_for_ac_unit_id ? (int) $item->reserved_for_ac_unit_id : null,
+            'reserved_for_serial' => $item->reserved_for_serial ?? null,
+            'reserved_for_unit_label' => $item->reserved_for_unit_label ?? null,
+            'expected_arrival' => $item->expected_arrival ?? null,
             'managed_by' => $item->managed_by ?? (($item->inventory_mode ?? '') === 'sale' ? 'Juan Mercado' : null),
             'is_archived' => (bool) ($item->is_archived ?? false),
             'archived_at' => $item->archived_at ?? null,
             'added_at' => $item->created_at ?? $item->last_updated,
             'last_updated' => $item->last_updated,
-            'low_stock' => $isPowerTool ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
+            'low_stock' => $isSerialTracked ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
         ];
     }
 
@@ -1635,7 +1654,7 @@ abstract class SuperAdminBaseController extends Controller
         $isTool = strtolower($item->item_type ?? '') === 'tool';
         $rawSubtype = strtolower((string) ($item->tool_subtype ?? ''));
         $normalizedSubtype = $isTool ? (str_contains($rawSubtype, 'power') ? 'power' : 'hand') : ($item->tool_subtype ?? null);
-        $isPowerTool = $isTool && $normalizedSubtype === 'power';
+        $isSerialTracked = $this->isSerialTrackedInventoryItem($item->item_type ?? null, $normalizedSubtype);
 
         return [
             'item_id' => (int) $item->item_id,
@@ -1648,20 +1667,26 @@ abstract class SuperAdminBaseController extends Controller
             'compatible_brands' => $brands,
             'serial_number' => $item->serial_number ?? null,
             'quantity_on_hand' => (int) $item->quantity_on_hand,
-            'initial_stock' => $isPowerTool ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
-            'reorder_level' => $isPowerTool ? 0 : (int) $item->reorder_level,
+            'initial_stock' => $isSerialTracked ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
+            'reorder_level' => $isSerialTracked ? 0 : (int) $item->reorder_level,
             'unit' => $item->unit,
             'capital' => $capital,
             'profit' => $profit,
             'selling_price' => $sellingPrice,
             'supplier_name' => $item->supplier_name ?? null,
             'status' => $item->status ?? 'Available',
+            'reservation_source' => $item->reservation_source ?? null,
+            'is_warranty_reserved' => (bool) ($item->is_warranty_reserved ?? false),
+            'reserved_for_ac_unit_id' => isset($item->reserved_for_ac_unit_id) && $item->reserved_for_ac_unit_id ? (int) $item->reserved_for_ac_unit_id : null,
+            'reserved_for_serial' => $item->reserved_for_serial ?? null,
+            'reserved_for_unit_label' => $item->reserved_for_unit_label ?? null,
+            'expected_arrival' => $item->expected_arrival ?? null,
             'managed_by' => $item->managed_by ?? (($item->inventory_mode ?? '') === 'sale' ? 'Juan Mercado' : null),
             'is_archived' => (bool) ($item->is_archived ?? false),
             'archived_at' => $item->archived_at ?? null,
             'added_at' => $item->created_at ?? $item->last_updated,
             'last_updated' => $item->last_updated,
-            'low_stock' => $isPowerTool ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
+            'low_stock' => $isSerialTracked ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
         ];
     }
 
@@ -1671,8 +1696,20 @@ abstract class SuperAdminBaseController extends Controller
             && str_contains(strtolower((string) ($toolSubtype ?? '')), 'power');
     }
 
+    protected function isSparePartInventoryItem(?string $itemType): bool
+    {
+        return strtolower(trim((string) ($itemType ?? ''))) === 'spare part';
+    }
+
+    protected function isSerialTrackedInventoryItem(?string $itemType, ?string $toolSubtype): bool
+    {
+        return $this->isPowerToolInventoryItem($itemType, $toolSubtype)
+            || $this->isSparePartInventoryItem($itemType);
+    }
+
     /**
-     * Enforce that Power Tools are individual serialized items (never stacked by quantity, no reorder threshold).
+     * Enforce that Power Tools and Spare Parts are individual serialized items
+     * (never stacked by quantity, counted by registered serial numbers, no low-stock reorder thresholds).
      */
     protected function normalizePowerToolInventoryMutation(array &$data, ?object $existingItem = null, bool $hasAddedStock = false): void
     {
@@ -1681,13 +1718,18 @@ abstract class SuperAdminBaseController extends Controller
             ? $data['tool_subtype']
             : ($existingItem->tool_subtype ?? null);
 
-        if (! $this->isPowerToolInventoryItem($effectiveType, $effectiveSubtype)) {
+        $isPowerTool = $this->isPowerToolInventoryItem($effectiveType, $effectiveSubtype);
+        $isSparePart = $this->isSparePartInventoryItem($effectiveType);
+
+        if (! $isPowerTool && ! $isSparePart) {
             return;
         }
 
+        $label = $isSparePart ? 'Spare parts' : 'Power tools';
+
         if ($hasAddedStock) {
             throw ValidationException::withMessages([
-                'added_stock' => ['Power tools are tracked individually by serial number and cannot be stacked by stock quantity.'],
+                'added_stock' => ["{$label} are tracked individually by serial number and cannot be stacked by stock quantity."],
             ]);
         }
 
@@ -1696,24 +1738,43 @@ abstract class SuperAdminBaseController extends Controller
             (array_key_exists('initial_stock', $data) && (int) $data['initial_stock'] > 1)
         ) {
             throw ValidationException::withMessages([
-                'quantity_on_hand' => ['Power tools cannot be stacked by quantity. Each power tool must have its own unique serial number (max quantity: 1).'],
-            ]);
-        }
-
-        $serial = array_key_exists('serial_number', $data)
-            ? $data['serial_number']
-            : ($existingItem->serial_number ?? null);
-
-        if (empty($serial)) {
-            throw ValidationException::withMessages([
-                'serial_number' => ['Serial number is required for power tools.'],
+                'quantity_on_hand' => ["{$label} cannot be stacked by quantity. Each unit must have its own unique serial number (max quantity: 1)."],
             ]);
         }
 
         $targetStatus = $data['status'] ?? ($existingItem->status ?? 'Available');
+        $targetStatusLower = strtolower(trim((string) $targetStatus));
+
+        // Power tools are strictly on-hand only (never Order Base)
+        if ($isPowerTool && $targetStatusLower === 'order base') {
+            throw ValidationException::withMessages([
+                'status' => ['Power tools cannot use Order Base status and are tracked on-hand only.'],
+            ]);
+        }
+
+        $serial = array_key_exists('serial_number', $data)
+            ? trim((string) ($data['serial_number'] ?? ''))
+            : trim((string) ($existingItem->serial_number ?? ''));
+
+        if ($serial === '' && ! in_array($targetStatusLower, ['order base', 'warranty reserved'], true)) {
+            throw ValidationException::withMessages([
+                'serial_number' => [$isSparePart ? 'Serial number is required for on-hand spare parts.' : 'Serial number is required for power tools.'],
+            ]);
+        }
+
         $data['initial_stock'] = 1;
         $data['reorder_level'] = 0;
-        $data['quantity_on_hand'] = strtolower((string) $targetStatus) === 'available' ? 1 : 0;
+        if ($targetStatusLower === 'warranty reserved') {
+            $data['quantity_on_hand'] = 1;
+        } elseif ($targetStatusLower === 'order base') {
+            $data['quantity_on_hand'] = 0;
+            $data['reservation_source'] = 'order_base';
+        } else {
+            $data['quantity_on_hand'] = in_array($targetStatusLower, ['available', 'available / on hand'], true) ? 1 : 0;
+            if ($isSparePart && array_key_exists('status', $data)) {
+                $data['reservation_source'] = null;
+            }
+        }
     }
 
     protected function formatSparePart($item): array
@@ -1740,13 +1801,16 @@ abstract class SuperAdminBaseController extends Controller
             'part_name'               => $item->item_name,
             'item_name'               => $item->item_name,
             'item_type'               => $item->item_type,
+            'inventory_mode'          => $item->inventory_mode ?? 'spare_part',
+            'serial_number'           => $item->serial_number ?? null,
+            'expected_arrival'        => $item->expected_arrival ?? null,
             'folder_id'               => $item->folder_id ? (int) $item->folder_id : null,
             'sub_category'            => $item->sub_category ?? null,
             'category'                => $item->sub_category ?? null,
             'compatible_brands'       => $brands,
             'quantity_on_hand'        => $qty,
-            'initial_stock'           => $item->initial_stock !== null ? (int) $item->initial_stock : $qty,
-            'reorder_level'           => $reorder,
+            'initial_stock'           => 1,
+            'reorder_level'           => 0,
             'unit'                    => $item->unit,
             'capital'                 => $capital,
             'selling_price'           => $sellingPrice,
@@ -1765,7 +1829,7 @@ abstract class SuperAdminBaseController extends Controller
             'warranty_days_left'      => $warrantyDaysLeft,
             'added_at'                => $item->created_at ?? $item->last_updated,
             'last_updated'            => $item->last_updated,
-            'low_stock'               => $qty <= $reorder,
+            'low_stock'               => false,
         ];
     }
 

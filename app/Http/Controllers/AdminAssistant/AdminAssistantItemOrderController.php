@@ -229,34 +229,80 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
             }
 
             $qty = (int) $order->quantity;
+            $isSerialTracked = $item->item_type === 'Spare Part'
+                || ($item->item_type === 'Tool' && str_contains(strtolower((string) ($item->tool_subtype ?? '')), 'power'));
+            $releasedSerials = [];
 
             // Deduct stock if not yet deducted (skip stock check only if order-base spare part with 0 on-hand)
             if (! $order->stock_deducted) {
-                if (! $order->is_order_base && (int) $item->quantity_on_hand < $qty) {
-                    throw ValidationException::withMessages([
-                        'quantity' => ["Insufficient on-hand stock ({$item->quantity_on_hand} available, {$qty} required)."],
-                    ]);
-                }
+                if ($isSerialTracked && ! $order->is_order_base) {
+                    $availableRows = DB::table('inventory_items')
+                        ->where('item_name', $item->item_name)
+                        ->where('item_type', $item->item_type)
+                        ->where('is_archived', false)
+                        ->where(function ($q) {
+                            $q->whereNull('is_warranty_reserved')->orWhere('is_warranty_reserved', false);
+                        })
+                        ->where('quantity_on_hand', '>', 0)
+                        ->whereNotIn(DB::raw("LOWER(COALESCE(status, 'available'))"), ['order base', 'warranty reserved', 'sold', 'damaged', 'lost', 'lost/damaged', 'defect', 'broken', 'out of stock'])
+                        ->orderByRaw('CASE WHEN item_id = ? THEN 0 ELSE 1 END', [$item->item_id])
+                        ->orderBy('item_id')
+                        ->lockForUpdate()
+                        ->get();
 
-                if (! $order->is_order_base || (int) $item->quantity_on_hand > 0) {
-                    $newQty = max(0, (int) $item->quantity_on_hand - $qty);
-                    $reorder = (int) ($item->reorder_level ?? 5);
-                    $nextItemStatus = $item->status;
-                    if (! in_array($item->status, ['Order Base', 'Warranty Reserved'], true)) {
-                        if ($item->item_type === 'Spare Part') {
-                            $nextItemStatus = $newQty === 0 ? 'Out of Stock' : ($newQty <= $reorder ? 'Low Stock' : 'Available / On Hand');
-                        } else {
-                            $nextItemStatus = $newQty === 0 ? 'Out of Stock' : ($newQty <= $reorder ? 'Low Stock' : 'Available');
-                        }
+                    $totalSerialUnits = (int) $availableRows->sum('quantity_on_hand');
+                    if ($totalSerialUnits < $qty) {
+                        throw ValidationException::withMessages([
+                            'quantity' => ["Insufficient on-hand stock ({$totalSerialUnits} available, {$qty} required)."],
+                        ]);
                     }
 
-                    DB::table('inventory_items')
-                        ->where('item_id', $item->item_id)
-                        ->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $nextItemStatus,
-                            'last_updated' => now(),
+                    $remainingToDeduct = $qty;
+                    foreach ($availableRows as $serialRow) {
+                        if ($remainingToDeduct <= 0) {
+                            break;
+                        }
+                        $take = min($remainingToDeduct, (int) $serialRow->quantity_on_hand);
+                        $newRowQty = max(0, (int) $serialRow->quantity_on_hand - $take);
+                        DB::table('inventory_items')
+                            ->where('item_id', $serialRow->item_id)
+                            ->update([
+                                'quantity_on_hand' => $newRowQty,
+                                'status' => $newRowQty === 0 ? 'Sold' : $serialRow->status,
+                                'last_updated' => now(),
+                            ]);
+                        if (! empty($serialRow->serial_number)) {
+                            $releasedSerials[] = $serialRow->serial_number;
+                        }
+                        $remainingToDeduct -= $take;
+                    }
+                } else {
+                    if (! $order->is_order_base && (int) $item->quantity_on_hand < $qty) {
+                        throw ValidationException::withMessages([
+                            'quantity' => ["Insufficient on-hand stock ({$item->quantity_on_hand} available, {$qty} required)."],
                         ]);
+                    }
+
+                    if (! $order->is_order_base || (int) $item->quantity_on_hand > 0) {
+                        $newQty = max(0, (int) $item->quantity_on_hand - $qty);
+                        $reorder = (int) ($item->reorder_level ?? 5);
+                        $nextItemStatus = $item->status;
+                        if (! in_array($item->status, ['Order Base', 'Warranty Reserved'], true)) {
+                            if ($item->item_type === 'Spare Part') {
+                                $nextItemStatus = $newQty === 0 ? 'Sold' : $item->status;
+                            } else {
+                                $nextItemStatus = $newQty === 0 ? 'Out of Stock' : ($newQty <= $reorder ? 'Low Stock' : 'Available');
+                            }
+                        }
+
+                        DB::table('inventory_items')
+                            ->where('item_id', $item->item_id)
+                            ->update([
+                                'quantity_on_hand' => $newQty,
+                                'status' => $nextItemStatus,
+                                'last_updated' => now(),
+                            ]);
+                    }
                 }
             }
 

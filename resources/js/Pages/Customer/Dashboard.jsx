@@ -322,6 +322,8 @@ export default function CustomerDashboard() {
                 onNavigate={onNavigate}
                 dashboardData={dashboardData}
                 isLoading={dashboardLoading}
+                addToast={addToast}
+                onDataChanged={handleDataChanged}
                 onSelectServiceToBook={(serviceId) => {
                     setSelectedServiceForBooking(serviceId);
                     setBookingInitialStep(1);

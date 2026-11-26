@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Bell, Calendar, CheckCircle2, Clock, Wrench } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, Calendar, CheckCircle2, Clock, X } from "lucide-react";
+import { CUSTOMER_ENDPOINTS } from "../utils/superAdmin";
 
 const tickSubscribers = new Set();
 let tickIntervalId = null;
@@ -182,26 +183,195 @@ export function computeMaintenanceCountdown(reminder, nowEpochMs) {
     };
 }
 
+/**
+ * Shared compact visible alert banner for customers when any completed booking's
+ * 3-month countdown has reached the end and looped into its next cycle.
+ */
+export function CompletedBookingDueAlertBanner({
+    alerts = [],
+    onBookService = null,
+    onDismissed = null,
+    addToast = null,
+}) {
+    const [dismissedIds, setDismissedIds] = useState([]);
+    const [busyId, setBusyId] = useState(null);
+
+    const visibleAlerts = (Array.isArray(alerts) ? alerts : []).filter(
+        (item) =>
+            item &&
+            item.is_alert_active &&
+            item.forecast_id &&
+            !dismissedIds.includes(Number(item.forecast_id)),
+    );
+
+    if (visibleAlerts.length === 0) {
+        return null;
+    }
+
+    const handleDismiss = async (forecastId) => {
+        const id = Number(forecastId);
+        setBusyId(id);
+        setDismissedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+        try {
+            await window.axios.post(CUSTOMER_ENDPOINTS.acknowledgeForecastAlert(id));
+            if (typeof onDismissed === "function") {
+                onDismissed(id);
+            }
+        } catch {
+            setDismissedIds((prev) => prev.filter((item) => item !== id));
+            if (typeof addToast === "function") {
+                addToast("Unable to dismiss reminder.", "error");
+            }
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    return (
+        <div role="alert" className="space-y-2.5">
+            {visibleAlerts.map((item) => {
+                const cycleNumber = Number(item.cycle_number || 1);
+                const nextDueText = item.predicted_due_date || item.due_date_formatted;
+                return (
+                    <div
+                        key={`due-alert-${item.forecast_id}`}
+                        className="rounded-xl border border-amber-300 bg-amber-50/90 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                        <div className="flex items-start gap-2.5 min-w-0">
+                            <span className="mt-0.5 w-7 h-7 rounded-lg bg-amber-100 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+                                <Bell size={15} />
+                            </span>
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 text-[10px] font-bold uppercase tracking-wider">
+                                        Maintenance Due
+                                    </span>
+                                    <span className="text-xs font-bold text-[#172B4D]">
+                                        {item.recommended_service_name}
+                                        {item.unit_summary ? ` • ${item.unit_summary}` : ""}
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-amber-900 mt-1">
+                                    3-month reminder ended{item.last_reminded_formatted ? ` (${item.last_reminded_formatted})` : ""}. New 3-month cycle #{cycleNumber} started{nextDueText ? ` • Due ${nextDueText}` : ""}.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                            {typeof onBookService === "function" && (
+                                <button
+                                    type="button"
+                                    onClick={() => onBookService(item.recommended_service_id || 3)}
+                                    className="px-3 py-1.5 min-h-[30px] rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors cursor-pointer"
+                                >
+                                    Book Now
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                disabled={busyId === Number(item.forecast_id)}
+                                onClick={() => handleDismiss(item.forecast_id)}
+                                className="px-2.5 py-1.5 min-h-[30px] rounded-lg bg-white hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                                <X size={13} />
+                                <span>Dismiss</span>
+                            </button>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 export default function MaintenanceReminderCountdown({
     reminder,
     variant = "card", // "card" | "table" | "drawer"
     onBookService = null,
+    onCycleRolledOver = null,
+    onAlertDismissed = null,
+    addToast = null,
 }) {
     const [nowMs, setNowMs] = useState(() => Date.now());
+    const [localReminder, setLocalReminder] = useState(reminder);
+    const [dismissingAlert, setDismissingAlert] = useState(false);
+    const triggeredCycleRef = useRef(null);
 
     useEffect(() => {
-        if (!reminder) return undefined;
-        return subscribeTicker(setNowMs);
+        setLocalReminder(reminder);
     }, [reminder]);
 
-    if (!reminder) {
+    useEffect(() => {
+        if (!localReminder) return undefined;
+        return subscribeTicker(setNowMs);
+    }, [localReminder]);
+
+    const activeReminder = localReminder || reminder;
+    const countdown = activeReminder
+        ? computeMaintenanceCountdown(activeReminder, nowMs)
+        : { days: 0, hours: 0, minutes: 0, seconds: 0, isPast: false, isoDuration: "PT0S", localizedSummary: "" };
+    const isScheduled = activeReminder?.status === "Scheduled";
+    const isDueNow = !isScheduled && (activeReminder?.status === "Due Now" || countdown.isPast);
+    const isDueSoon = !isScheduled && !isDueNow && (activeReminder?.status === "Due Soon" || countdown.days <= 7);
+    const isCustomerView = variant === "card" || typeof onBookService === "function" || typeof onCycleRolledOver === "function";
+
+    useEffect(() => {
+        if (!activeReminder || !isCustomerView || isScheduled || !countdown.isPast || !activeReminder.forecast_id) {
+            return;
+        }
+        const cycleKey = `${activeReminder.forecast_id}:${activeReminder.target_iso || ""}`;
+        if (triggeredCycleRef.current === cycleKey) {
+            return;
+        }
+        triggeredCycleRef.current = cycleKey;
+
+        let cancelled = false;
+        window.axios
+            .post(CUSTOMER_ENDPOINTS.completeForecastCycle(activeReminder.forecast_id))
+            .then(({ data }) => {
+                if (cancelled) return;
+                if (data?.reminder) {
+                    setLocalReminder(data.reminder);
+                }
+                window.dispatchEvent(new CustomEvent("topbar-widgets-refresh"));
+                if (data?.rolled_over && typeof addToast === "function") {
+                    addToast("Maintenance due. New 3-month cycle started.", "warning");
+                }
+                if (typeof onCycleRolledOver === "function") {
+                    onCycleRolledOver(data?.reminder || null);
+                }
+            })
+            .catch(() => {
+                triggeredCycleRef.current = null;
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeReminder, isCustomerView, isScheduled, countdown.isPast, addToast, onCycleRolledOver]);
+
+    if (!activeReminder) {
         return null;
     }
 
-    const countdown = computeMaintenanceCountdown(reminder, nowMs);
-    const isScheduled = reminder.status === "Scheduled";
-    const isDueNow = !isScheduled && (reminder.status === "Due Now" || countdown.isPast);
-    const isDueSoon = !isScheduled && !isDueNow && (reminder.status === "Due Soon" || countdown.days <= 7);
+    const handleDismissAlert = async () => {
+        if (!activeReminder.forecast_id) return;
+        setDismissingAlert(true);
+        setLocalReminder((prev) => (prev ? { ...prev, is_alert_active: false } : prev));
+        try {
+            await window.axios.post(CUSTOMER_ENDPOINTS.acknowledgeForecastAlert(activeReminder.forecast_id));
+            if (typeof onAlertDismissed === "function") {
+                onAlertDismissed(activeReminder.forecast_id);
+            }
+        } catch {
+            setLocalReminder((prev) => (prev ? { ...prev, is_alert_active: true } : prev));
+            if (typeof addToast === "function") {
+                addToast("Unable to dismiss reminder.", "error");
+            }
+        } finally {
+            setDismissingAlert(false);
+        }
+    };
 
     // 1. Compact Table Pill for Super Admin & Manager Bookings Tab
     if (variant === "table") {
@@ -243,7 +413,7 @@ export default function MaintenanceReminderCountdown({
 
         return (
             <div
-                title={`Repair/Check-up & Cleaning/Preventive Maintenance Reminder — Due ${reminder.due_date_formatted}`}
+                title={`Repair/Check-up & Cleaning/Preventive Maintenance Reminder — Due ${activeReminder.due_date_formatted}`}
                 style={{
                     marginTop: 5,
                     padding: "5px 8px",
@@ -309,7 +479,7 @@ export default function MaintenanceReminderCountdown({
                         </span>
                     ) : isDueNow ? (
                         <span style={{ fontWeight: 800, color: badgeStyles.valueColor }}>
-                            Active ({reminder.due_date_formatted})
+                            Active ({activeReminder.due_date_formatted})
                         </span>
                     ) : (
                         <time
@@ -335,7 +505,7 @@ export default function MaintenanceReminderCountdown({
                                 whiteSpace: "nowrap",
                             }}
                         >
-                            {reminder.due_date_formatted}
+                            {activeReminder.due_date_formatted}
                         </span>
                     )}
                 </div>
@@ -422,7 +592,7 @@ export default function MaintenanceReminderCountdown({
                         }}
                     >
                         <CheckCircle2 size={14} />
-                        <span>Follow-up service scheduled (Due {reminder.due_date_formatted})</span>
+                        <span>Follow-up service scheduled (Due {activeReminder.due_date_formatted})</span>
                     </div>
                 ) : isDueNow ? (
                     <div
@@ -440,7 +610,7 @@ export default function MaintenanceReminderCountdown({
                         }}
                     >
                         <span>Automated reminder active</span>
-                        <span>{reminder.due_date_formatted}</span>
+                        <span>{activeReminder.due_date_formatted}</span>
                     </div>
                 ) : (
                     <time
@@ -506,23 +676,26 @@ export default function MaintenanceReminderCountdown({
                         alignItems: "center",
                     }}
                 >
-                    <span>Last Service: {reminder.last_service_formatted}</span>
-                    <strong style={{ color: "#1E2F5F" }}>Due: {reminder.due_date_formatted}</strong>
+                    <span>Last Service: {activeReminder.last_service_formatted}</span>
+                    <strong style={{ color: "#1E2F5F" }}>Due: {activeReminder.due_date_formatted}</strong>
                 </div>
             </div>
         );
     }
 
     // 3. Default Card Strip for Customer Service History & Completed Bookings
+    const hasActiveAlert = Boolean(activeReminder.is_alert_active) && !isScheduled;
+    const cycleNumber = Number(activeReminder.cycle_number || 1);
+
     const cardTone = isScheduled
         ? "bg-[#F0FDF4] border-[#BBF7D0]"
-        : isDueNow || isDueSoon
-        ? "bg-[#FFFBEB] border-[#FDE68A]"
+        : hasActiveAlert || isDueNow || isDueSoon
+        ? "bg-[#FFFBEB] border-amber-300"
         : "bg-[#F4F8FF] border-[#CFE0FF]";
 
     const statusBadgeClass = isScheduled
         ? "bg-white text-[#15803D] border-[#BBF7D0]"
-        : isDueNow || isDueSoon
+        : hasActiveAlert || isDueNow || isDueSoon
         ? "bg-amber-100 text-[#B45309] border-amber-300"
         : "bg-white text-[#2563EB] border-[#C7DDFD]";
 
@@ -532,10 +705,37 @@ export default function MaintenanceReminderCountdown({
         ? "Due Now"
         : isDueSoon
         ? "Due Soon"
+        : cycleNumber > 1
+        ? `Cycle #${cycleNumber}`
         : "3-Month Cycle";
 
     return (
         <div className={`mt-3.5 rounded-xl border p-3.5 sm:p-4 ${cardTone}`}>
+            {hasActiveAlert && (
+                <div
+                    role="alert"
+                    className="mb-3 pb-2.5 border-b border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                >
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-950 text-[10px] font-bold uppercase tracking-wider shrink-0">
+                            Maintenance Due
+                        </span>
+                        <span className="text-xs font-semibold text-amber-950 truncate">
+                            3-month reminder ended{activeReminder.last_reminded_formatted ? ` (${activeReminder.last_reminded_formatted})` : ""} • New 3-month cycle started
+                        </span>
+                    </div>
+                    <button
+                        type="button"
+                        disabled={dismissingAlert}
+                        onClick={handleDismissAlert}
+                        className="self-start sm:self-auto px-2.5 py-1 min-h-[26px] rounded-md bg-white hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                    >
+                        <X size={12} />
+                        <span>Dismiss</span>
+                    </button>
+                </div>
+            )}
+
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
                 {/* Left: Minimal Label & Scope */}
                 <div className="space-y-1 min-w-0">
@@ -546,7 +746,7 @@ export default function MaintenanceReminderCountdown({
                                 className={
                                     isScheduled
                                         ? "text-[#16A34A]"
-                                        : isDueNow || isDueSoon
+                                        : hasActiveAlert || isDueNow || isDueSoon
                                         ? "text-[#D97706]"
                                         : "text-[#2563EB]"
                                 }
@@ -565,14 +765,14 @@ export default function MaintenanceReminderCountdown({
                     <div className="flex items-center gap-2 text-[11px] text-[#64748B] flex-wrap">
                         <span className="inline-flex items-center gap-1">
                             <Calendar size={12} className="text-[#2563EB]" />
-                            <span>Due <strong className="text-[#172B4D]">{reminder.due_date_formatted}</strong></span>
+                            <span>Due <strong className="text-[#172B4D]">{activeReminder.due_date_formatted}</strong></span>
                         </span>
                         <span>&bull;</span>
-                        <span>Since {reminder.last_service_formatted}</span>
+                        <span>Since {activeReminder.last_service_formatted}</span>
                     </div>
                 </div>
 
-                {/* Right: Live Countdown + Minimal Quick Book Actions */}
+                {/* Right: Live Countdown */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 shrink-0">
                     {isScheduled ? (
                         <div className="px-3 py-2 rounded-lg bg-white border border-[#BBF7D0] text-xs font-bold text-[#15803D] inline-flex items-center gap-1.5">
@@ -609,26 +809,6 @@ export default function MaintenanceReminderCountdown({
                                 </div>
                             ))}
                         </time>
-                    )}
-
-                    {onBookService && !isScheduled && (
-                        <div className="flex items-center gap-1.5">
-                            <button
-                                type="button"
-                                onClick={() => onBookService(reminder.cleaning_service_id || 3)}
-                                className="px-2.5 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
-                            >
-                                Book Cleaning
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => onBookService(reminder.repair_service_id || 2)}
-                                className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-[#EAF2FF] text-[#172B4D] hover:text-[#2563EB] border border-[#CBD5E1] hover:border-[#93C5FD] text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                            >
-                                <Wrench size={11} />
-                                <span>Check-up</span>
-                            </button>
-                        </div>
                     )}
                 </div>
             </div>

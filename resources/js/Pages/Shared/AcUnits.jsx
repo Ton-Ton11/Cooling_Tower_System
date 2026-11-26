@@ -428,12 +428,10 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         const list = [];
         for (const entry of recentAcHistory) {
             if (entry.type === 'part') {
-                const p = parts.find((x) => (x.part_id || x.item_id) === entry.id);
-                if (p) list.push({ entry, item: p, isPart: true });
-            } else {
-                const u = units.find((x) => x.ac_unit_id === entry.id);
-                if (u) list.push({ entry, item: u, isPart: false });
+                continue;
             }
+            const u = units.find((x) => x.ac_unit_id === entry.id);
+            if (u) list.push({ entry, item: u, isPart: false });
         }
         return list;
     }, [units, parts, recentAcHistory]);
@@ -1695,7 +1693,6 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         if (mainTab === 'order') return 'Order Base AC Units';
         if (mainTab === 'sold') return 'Sold AC Units';
         if (mainTab === 'defects') return 'Defective AC Units';
-        if (mainTab === 'spareparts') return 'AC Spare Parts & Components';
         return 'AC Units Inventory';
     };
 
@@ -1703,16 +1700,13 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
         if (mainTab === 'order') return `${orderBaseUnits.length} units ordered awaiting supplier delivery`;
         if (mainTab === 'sold') return `${soldUnits.length} AC units sold to customers`;
         if (mainTab === 'defects') return `${defectUnits.length} defective units flagged for inspection or return`;
-        if (mainTab === 'spareparts') {
-            return `Organized in clickable Brands & Categories · ${inStockParts.length} in stock · ${orderBaseParts.length} order base · ${soldParts.length} sold · ${defectParts.length} defect · ${warrantyReservedParts.length} warranty reserved`;
-        }
         return `Organized in clickable Brands & Categories · ${inStockUnits.length} in stock · ${availableUnits.length} available · ${soldUnits.length} sold · ${defectUnits.length} defect`;
     };
 
     if (loading) {
         return (
             <div style={{ padding: 32, borderRadius: 12, background: '#F8FAFC', color: '#64748B', textAlign: 'center', border: '1px solid #E2E8F0' }}>
-                <p style={{ fontWeight: 600, margin: 0 }}>Loading AC Units & Spare Parts...</p>
+                <p style={{ fontWeight: 600, margin: 0 }}>Loading AC Units...</p>
             </div>
         );
     }
@@ -1726,31 +1720,19 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                     <p className="page-subtitle">{getTabSubtitle()}</p>
                 </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button className="btn-secondary" onClick={() => { fetchUnits(); fetchParts(); }}>Refresh</button>
+                    <button className="btn-secondary" onClick={() => fetchUnits()}>Refresh</button>
 
-                    {/* ONLY the main "Brands" tab (or Spare Parts In Stock tab) allows adding new Brand Cards */}
+                    {/* ONLY the main "Brands" tab allows adding new Brand Cards */}
                     {mainTab === 'brands' && !selectedBrand && (
-                        <button className="btn-primary" onClick={() => { setBrandForm({ name: '', country_of_origin: '', description: '' }); setAddBrandModal(true); }}>
-                            + Add Brand
-                        </button>
-                    )}
-                    {mainTab === 'spareparts' && partSubTab === 'in_stock' && !selectedPartBrand && (
                         <button className="btn-primary" onClick={() => { setBrandForm({ name: '', country_of_origin: '', description: '' }); setAddBrandModal(true); }}>
                             + Add Brand
                         </button>
                     )}
 
                     {/* Add AC Unit button inside drill-down */}
-                    {mainTab !== 'spareparts' && selectedBrand && (
+                    {selectedBrand && (
                         <button className="btn-primary" onClick={() => handleOpenAddUnit(selectedBrand, selectedCategory !== 'all' ? selectedCategory : null)}>
                             + Add AC Unit
-                        </button>
-                    )}
-
-                    {/* Add Spare Part button inside drill-down */}
-                    {mainTab === 'spareparts' && selectedPartBrand && (
-                        <button className="btn-primary" onClick={() => handleOpenAddPart(selectedPartBrand, selectedPartCategory !== 'all' ? selectedPartCategory : null)}>
-                            + Add Spare Part
                         </button>
                     )}
                 </div>
@@ -1770,17 +1752,13 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                 <button className={`tab-item ${mainTab === 'defects' ? 'active' : ''}`} onClick={() => handleTabChange('defects')}>
                     Defects ({defectUnits.length})
                 </button>
-                <button className={`tab-item ${mainTab === 'spareparts' ? 'active' : ''}`} onClick={() => handleTabChange('spareparts')}>
-                    Spare Parts ({parts.length})
-                    {lowParts.length > 0 && <span style={{ marginLeft: 6, background: '#EF4444', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px', fontWeight: 700 }}>{lowParts.length}</span>}
-                </button>
             </div>
 
             {/* ══════════════════════════════════════════════════════════════
                 SHARED BRAND CARDS & CATEGORIES ARCHITECTURE: AC UNITS
                 (Applies to Brands, Order Base, Sold Units, and Defects)
                ══════════════════════════════════════════════════════════════ */}
-            {mainTab !== 'spareparts' && (
+            {true && (
                 <div>
                     {/* Sold Units Sub-View Toggle: Organized Records vs. Browse by Brand Cards */}
                     {mainTab === 'sold' && (

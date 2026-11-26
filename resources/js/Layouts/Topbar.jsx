@@ -273,7 +273,14 @@ function Topbar({ collapsed, isMobile = false, onToggleSidebar, onNavigate, addT
     useEffect(() => {
         fetchWidgets();
         const timer = setInterval(fetchWidgets, 45000);
-        return () => clearInterval(timer);
+        const handleRefresh = () => {
+            fetchWidgets();
+        };
+        window.addEventListener("topbar-widgets-refresh", handleRefresh);
+        return () => {
+            clearInterval(timer);
+            window.removeEventListener("topbar-widgets-refresh", handleRefresh);
+        };
     }, []);
 
     // Close popover when clicking outside

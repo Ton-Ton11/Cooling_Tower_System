@@ -81,6 +81,25 @@ const HAND_TOOL_NAMES = [
     'Pipe Flaring Tool Set', 'Torque Wrench Set', 'Screwdriver Set', 'Hex Key Set',
     'Pliers Set', 'Wire Stripper Set', 'Tape Measure', 'Utility Knife Set',
 ];
+const SPARE_PART_CATEGORIES = [
+    'Capacitors',
+    'Contactors & Relays',
+    'Fan Motors',
+    'PCBs & Controls',
+    'Valves & Coils',
+    'Sensors & Thermistors',
+    'Filters & Driers',
+    'Hardware & Accessories',
+];
+const SPARE_PART_NAMES = [
+    'Dual Run Capacitor 35+5 uF 450VAC',
+    'Inverter Main Control PCB Board',
+    'Outdoor Condenser Fan Motor',
+    '2-Pole Magnetic Contactor 25A',
+    'Electronic Expansion Valve (EEV)',
+    'Dual Pipe Temperature Thermistor Sensor',
+    'Brass Flare Filter Drier Cartridge',
+];
 const UNIT_OPTIONS = ['can', 'roll', 'm', 'pc', 'set', 'unit', 'L', 'kg', 'box', 'pair', 'spool', 'cylinder', 'gallon', 'pcs'];
 
 // Combobox Component
@@ -376,18 +395,21 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const [wmForm, setWmForm] = useState({ item_name: '', unit: '', initial_stock: '', reorder_level: '', sub_category: '', folder_id: null, managed_by: '' });
     const [ptForm, setPtForm] = useState({ item_name: '', serial_number: '', unit: 'unit', sub_category: '', folder_id: null, managed_by: '' });
     const [htAddForm, setHtAddForm] = useState({ item_name: '', unit: '', quantity: '', reorder_level: '', sub_category: '', folder_id: null, managed_by: '' });
-    const [saleForm, setSaleForm] = useState({ item_name: '', item_type: 'Material', unit: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '' });
+    const [saleForm, setSaleForm] = useState({ item_name: '', item_type: 'Material', tool_subtype: 'hand', serial_number: '', compatible_brands: '', expected_arrival: '', unit: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '', status: 'Available' });
     
     const [editWMForm, setEditWMForm] = useState({ item_name: '', unit: '', initial_stock: '', quantity_on_hand: '', reorder_level: '', sub_category: '', folder_id: null, managed_by: '' });
     const [editPTForm, setEditPTForm] = useState({ item_name: '', serial_number: '', unit: '', status: 'Available', initial_stock: '1', quantity_on_hand: '1', sub_category: '', folder_id: null, managed_by: '' });
     const [editHTForm, setEditHTForm] = useState({ item_name: '', unit: '', initial_stock: '', quantity_on_hand: '', reorder_level: '', sub_category: '', folder_id: null, managed_by: '' });
-    const [editSaleForm, setEditSaleForm] = useState({ item_name: '', item_type: 'Material', unit: '', initial_stock: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '' });
+    const [editSaleForm, setEditSaleForm] = useState({ item_name: '', item_type: 'Material', tool_subtype: 'hand', serial_number: '', compatible_brands: '', expected_arrival: '', unit: '', initial_stock: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '', status: 'Available' });
 
     // ── Checkout & Usage Tracking States ──
     const [checkouts, setCheckouts] = useState([]);
     const [checkoutOptions, setCheckoutOptions] = useState({ technicians: [], services: [], customers: [] });
     const [soldItems, setSoldItems] = useState([]);
-    const [saleSubTab, setSaleSubTab] = useState('catalog'); // 'catalog' | 'sold_records'
+    const [saleSubTab, setSaleSubTab] = useState('materials'); // 'materials' | 'power' | 'hand' | 'spare_parts' | 'low_stock' | 'damaged_lost' | 'sold_records'
+    const [sparePartView, setSparePartView] = useState('on_hand'); // 'on_hand' | 'order_base' | 'warranty_reserved'
+    const [editingPartArrival, setEditingPartArrival] = useState(null);
+    const [partArrivalInput, setPartArrivalInput] = useState('');
     const [soldSearch, setSoldSearch] = useState('');
     const [soldPaymentFilter, setSoldPaymentFilter] = useState('all');
 
@@ -514,6 +536,15 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const powerCategories = useMemo(() => folders.filter(f => f.field_type === 'power_tools'), [folders]);
     const handCategories = useMemo(() => folders.filter(f => f.field_type === 'hand_tools'), [folders]);
     const saleCategories = useMemo(() => folders.filter(f => f.field_type === 'sale_items'), [folders]);
+    const sparePartFolders = useMemo(() => folders.filter(f => f.field_type === 'spare_parts'), [folders]);
+
+    const activeSaleFieldType = saleSubTab === 'power'
+        ? 'power_tools'
+        : saleSubTab === 'hand'
+        ? 'hand_tools'
+        : saleSubTab === 'spare_parts'
+        ? 'spare_parts'
+        : 'sale_items';
 
     const getCategoriesForFieldType = useCallback((fieldType) => {
         if (fieldType === 'materials' || fieldType === 'material') {
@@ -525,14 +556,20 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         if (fieldType === 'hand_tools' || fieldType === 'hand_tool') {
             return handCategories;
         }
+        if (fieldType === 'spare_parts' || fieldType === 'spare_part') {
+            return sparePartFolders;
+        }
         return saleCategories;
-    }, [materialCategories, powerCategories, handCategories, saleCategories]);
+    }, [materialCategories, powerCategories, handCategories, sparePartFolders, saleCategories]);
 
     // Active sub-category objects
     const activeMaterialCategoryObj = useMemo(() => materialCategories.find(f => f.name === selectedMaterialCategory), [materialCategories, selectedMaterialCategory]);
     const activePowerCategoryObj = useMemo(() => powerCategories.find(f => f.name === selectedPowerCategory), [powerCategories, selectedPowerCategory]);
     const activeHandCategoryObj = useMemo(() => handCategories.find(f => f.name === selectedHandCategory), [handCategories, selectedHandCategory]);
-    const activeSaleCategoryObj = useMemo(() => saleCategories.find(f => f.name === selectedSaleCategory), [saleCategories, selectedSaleCategory]);
+    const activeSaleCategoryObj = useMemo(
+        () => [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(f => f.name === selectedSaleCategory),
+        [saleCategories, powerCategories, handCategories, sparePartFolders, selectedSaleCategory]
+    );
 
     // Partition into Active and Archived items
     const activeItems = useMemo(() => {
@@ -624,6 +661,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             setEditSaleForm({
                 item_name: item.item_name,
                 item_type: item.item_type || 'Material',
+                tool_subtype: item.tool_subtype || 'hand',
                 sub_category: item.sub_category || 'General',
                 folder_id: item.folder_id,
                 unit: item.unit,
@@ -635,6 +673,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 reorder_level: String(item.reorder_level || 2),
                 supplier_name: item.supplier_name || '',
                 managed_by: currentUserName,
+                status: item.status || 'Available',
             });
         } else if (item.item_type === 'Tool' && item.tool_subtype === 'power') {
             setEditPTTarget(item);
@@ -679,19 +718,27 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
     // Filtered items by category & sub-category from active inventory
     const isDamagedOrLostItem = (i) =>
-        ['Lost/Damaged', 'Damaged', 'Lost', 'Broken'].includes(i.status) ||
+        ['Lost/Damaged', 'Damaged', 'Lost', 'Broken', 'Defect'].includes(i.status) ||
         (i.sub_category || '').toLowerCase() === 'damaged / lost';
 
-    const workerMaterials = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool' && !isDamagedOrLostItem(i)), [activeItems]);
+    const workerMaterials = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type !== 'Tool' && i.item_type !== 'Spare Part' && !isDamagedOrLostItem(i)), [activeItems]);
     const powerTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'power' && !isDamagedOrLostItem(i)), [activeItems]);
     const handTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && i.item_type === 'Tool' && i.tool_subtype === 'hand' && !isDamagedOrLostItem(i)), [activeItems]);
     const damagedLostTools = useMemo(() => activeItems.filter(i => i.inventory_mode === 'worker' && isDamagedOrLostItem(i)), [activeItems]);
-    const saleItems = useMemo(() => activeItems.filter(i => i.inventory_mode === 'sale'), [activeItems]);
+    const saleItems = useMemo(() => activeItems.filter(i => i.inventory_mode === 'sale' || i.item_type === 'Spare Part'), [activeItems]);
+    const saleMaterials = useMemo(() => saleItems.filter(i => i.item_type !== 'Tool' && i.item_type !== 'Spare Part' && !isDamagedOrLostItem(i)), [saleItems]);
+    const salePowerTools = useMemo(() => saleItems.filter(i => i.item_type === 'Tool' && i.tool_subtype === 'power' && !isDamagedOrLostItem(i) && (i.status || '') !== 'Order Base' && (i.status || '') !== 'Sold'), [saleItems]);
+    const saleHandTools = useMemo(() => saleItems.filter(i => i.item_type === 'Tool' && i.tool_subtype !== 'power' && !isDamagedOrLostItem(i)), [saleItems]);
+    const saleAllSpareParts = useMemo(() => saleItems.filter(i => i.item_type === 'Spare Part' && !isDamagedOrLostItem(i) && (i.status || '') !== 'Sold'), [saleItems]);
+    const saleSparePartsOnHand = useMemo(() => saleAllSpareParts.filter(p => !p.is_warranty_reserved && p.status !== 'Warranty Reserved' && p.status !== 'Order Base' && p.reservation_source !== 'order_base' && p.status !== 'Out of Stock' && Number(p.quantity_on_hand ?? 0) > 0), [saleAllSpareParts]);
+    const saleSparePartsOrderBase = useMemo(() => saleAllSpareParts.filter(p => !p.is_warranty_reserved && p.status !== 'Warranty Reserved' && (p.status === 'Order Base' || p.reservation_source === 'order_base')), [saleAllSpareParts]);
+    const saleSparePartsWarranty = useMemo(() => saleAllSpareParts.filter(p => p.is_warranty_reserved || p.status === 'Warranty Reserved'), [saleAllSpareParts]);
+    const saleDamagedLost = useMemo(() => saleItems.filter(i => isDamagedOrLostItem(i)), [saleItems]);
 
     const isLowStockItem = useCallback((item) => {
         if (!item || item.is_archived || isDamagedOrLostItem(item)) return false;
-        // Power tools are individual serialized equipment; low stock thresholds do not apply
-        if (item.item_type === 'Tool' && item.tool_subtype === 'power') return false;
+        // Power tools & Spare parts are individual serialized equipment; low stock thresholds do not apply
+        if ((item.item_type === 'Tool' && item.tool_subtype === 'power') || item.item_type === 'Spare Part') return false;
         const qty = Number(item.quantity_on_hand ?? 0);
         const reorder = Number(item.reorder_level ?? 0);
         return qty <= reorder;
@@ -700,7 +747,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
     const lowStockWorkerMaterials = useMemo(() => workerMaterials.filter(isLowStockItem), [workerMaterials, isLowStockItem]);
     const lowStockHandTools = useMemo(() => handTools.filter(isLowStockItem), [handTools, isLowStockItem]);
     const lowStockWorker = useMemo(() => [...lowStockWorkerMaterials, ...lowStockHandTools], [lowStockWorkerMaterials, lowStockHandTools]);
-    const lowStockSale = useMemo(() => saleItems.filter(isLowStockItem), [saleItems, isLowStockItem]);
+    const lowStockSale = useMemo(() => [...saleMaterials, ...saleHandTools].filter(isLowStockItem), [saleMaterials, saleHandTools, isLowStockItem]);
     const totalLowStockCount = useMemo(() => (isToolsMan ? lowStockWorker.length : (lowStockWorker.length + lowStockSale.length)), [isToolsMan, lowStockWorker.length, lowStockSale.length]);
 
     // Active field's filtered items taking into account selected sub-category
@@ -736,17 +783,64 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         });
     }, [handTools, handSearch, selectedHandCategory, activeHandCategoryObj]);
     
+    const activeSaleTabItems = useMemo(() => {
+        if (saleSubTab === 'materials') return saleMaterials;
+        if (saleSubTab === 'power') return salePowerTools;
+        if (saleSubTab === 'hand') return saleHandTools;
+        if (saleSubTab === 'spare_parts') {
+            if (sparePartView === 'order_base') return saleSparePartsOrderBase;
+            if (sparePartView === 'warranty_reserved') return saleSparePartsWarranty;
+            return saleSparePartsOnHand;
+        }
+        if (saleSubTab === 'damaged_lost') return saleDamagedLost;
+        return saleItems;
+    }, [saleSubTab, sparePartView, saleMaterials, salePowerTools, saleHandTools, saleSparePartsOnHand, saleSparePartsOrderBase, saleSparePartsWarranty, saleDamagedLost, saleItems]);
+
+    const activeSaleTabCategories = useMemo(() => {
+        const names = new Map();
+        const addCat = (name, id = null) => {
+            const clean = (name || '').trim();
+            if (!clean) return;
+            const key = clean.toLowerCase();
+            if (!names.has(key)) names.set(key, { id: id || clean, name: clean });
+        };
+
+        if (saleSubTab === 'spare_parts') {
+            SPARE_PART_CATEGORIES.forEach(c => addCat(c));
+            sparePartFolders.forEach(c => addCat(c.name, c.id));
+            activeSaleTabItems.forEach(i => addCat(i.sub_category, i.folder_id));
+        } else if (saleSubTab === 'materials') {
+            saleCategories.forEach(c => addCat(c.name, c.id));
+            activeSaleTabItems.forEach(i => addCat(i.sub_category, i.folder_id));
+        } else if (saleSubTab === 'power') {
+            powerCategories.forEach(c => addCat(c.name, c.id));
+            activeSaleTabItems.forEach(i => addCat(i.sub_category, i.folder_id));
+        } else if (saleSubTab === 'hand') {
+            handCategories.forEach(c => addCat(c.name, c.id));
+            activeSaleTabItems.forEach(i => addCat(i.sub_category, i.folder_id));
+        } else {
+            saleCategories.forEach(c => addCat(c.name, c.id));
+            if (saleSubTab === 'low_stock') {
+                lowStockSale.forEach(i => addCat(i.sub_category, i.folder_id));
+            }
+        }
+
+        return Array.from(names.values());
+    }, [saleSubTab, activeSaleTabItems, saleCategories, powerCategories, handCategories, sparePartFolders, lowStockSale]);
+
     const filteredSale = useMemo(() => {
-        return saleItems.filter(i => {
+        return activeSaleTabItems.filter(i => {
             const matchesSearch = i.item_name.toLowerCase().includes(saleSearch.toLowerCase()) ||
+                (i.serial_number || '').toLowerCase().includes(saleSearch.toLowerCase()) ||
                 (i.supplier_name || '').toLowerCase().includes(saleSearch.toLowerCase()) ||
-                (i.sub_category || '').toLowerCase().includes(saleSearch.toLowerCase());
+                (i.sub_category || '').toLowerCase().includes(saleSearch.toLowerCase()) ||
+                (Array.isArray(i.compatible_brands) ? i.compatible_brands.join(', ') : (i.compatible_brands || '')).toLowerCase().includes(saleSearch.toLowerCase());
             if (!matchesSearch) return false;
             if (selectedSaleCategory === 'all') return true;
             return (i.sub_category || '').toLowerCase() === selectedSaleCategory.toLowerCase() ||
                 (activeSaleCategoryObj && (i.folder_id === activeSaleCategoryObj.id || (i.sub_category || '').toLowerCase() === activeSaleCategoryObj.name.toLowerCase()));
         });
-    }, [saleItems, saleSearch, selectedSaleCategory, activeSaleCategoryObj]);
+    }, [activeSaleTabItems, saleSearch, selectedSaleCategory, activeSaleCategoryObj]);
 
     // Filtered Checkouts & Usage Tracking Logs
     const filteredCheckouts = useMemo(() => {
@@ -916,15 +1010,23 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 name: categoryForm.name.trim(),
                 description: categoryForm.description?.trim() || null,
             });
-            addToast(`Sub-category "${categoryForm.name.trim()}" created successfully!`);
+            const createdName = categoryForm.name.trim();
+            addToast(`Sub-category "${createdName}" created successfully!`);
             setCreateCategoryModal(false);
             setCategoryForm({ name: '', description: '' });
             await fetchFolders();
             // Automatically switch to the newly created sub-category
-            if (categoryFieldType === 'materials') setSelectedMaterialCategory(categoryForm.name.trim());
-            if (categoryFieldType === 'power_tools') setSelectedPowerCategory(categoryForm.name.trim());
-            if (categoryFieldType === 'hand_tools') setSelectedHandCategory(categoryForm.name.trim());
-            if (categoryFieldType === 'sale_items') setSelectedSaleCategory(categoryForm.name.trim());
+            if (mainTab === 'sale') {
+                setSelectedSaleCategory(createdName);
+                if (addSaleModal) {
+                    setSaleForm(p => ({ ...p, sub_category: createdName }));
+                }
+            } else {
+                if (categoryFieldType === 'materials') setSelectedMaterialCategory(createdName);
+                if (categoryFieldType === 'power_tools') setSelectedPowerCategory(createdName);
+                if (categoryFieldType === 'hand_tools') setSelectedHandCategory(createdName);
+                if (categoryFieldType === 'sale_items' || categoryFieldType === 'spare_parts') setSelectedSaleCategory(createdName);
+            }
         } catch (error) {
             addToast(extractErrorMessage(error, "Unable to create sub-category."), "error");
         } finally {
@@ -1003,10 +1105,85 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
         setAddHandToolModal(true);
     };
 
+    const openEditSaleModalForItem = (item) => {
+        if (!item) return;
+        trackRecentItem(item.item_id);
+        const costPrice = Number(item.capital || 0);
+        const sellingPrice = (item.selling_price !== null && item.selling_price !== undefined && item.selling_price !== '')
+            ? Number(item.selling_price)
+            : (costPrice + (Number(item.profit) || 0));
+        const profitVal = (item.profit !== null && item.profit !== undefined && item.profit !== '')
+            ? Number(item.profit)
+            : Math.max(0, sellingPrice - costPrice);
+        const brandsStr = Array.isArray(item.compatible_brands) ? item.compatible_brands.join(', ') : (item.compatible_brands || '');
+        setEditSaleTarget(item);
+        setEditSaleForm({
+            item_name: item.item_name,
+            item_type: item.item_type || 'Material',
+            tool_subtype: item.tool_subtype || 'hand',
+            serial_number: item.serial_number || '',
+            compatible_brands: brandsStr,
+            expected_arrival: item.expected_arrival || '',
+            unit: item.unit || 'pc',
+            initial_stock: String(item.initial_stock ?? item.quantity_on_hand ?? 1),
+            quantity_on_hand: String(item.quantity_on_hand ?? 1),
+            reorder_level: String(item.reorder_level ?? 0),
+            capital: String(costPrice),
+            selling_price: String(sellingPrice),
+            profit: String(profitVal),
+            supplier_name: item.supplier_name || '',
+            sub_category: item.sub_category || (item.item_type === 'Spare Part' ? 'Capacitors' : 'General For-Sale Items'),
+            folder_id: item.folder_id,
+            managed_by: currentUserName,
+            status: item.status || 'Available',
+        });
+    };
+
+    const handleSetPartArrival = async (itemId) => {
+        try {
+            await window.axios.patch(ep.updateInventory(itemId), {
+                expected_arrival: partArrivalInput || null,
+                managed_by: currentUserName,
+            });
+            addToast("Expected arrival date updated.");
+            setEditingPartArrival(null);
+            setPartArrivalInput('');
+            await fetchItems(false);
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to update arrival date."), "error");
+        }
+    };
+
     const handleOpenAddSaleItem = (prefilledCategory = null) => {
-        const catName = prefilledCategory || (selectedSaleCategory !== 'all' ? selectedSaleCategory : (saleCategories[0]?.name || 'General For-Sale Items'));
-        const catObj = saleCategories.find(f => f.name === catName);
-        setSaleForm({ item_name: '', item_type: 'Material', unit: '', quantity_on_hand: '', reorder_level: '3', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: catName, folder_id: catObj?.id || null, managed_by: currentUserName });
+        const defaultType = saleSubTab === 'spare_parts'
+            ? 'Spare Part'
+            : (saleSubTab === 'power' || saleSubTab === 'hand')
+            ? 'Tool'
+            : 'Material';
+        const defaultSubtype = saleSubTab === 'power' ? 'power' : 'hand';
+        const isOrderBasePart = saleSubTab === 'spare_parts' && sparePartView === 'order_base';
+        const fallbackCat = activeSaleTabCategories[0]?.name || (defaultType === 'Spare Part' ? 'Capacitors' : (saleCategories[0]?.name || 'General For-Sale Items'));
+        const catName = prefilledCategory || (selectedSaleCategory !== 'all' ? selectedSaleCategory : fallbackCat);
+        const catObj = [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(f => f.name === catName);
+        setSaleForm({
+            item_name: '',
+            item_type: defaultType,
+            tool_subtype: defaultSubtype,
+            serial_number: '',
+            compatible_brands: '',
+            expected_arrival: '',
+            unit: defaultType === 'Tool' ? 'unit' : 'pc',
+            quantity_on_hand: (defaultType === 'Spare Part' || (defaultType === 'Tool' && defaultSubtype === 'power')) ? '1' : '',
+            reorder_level: (defaultType === 'Spare Part' || (defaultType === 'Tool' && defaultSubtype === 'power')) ? '0' : '3',
+            capital: '',
+            selling_price: '',
+            profit: '',
+            supplier_name: '',
+            sub_category: catName,
+            folder_id: catObj?.id || null,
+            managed_by: currentUserName,
+            status: isOrderBasePart ? 'Order Base' : 'Available',
+        });
         setAddSaleModal(true);
     };
 
@@ -1281,30 +1458,37 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             const costPrice = parseFloat(saleForm.capital) || 0;
             const sellingPrice = parseFloat(saleForm.selling_price) || 0;
             const profit = Math.max(0, sellingPrice - costPrice);
+            const isSerialItem = saleForm.item_type === 'Spare Part' || (saleForm.item_type === 'Tool' && (saleForm.tool_subtype || 'hand') === 'power');
+            const isOrderBase = saleForm.item_type === 'Spare Part' && saleForm.status === 'Order Base';
 
-            const catObj = saleCategories.find(f => f.name === saleForm.sub_category);
+            const catObj = [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(f => f.name === saleForm.sub_category);
             const payload = {
                 item_name: saleForm.item_name,
                 item_type: saleForm.item_type,
+                tool_subtype: saleForm.item_type === 'Tool' ? (saleForm.tool_subtype || 'hand') : null,
                 inventory_mode: 'sale',
-                sub_category: saleForm.sub_category || 'General For-Sale Items',
+                serial_number: isSerialItem ? (saleForm.serial_number || null) : null,
+                compatible_brands: saleForm.item_type === 'Spare Part' ? (saleForm.compatible_brands || '') : null,
+                expected_arrival: isOrderBase ? (saleForm.expected_arrival || null) : null,
+                reservation_source: isOrderBase ? 'order_base' : null,
+                sub_category: saleForm.sub_category || (saleForm.item_type === 'Spare Part' ? 'Capacitors' : 'General For-Sale Items'),
                 folder_id: catObj?.id || null,
-                quantity_on_hand: parseInt(saleForm.quantity_on_hand) || 0,
-                initial_stock: parseInt(saleForm.quantity_on_hand) || 0,
-                reorder_level: parseInt(saleForm.reorder_level) || 0,
-                unit: saleForm.unit,
+                quantity_on_hand: isSerialItem ? (isOrderBase ? 0 : 1) : (parseInt(saleForm.quantity_on_hand) || 0),
+                initial_stock: isSerialItem ? 1 : (parseInt(saleForm.quantity_on_hand) || 0),
+                reorder_level: isSerialItem ? 0 : (parseInt(saleForm.reorder_level) || 0),
+                unit: saleForm.unit || (isSerialItem ? 'unit' : 'pc'),
                 capital: costPrice,
                 selling_price: sellingPrice,
                 profit: profit,
                 supplier_name: saleForm.supplier_name,
                 managed_by: saleForm.managed_by || currentUserName,
-                status: 'Available',
+                status: saleForm.status || 'Available',
             };
             await window.axios.post(ep.inventory, payload);
             addToast(`"${saleForm.item_name}" added to [${saleForm.sub_category || 'For Sale'}].`);
             setAddSaleModal(false);
             setConfirmAddSale(false);
-            setSaleForm({ item_name: '', item_type: 'Material', unit: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '' });
+            setSaleForm({ item_name: '', item_type: 'Material', tool_subtype: 'hand', serial_number: '', compatible_brands: '', expected_arrival: '', unit: '', quantity_on_hand: '', reorder_level: '', capital: '', selling_price: '', profit: '', supplier_name: '', sub_category: '', folder_id: null, managed_by: '', status: 'Available' });
             await fetchItems(false);
             onDataChanged?.();
         } catch (error) {
@@ -1389,22 +1573,30 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             const costPrice = parseFloat(editSaleForm.capital) || 0;
             const sellingPrice = parseFloat(editSaleForm.selling_price) || (costPrice + (parseFloat(editSaleForm.profit) || 0));
             const profitMargin = Math.max(0, sellingPrice - costPrice);
+            const isSerialItem = editSaleForm.item_type === 'Spare Part' || (editSaleForm.item_type === 'Tool' && (editSaleForm.tool_subtype || 'hand') === 'power');
+            const isOrderBase = editSaleForm.item_type === 'Spare Part' && editSaleForm.status === 'Order Base';
 
-            const catObj = saleCategories.find(f => f.name === editSaleForm.sub_category);
+            const catObj = [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(f => f.name === editSaleForm.sub_category);
             await window.axios.patch(ep.updateInventory(editSaleTarget.item_id), {
                 item_name: editSaleForm.item_name,
                 item_type: editSaleForm.item_type,
+                tool_subtype: editSaleForm.item_type === 'Tool' ? (editSaleForm.tool_subtype || 'hand') : null,
+                serial_number: isSerialItem ? (editSaleForm.serial_number || null) : null,
+                compatible_brands: editSaleForm.item_type === 'Spare Part' ? (editSaleForm.compatible_brands || '') : null,
+                expected_arrival: isOrderBase ? (editSaleForm.expected_arrival || null) : null,
+                reservation_source: isOrderBase ? 'order_base' : null,
                 unit: editSaleForm.unit,
                 sub_category: editSaleForm.sub_category,
                 folder_id: catObj?.id || editSaleTarget.folder_id,
-                initial_stock: parseInt(editSaleForm.initial_stock) ?? editSaleTarget.initial_stock,
-                quantity_on_hand: parseInt(editSaleForm.quantity_on_hand) ?? 0,
-                reorder_level: parseInt(editSaleForm.reorder_level) || 0,
+                initial_stock: isSerialItem ? 1 : (parseInt(editSaleForm.initial_stock) ?? editSaleTarget.initial_stock),
+                quantity_on_hand: isSerialItem ? (isOrderBase ? 0 : (editSaleForm.status === 'Available' || editSaleForm.status === 'Available / On Hand' ? 1 : 0)) : (parseInt(editSaleForm.quantity_on_hand) ?? 0),
+                reorder_level: isSerialItem ? 0 : (parseInt(editSaleForm.reorder_level) || 0),
                 capital: costPrice,
                 selling_price: sellingPrice,
                 profit: profitMargin,
                 supplier_name: editSaleForm.supplier_name,
                 managed_by: currentUserName,
+                status: editSaleForm.status || 'Available',
             });
             addToast(`Sale item "${editSaleForm.item_name}" updated.`);
             setEditSaleTarget(null);
@@ -1540,6 +1732,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             setEditSaleForm({
                 item_name: item.item_name,
                 item_type: item.item_type || 'Material',
+                tool_subtype: item.tool_subtype || 'hand',
                 unit: item.unit,
                 initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
                 quantity_on_hand: String(item.quantity_on_hand),
@@ -1551,6 +1744,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 sub_category: item.sub_category || 'General For-Sale Items',
                 folder_id: item.folder_id,
                 managed_by: currentUserName,
+                status: item.status || 'Available',
             });
         } else if (item.item_type === 'Tool' && item.tool_subtype === 'power') {
             setEditPTTarget(item);
@@ -1892,7 +2086,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                     </div>
                                                 ) : (
                                                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                        {isSaleItem && (
+                                                        {isSaleItem && !isAdminAssistant && (
                                                             <button
                                                                 className="btn-primary"
                                                                 style={{ padding: '4px 9px', fontSize: 11 }}
@@ -3023,99 +3217,135 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     )}
 
-                    {/* Sub-navigation Toggle: For Sale Catalog vs Low Stock vs Organized Sold Tools & Materials Records */}
+                    {/* For Sale Field Sub-Tabs (mirroring Worker Inventory + Spare Parts) */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-                        <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', padding: 5, borderRadius: 12, border: '1px solid #E2E8F0', flexWrap: 'wrap' }}>
-                            <button
-                                onClick={() => setSaleSubTab('catalog')}
-                                style={{
-                                    padding: '8px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
-                                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                                    background: saleSubTab === 'catalog' ? '#FFFFFF' : 'transparent',
-                                    color: saleSubTab === 'catalog' ? '#1E2F5F' : '#64748B',
-                                    boxShadow: saleSubTab === 'catalog' ? '0 2px 6px rgba(15,23,42,0.08)' : 'none',
-                                    transition: 'all 0.15s ease',
-                                }}
-                            >
-                                For Sale Catalog ({saleItems.length})
-                            </button>
-                            <button
-                                onClick={() => setSaleSubTab('low_stock')}
-                                style={{
-                                    padding: '8px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
-                                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                                    background: saleSubTab === 'low_stock' ? '#FFFFFF' : 'transparent',
-                                    color: saleSubTab === 'low_stock' ? '#D97706' : (lowStockSale.length > 0 ? '#D97706' : '#64748B'),
-                                    boxShadow: saleSubTab === 'low_stock' ? '0 2px 6px rgba(15,23,42,0.08)' : 'none',
-                                    transition: 'all 0.15s ease',
-                                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                                }}
-                            >
-                                <span>Low Stock</span>
-                                <span style={{
-                                    fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 12,
-                                    background: lowStockSale.length > 0 ? 'rgba(245,138,7,0.16)' : '#E2E8F0',
-                                    color: lowStockSale.length > 0 ? '#D97706' : '#64748B',
-                                }}>
-                                    {lowStockSale.length}
-                                </span>
-                            </button>
-                            <button
-                                onClick={() => setSaleSubTab('sold_records')}
-                                style={{
-                                    padding: '8px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
-                                    fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
-                                    background: saleSubTab === 'sold_records' ? '#1E2F5F' : 'transparent',
-                                    color: saleSubTab === 'sold_records' ? '#FFFFFF' : '#64748B',
-                                    boxShadow: saleSubTab === 'sold_records' ? '0 2px 8px rgba(30,47,95,0.22)' : 'none',
-                                    transition: 'all 0.15s ease',
-                                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                                }}
-                            >
-                                <span>Sold Tools & Materials Records</span>
-                                <span style={{
-                                    fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 12,
-                                    background: saleSubTab === 'sold_records' ? 'rgba(255,255,255,0.2)' : '#DCFCE7',
-                                    color: saleSubTab === 'sold_records' ? '#FFFFFF' : '#15803D',
-                                }}>
-                                    {soldItems.length}
-                                </span>
-                            </button>
+                        <div style={{ display: 'inline-flex', gap: 6, background: '#F1F5F9', borderRadius: 10, padding: 4, flexWrap: 'wrap' }}>
+                            {[
+                                { key: 'materials', label: 'Materials', count: saleMaterials.length },
+                                { key: 'power', label: 'Power Tools', count: salePowerTools.length },
+                                { key: 'hand', label: 'Hand Tools & Hardware', count: saleHandTools.length },
+                                { key: 'spare_parts', label: 'Spare Parts', count: saleSparePartsOnHand.length },
+                                { key: 'low_stock', label: 'Low Stock', count: lowStockSale.length, isLowStock: true },
+                                { key: 'damaged_lost', label: 'Damaged / Lost', count: saleDamagedLost.length },
+                                { key: 'sold_records', label: 'Sold Records', count: soldItems.length },
+                            ].map(t => (
+                                <button
+                                    key={t.key}
+                                    onClick={() => {
+                                        setSaleSubTab(t.key);
+                                        setSelectedSaleCategory('all');
+                                    }}
+                                    style={{
+                                        padding: '8px 18px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                                        fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                                        background: saleSubTab === t.key ? '#fff' : 'transparent',
+                                        color: saleSubTab === t.key ? (t.isLowStock ? '#D97706' : '#0F172A') : (t.isLowStock && t.count > 0 ? '#D97706' : '#64748B'),
+                                        boxShadow: saleSubTab === t.key ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                                        transition: 'all 0.15s ease',
+                                    }}
+                                >
+                                    {t.label} <span style={{ fontSize: 11, color: saleSubTab === t.key ? (t.isLowStock ? '#D97706' : '#3B82F6') : (t.isLowStock && t.count > 0 ? '#D97706' : '#94A3B8'), marginLeft: 4 }}>({t.count})</span>
+                                </button>
+                            ))}
                         </div>
 
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                className="btn-secondary"
-                                style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                onClick={() => {
-                                    setCategoryFieldType('sale_items');
-                                    setManageCategoriesModal(true);
-                                }}>
-                                Manage Sub-categories
-                            </button>
-                            <button
-                                className="btn-primary"
-                                style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
-                                onClick={() => {
-                                    handleOpenCreateCategory('sale_items');
-                                }}>
-                                + New Sub-category
-                            </button>
-                        </div>
+                        {saleSubTab !== 'damaged_lost' && saleSubTab !== 'low_stock' && saleSubTab !== 'sold_records' && (
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                    className="btn-secondary"
+                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                    onClick={() => {
+                                        setCategoryFieldType(activeSaleFieldType);
+                                        setManageCategoriesModal(true);
+                                    }}>
+                                    Manage Sub-categories
+                                </button>
+                                <button
+                                    className="btn-primary"
+                                    style={{ fontSize: 12, padding: '7px 14px', borderRadius: 8, fontWeight: 600 }}
+                                    onClick={() => {
+                                        handleOpenCreateCategory(activeSaleFieldType);
+                                    }}>
+                                    + New Sub-category
+                                </button>
+                            </div>
+                        )}
                     </div>
 
-                    {/* For Sale Sub-category Pill Selector Bar */}
+                    {/* Spare Parts Sub-View Toggle (On-Hand vs Order Base) */}
+                    {saleSubTab === 'spare_parts' && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                            <div style={{ display: 'inline-flex', gap: 6, background: '#F8FAFC', padding: 4, borderRadius: 10, border: '1px solid #E2E8F0', flexWrap: 'wrap' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => { setSparePartView('on_hand'); setSelectedSaleCategory('all'); }}
+                                    style={{
+                                        padding: '7px 15px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                                        fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                                        background: sparePartView === 'on_hand' ? '#FFFFFF' : 'transparent',
+                                        color: sparePartView === 'on_hand' ? '#1E2F5F' : '#64748B',
+                                        boxShadow: sparePartView === 'on_hand' ? '0 1px 4px rgba(15,23,42,0.08)' : 'none',
+                                    }}
+                                >
+                                    On-Hand ({saleSparePartsOnHand.length})
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setSparePartView('order_base'); setSelectedSaleCategory('all'); }}
+                                    style={{
+                                        padding: '7px 15px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                                        fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                                        background: sparePartView === 'order_base' ? '#FFFFFF' : 'transparent',
+                                        color: sparePartView === 'order_base' ? '#D97706' : '#64748B',
+                                        boxShadow: sparePartView === 'order_base' ? '0 1px 4px rgba(15,23,42,0.08)' : 'none',
+                                    }}
+                                >
+                                    Order Base ({saleSparePartsOrderBase.length})
+                                </button>
+                                {saleSparePartsWarranty.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setSparePartView('warranty_reserved'); setSelectedSaleCategory('all'); }}
+                                        style={{
+                                            padding: '7px 15px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                                            fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                                            background: sparePartView === 'warranty_reserved' ? '#FFFFFF' : 'transparent',
+                                            color: sparePartView === 'warranty_reserved' ? '#2563EB' : '#64748B',
+                                            boxShadow: sparePartView === 'warranty_reserved' ? '0 1px 4px rgba(15,23,42,0.08)' : 'none',
+                                        }}
+                                    >
+                                        Warranty Reserved ({saleSparePartsWarranty.length})
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* For Sale Sub-category Pill Selector Bar (hidden in Damaged/Lost & Warranty Reserved) */}
+                    {saleSubTab !== 'damaged_lost' && !(saleSubTab === 'spare_parts' && sparePartView === 'warranty_reserved') && (
                     <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 12, padding: '14px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569' }}>
-                                {saleSubTab === 'catalog'
-                                    ? 'For Sale Sub-categories'
+                                {saleSubTab === 'materials'
+                                    ? 'For Sale Materials Sub-categories'
+                                    : saleSubTab === 'power'
+                                    ? 'Power Tools Types (On-Hand Serials)'
+                                    : saleSubTab === 'hand'
+                                    ? 'Hand Tools & Hardware Sub-categories'
+                                    : saleSubTab === 'spare_parts' && sparePartView === 'order_base'
+                                    ? 'Spare Part Types (Order Base)'
+                                    : saleSubTab === 'spare_parts'
+                                    ? 'Spare Part Types (On-Hand Serials)'
                                     : saleSubTab === 'low_stock'
-                                    ? 'Filter Low Stock by Sub-category'
-                                    : 'Filter Sold Records by Sub-category'}
+                                    ? 'Low Stock Sub-categories'
+                                    : 'Sold Records Sub-categories'}
                             </span>
                             <span style={{ fontSize: 12, color: '#64748B' }}>
-                                {saleCategories.length} sub-categories configured
+                                {saleSubTab === 'spare_parts' && sparePartView === 'order_base'
+                                    ? `${activeSaleTabItems.length} order-base part${activeSaleTabItems.length === 1 ? '' : 's'}`
+                                    : (saleSubTab === 'power' || saleSubTab === 'spare_parts')
+                                    ? `${activeSaleTabItems.length} registered serial${activeSaleTabItems.length === 1 ? '' : 's'}`
+                                    : `${activeSaleTabCategories.length} sub-categories`}
                             </span>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -3130,18 +3360,18 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     boxShadow: selectedSaleCategory === 'all' ? '0 2px 6px rgba(59,130,246,0.15)' : 'none',
                                     transition: 'all 0.15s ease',
                                 }}>
-                                {saleSubTab === 'catalog'
-                                    ? `All For Sale (${saleItems.length})`
-                                    : saleSubTab === 'low_stock'
+                                {saleSubTab === 'low_stock'
                                     ? `All Low Stock (${lowStockSale.length})`
-                                    : `All Sold Records (${soldItems.length})`}
+                                    : saleSubTab === 'sold_records'
+                                    ? `All Sold Records (${soldItems.length})`
+                                    : `All (${activeSaleTabItems.length})`}
                             </button>
-                            {saleCategories.map(cat => {
-                                const count = saleSubTab === 'catalog'
-                                    ? saleItems.filter(i => i.sub_category === cat.name || i.folder_id === cat.id).length
-                                    : saleSubTab === 'low_stock'
-                                    ? lowStockSale.filter(i => i.sub_category === cat.name || i.folder_id === cat.id).length
-                                    : soldItems.filter(r => (r.sub_category || '').toLowerCase() === cat.name.toLowerCase()).length;
+                            {activeSaleTabCategories.map(cat => {
+                                const count = saleSubTab === 'low_stock'
+                                    ? lowStockSale.filter(i => (i.sub_category || '').toLowerCase() === cat.name.toLowerCase() || i.folder_id === cat.id).length
+                                    : saleSubTab === 'sold_records'
+                                    ? soldItems.filter(r => (r.sub_category || '').toLowerCase() === cat.name.toLowerCase()).length
+                                    : activeSaleTabItems.filter(i => (i.sub_category || '').toLowerCase() === cat.name.toLowerCase() || i.folder_id === cat.id).length;
                                 const isSelected = selectedSaleCategory === cat.name;
                                 return (
                                     <button
@@ -3162,16 +3392,139 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                             })}
                         </div>
                     </div>
+                    )}
 
                     {saleSubTab === 'low_stock' ? (
                         renderLowStockPanel('sale')
-                    ) : saleSubTab === 'catalog' ? (
+                    ) : saleSubTab === 'damaged_lost' ? (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                        Damaged / Lost
+                                    </p>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        Damaged or lost for-sale items are hidden from the customer Buy Item tab
+                                    </p>
+                                </div>
+                                <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search damaged or lost items..." />
+                            </div>
+
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['ID', 'Item Name', 'Type', 'Qty / Serial', 'Status', 'Last Updated', 'Actions'].map(h => (
+                                                <th
+                                                    key={h}
+                                                    className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        textAlign: h === 'Actions' ? 'right' : 'left',
+                                                        fontSize: 11,
+                                                        fontWeight: 700,
+                                                        letterSpacing: '0.05em',
+                                                        textTransform: 'uppercase',
+                                                        color: '#64748B',
+                                                        whiteSpace: 'nowrap',
+                                                        borderBottom: '1px solid #E2E8F0',
+                                                    }}
+                                                >
+                                                    {h}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSale.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No damaged or lost for-sale items recorded.
+                                                </td>
+                                            </tr>
+                                        ) : filteredSale.map(item => {
+                                            const costPrice = parseFloat(item.capital || 0);
+                                            const sellingPrice = parseFloat(item.selling_price || 0);
+                                            const profitVal = Math.max(0, sellingPrice - costPrice);
+                                            return (
+                                                <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9' }}>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#94A3B8' }}>#{item.item_id}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>{item.item_name}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>
+                                                        {item.item_type === 'Tool' ? (item.tool_subtype === 'power' ? 'Power Tool' : 'Hand Tool') : item.item_type}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, color: '#1E293B' }}>
+                                                        {item.serial_number ? (
+                                                            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, background: '#F1F5F9', padding: '2px 7px', borderRadius: 5, color: '#334155' }}>
+                                                                {item.serial_number}
+                                                            </span>
+                                                        ) : (
+                                                            `${item.quantity_on_hand} ${item.unit}`
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-block',
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            padding: '3px 10px',
+                                                            borderRadius: 9999,
+                                                            background: item.status === 'Lost' ? '#F1F5F9' : '#FEE2E2',
+                                                            color: item.status === 'Lost' ? '#475569' : '#DC2626',
+                                                        }}>
+                                                            {item.status || 'Damaged / Lost'}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8' }}>{item.last_updated || '—'}</td>
+                                                    <td className="sticky-action-col" style={{ padding: '10px 12px', textAlign: 'right', background: '#FFFFFF' }}>
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{ padding: '4px 12px', fontSize: 11 }}
+                                                            onClick={() => {
+                                                                trackRecentItem(item.item_id);
+                                                                setEditSaleTarget(item);
+                                                                setEditSaleForm({
+                                                                    item_name: item.item_name,
+                                                                    item_type: item.item_type || 'Material',
+                                                                    tool_subtype: item.tool_subtype || 'hand',
+                                                                    unit: item.unit,
+                                                                    initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
+                                                                    quantity_on_hand: String(item.quantity_on_hand),
+                                                                    reorder_level: String(item.reorder_level),
+                                                                    capital: String(costPrice),
+                                                                    selling_price: String(sellingPrice),
+                                                                    profit: String(profitVal),
+                                                                    supplier_name: item.supplier_name || '',
+                                                                    sub_category: item.sub_category || 'General For-Sale Items',
+                                                                    folder_id: item.folder_id,
+                                                                    managed_by: currentUserName,
+                                                                    status: item.status || 'Damaged',
+                                                                    serial_number: item.serial_number || '',
+                                                                    compatible_brands: Array.isArray(item.compatible_brands)
+                                                                        ? item.compatible_brands.join(', ')
+                                                                        : (item.compatible_brands || ''),
+                                                                    expected_arrival: item.expected_arrival || '',
+                                                                });
+                                                            }}
+                                                        >
+                                                            Manage
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : (saleSubTab === 'spare_parts' && sparePartView === 'order_base') ? (
+                        /* ─── ORDER BASE SPARE PARTS TABLE (SPARE PART TYPES VIEW, NO SERIAL NO. COLUMN) ─── */
                         <div className="card" style={{ padding: 20 }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                                 <div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
-                                            {selectedSaleCategory === 'all' ? 'All For Sale Items' : selectedSaleCategory}
+                                            {selectedSaleCategory === 'all' ? 'Order Base Spare Parts' : selectedSaleCategory}
                                         </p>
                                         {selectedSaleCategory !== 'all' && (
                                             <button
@@ -3182,18 +3535,310 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                         )}
                                     </div>
                                     <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                                        {selectedSaleCategory === 'all'
-                                            ? 'Materials & tools available for direct purchase by clients — sales automatically sync to Sales & Records'
-                                            : (activeSaleCategoryObj?.description || `Items assigned under "${selectedSaleCategory}"`)}
+                                        {filteredSale.length} order-base spare part{filteredSale.length === 1 ? '' : 's'} · Track expected supplier arrival dates
                                     </p>
                                 </div>
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search sale items or sub-category..." />
+                                    <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search part, type, or brand..." />
                                     <button
                                         className="btn-primary"
                                         style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
                                         onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
-                                        + Add Item {selectedSaleCategory !== 'all' ? `to ${selectedSaleCategory}` : ''}
+                                        + Add Order Base Part
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['Part Name', 'Type', 'Compatible Brands', 'Cost Price', 'Selling Price', 'Arrival Tracker', 'Status', 'Actions'].map(h => (
+                                                <th
+                                                    key={h}
+                                                    className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        textAlign: h === 'Actions' ? 'right' : 'left',
+                                                        fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0',
+                                                        ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                    }}
+                                                >
+                                                    {h}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSale.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={8} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No order-base spare parts found {selectedSaleCategory !== 'all' ? `in "${selectedSaleCategory}"` : ''}.
+                                                    <div style={{ marginTop: 10 }}>
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{ fontSize: 12, padding: '5px 12px' }}
+                                                            onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                                            + Add Order Base Part
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : filteredSale.map(item => (
+                                            <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9' }}>
+                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{item.item_name}</td>
+                                                <td style={{ padding: '10px 12px' }}>
+                                                    <span style={{ display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 6, background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE' }}>
+                                                        {item.sub_category || 'Spare Parts'}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>
+                                                    {Array.isArray(item.compatible_brands) && item.compatible_brands.length > 0 ? item.compatible_brands.join(', ') : (item.compatible_brands || 'Universal')}
+                                                </td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155' }}>₱{Number(item.capital || 0).toLocaleString()}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#16A34A' }}>₱{Number(item.selling_price || 0).toLocaleString()}</td>
+                                                <td style={{ padding: '10px 12px', minWidth: 165 }} onClick={e => e.stopPropagation()}>
+                                                    {editingPartArrival === item.item_id ? (
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                            <input type="date" className="input-field" style={{ padding: '4px 8px', fontSize: 12, width: 135 }}
+                                                                value={partArrivalInput} onChange={e => setPartArrivalInput(e.target.value)} />
+                                                            <button className="btn-primary" style={{ padding: '4px 8px', fontSize: 11 }} onClick={() => handleSetPartArrival(item.item_id)}>Save</button>
+                                                            <button className="btn-secondary" style={{ padding: '4px 6px', fontSize: 11 }} onClick={() => { setEditingPartArrival(null); setPartArrivalInput(''); }}>✕</button>
+                                                        </div>
+                                                    ) : item.expected_arrival ? (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                            <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>{item.expected_arrival}</span>
+                                                            <button onClick={() => { setEditingPartArrival(item.item_id); setPartArrivalInput(item.expected_arrival || ''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#2563EB' }}>Edit</button>
+                                                        </div>
+                                                    ) : (
+                                                        <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: 11 }}
+                                                            onClick={() => { setEditingPartArrival(item.item_id); setPartArrivalInput(''); }}>
+                                                            Set Date
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                <td style={{ padding: '10px 12px' }}><StatusBadge status="Order Base" /></td>
+                                                <td className="sticky-action-col" style={{ padding: '10px 12px', textAlign: 'right', background: '#FFFFFF' }}>
+                                                    <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }} onClick={() => openEditSaleModalForItem(item)}>
+                                                        Manage
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : (saleSubTab === 'spare_parts' && sparePartView === 'warranty_reserved') ? (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Warranty Reserved Spare Parts</p>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>Automatically reserved for active AC unit warranties</p>
+                                </div>
+                                <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search reserved parts..." />
+                            </div>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {['Serial No.', 'Part Name', 'Type', 'Reserved For Unit', 'Warranty Expiry', 'Status', 'Actions'].map(h => (
+                                                <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Actions' ? 'right' : 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: '#64748B', borderBottom: '1px solid #E2E8F0' }}>{h}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSale.length === 0 ? (
+                                            <tr><td colSpan={7} style={{ padding: '32px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>No warranty-reserved spare parts.</td></tr>
+                                        ) : filteredSale.map(item => (
+                                            <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9' }}>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#1E40AF' }}>{item.serial_number || `#${item.item_id}`}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{item.item_name}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#475569' }}>{item.sub_category || 'Spare Parts'}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155' }}>{item.reserved_for_unit_label || item.reserved_for_serial || '—'}</td>
+                                                <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.warranty_expiry_date || '—'}</td>
+                                                <td style={{ padding: '10px 12px' }}><StatusBadge status="Warranty Reserved" /></td>
+                                                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                                    <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }} onClick={() => openEditSaleModalForItem(item)}>Manage</button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : (saleSubTab === 'power' || (saleSubTab === 'spare_parts' && sparePartView === 'on_hand')) ? (
+                        /* ─── SERIAL-NUMBER TRACKED TABLE (FOR-SALE POWER TOOLS & ON-HAND SPARE PARTS) ─── */
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                            {selectedSaleCategory === 'all'
+                                                ? (saleSubTab === 'power' ? 'For Sale Power Tools' : 'On-Hand Spare Parts')
+                                                : selectedSaleCategory}
+                                        </p>
+                                        {selectedSaleCategory !== 'all' && (
+                                            <button
+                                                onClick={() => setSelectedSaleCategory('all')}
+                                                style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                                                View All
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        {filteredSale.length} registered on-hand serial{filteredSale.length === 1 ? '' : 's'} · Organized by type (not quantity-stacked)
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder={saleSubTab === 'power' ? 'Search serial or power tool...' : 'Search serial, part, or brand...'} />
+                                    <button
+                                        className="btn-primary"
+                                        style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                        onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                        + Add {saleSubTab === 'power' ? 'Power Tool' : 'Spare Part'}
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
+                                    <thead>
+                                        <tr style={{ background: '#F8FAFC' }}>
+                                            {(saleSubTab === 'spare_parts'
+                                                ? ['Serial No.', 'Part Name', 'Type', 'Compatible Brands', 'Unit', 'Cost Price', 'Selling Price', 'Status', 'Supplier', 'Last Updated', 'Actions']
+                                                : ['Serial No.', 'Tool Name', 'Type', 'Unit', 'Cost Price', 'Selling Price', 'Profit', 'Status', 'Supplier', 'Last Updated', 'Actions']
+                                            ).map(h => (
+                                                <th
+                                                    key={h}
+                                                    className={h === 'Actions' ? 'sticky-action-col' : ''}
+                                                    style={{
+                                                        padding: '10px 12px',
+                                                        textAlign: h === 'Actions' ? 'right' : 'left',
+                                                        fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#64748B', whiteSpace: 'nowrap', borderBottom: '1px solid #E2E8F0',
+                                                        ...(h === 'Actions' ? { position: 'sticky', right: 0, zIndex: 10, background: '#F8FAFC' } : {}),
+                                                    }}
+                                                >
+                                                    {h}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredSale.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={11} style={{ padding: '36px 20px', textAlign: 'center', fontSize: 13, color: '#94A3B8' }}>
+                                                    No registered on-hand {saleSubTab === 'power' ? 'power tools' : 'spare parts'} found {selectedSaleCategory !== 'all' ? `in "${selectedSaleCategory}"` : ''}.
+                                                    <div style={{ marginTop: 10 }}>
+                                                        <button
+                                                            className="btn-primary"
+                                                            style={{ fontSize: 12, padding: '5px 12px' }}
+                                                            onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                                            + Register {saleSubTab === 'power' ? 'Power Tool' : 'Spare Part'}
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : filteredSale.map(item => {
+                                            const costPrice = Number(item.capital || 0);
+                                            const sellingPrice = (item.selling_price !== null && item.selling_price !== undefined && item.selling_price !== '')
+                                                ? Number(item.selling_price)
+                                                : (costPrice + (Number(item.profit) || 0));
+                                            const profitVal = (item.profit !== null && item.profit !== undefined && item.profit !== '')
+                                                ? Number(item.profit)
+                                                : Math.max(0, sellingPrice - costPrice);
+                                            const brandsText = Array.isArray(item.compatible_brands) && item.compatible_brands.length > 0
+                                                ? item.compatible_brands.join(', ')
+                                                : (item.compatible_brands || 'Universal');
+
+                                            return (
+                                                <tr key={item.item_id} style={{ borderTop: '1px solid #F1F5F9', cursor: 'pointer' }}
+                                                    onClick={() => trackRecentItem(item.item_id)}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#1E40AF', whiteSpace: 'nowrap' }}>
+                                                        {item.serial_number || `#${item.item_id}`}
+                                                    </td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#0F172A', whiteSpace: 'nowrap' }}>{item.item_name}</td>
+                                                    <td style={{ padding: '10px 12px' }}>
+                                                        <span style={{
+                                                            display: 'inline-block',
+                                                            fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 6,
+                                                            background: '#EFF6FF', color: '#1E40AF', border: '1px solid #DBEAFE',
+                                                        }}>
+                                                            {item.sub_category || (saleSubTab === 'power' ? 'Power Tools' : 'Spare Parts')}
+                                                        </span>
+                                                    </td>
+                                                    {saleSubTab === 'spare_parts' && (
+                                                        <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{brandsText}</td>
+                                                    )}
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B' }}>{item.unit || 'unit'}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#334155' }}>₱{costPrice.toLocaleString()}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: '#0F172A' }}>₱{sellingPrice.toLocaleString()}</td>
+                                                    {saleSubTab === 'power' && (
+                                                        <td style={{ padding: '10px 12px', fontSize: 12, fontWeight: 600, color: '#16A34A' }}>₱{profitVal.toLocaleString()}</td>
+                                                    )}
+                                                    <td style={{ padding: '10px 12px' }}><StatusBadge status={item.status || 'Available'} /></td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>{item.supplier_name || '—'}</td>
+                                                    <td style={{ padding: '10px 12px', fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap' }}>{item.last_updated}</td>
+                                                    <td
+                                                        className="sticky-action-col"
+                                                        style={{ padding: '10px 12px', position: 'sticky', right: 0, zIndex: 5, background: '#FFFFFF' }}
+                                                        onClick={e => e.stopPropagation()}
+                                                    >
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                                                            {!isAdminAssistant && (
+                                                                <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                    onClick={() => {
+                                                                        trackRecentItem(item.item_id);
+                                                                        setSellTarget(item);
+                                                                        setSellQty('1');
+                                                                        setSellMethod('Cash');
+                                                                        setSelectedCustomer(null);
+                                                                        setCustomerSearch('');
+                                                                        setCustomerDropdownOpen(false);
+                                                                    }}>
+                                                                    Sell
+                                                                </button>
+                                                            )}
+                                                            <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
+                                                                onClick={() => openEditSaleModalForItem(item)}>Manage</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : (saleSubTab === 'materials' || saleSubTab === 'hand') ? (
+                        <div className="card" style={{ padding: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <p style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                                            {selectedSaleCategory === 'all'
+                                                ? (saleSubTab === 'materials' ? 'For Sale Materials' : 'For Sale Hand Tools & Hardware')
+                                                : selectedSaleCategory}
+                                        </p>
+                                        {selectedSaleCategory !== 'all' && (
+                                            <button
+                                                onClick={() => setSelectedSaleCategory('all')}
+                                                style={{ background: 'none', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                                                View All
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
+                                        Available items synced with Customer Buy Item catalog
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <SearchBar value={saleSearch} onChange={setSaleSearch} placeholder="Search items..." />
+                                    <button
+                                        className="btn-primary"
+                                        style={{ fontSize: 12, padding: '7px 16px', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                        onClick={() => handleOpenAddSaleItem(selectedSaleCategory !== 'all' ? selectedSaleCategory : null)}>
+                                        + Add {saleSubTab === 'hand' ? 'Hand Tool' : 'Material'}
                                     </button>
                                 </div>
                             </div>
@@ -3301,41 +3946,25 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                         onClick={e => e.stopPropagation()}
                                                     >
                                                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                            <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                onClick={() => {
-                                                                    trackRecentItem(item.item_id);
-                                                                    setSellTarget(item);
-                                                                    setSellQty('1');
-                                                                    setSellMethod('Cash');
-                                                                    setSelectedCustomer(null);
-                                                                    setCustomerSearch('');
-                                                                    setCustomerDropdownOpen(false);
-                                                                }}
-                                                                disabled={available === 0}>
-                                                                Sell
-                                                            </button>
+                                                            {!isAdminAssistant && (
+                                                                <button className="btn-primary" style={{ padding: '4px 9px', fontSize: 11 }}
+                                                                    onClick={() => {
+                                                                        trackRecentItem(item.item_id);
+                                                                        setSellTarget(item);
+                                                                        setSellQty('1');
+                                                                        setSellMethod('Cash');
+                                                                        setSelectedCustomer(null);
+                                                                        setCustomerSearch('');
+                                                                        setCustomerDropdownOpen(false);
+                                                                    }}
+                                                                    disabled={available === 0}>
+                                                                    Sell
+                                                                </button>
+                                                            )}
                                                             <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
                                                                 onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                             <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
-                                                                onClick={() => {
-                                                                    trackRecentItem(item.item_id);
-                                                                    setEditSaleTarget(item);
-                                                                    setEditSaleForm({
-                                                                        item_name: item.item_name,
-                                                                        item_type: item.item_type || 'Material',
-                                                                        unit: item.unit,
-                                                                        initial_stock: String(item.initial_stock ?? item.quantity_on_hand),
-                                                                        quantity_on_hand: String(item.quantity_on_hand),
-                                                                        reorder_level: String(item.reorder_level),
-                                                                        capital: String(costPrice),
-                                                                        selling_price: String(sellingPrice),
-                                                                        profit: String(profitVal),
-                                                                        supplier_name: item.supplier_name || '',
-                                                                        sub_category: item.sub_category || 'General For-Sale Items',
-                                                                        folder_id: item.folder_id,
-                                                                        managed_by: currentUserName,
-                                                                    });
-                                                                }}>Manage</button>
+                                                                onClick={() => openEditSaleModalForItem(item)}>Manage</button>
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -3774,7 +4403,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                             Create New Sub-category
                         </h2>
                         <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                            Under {categoryFieldType === 'materials' ? 'Materials' : categoryFieldType === 'power_tools' ? 'Power Tools' : categoryFieldType === 'hand_tools' ? 'Hand Tools' : 'For Sale Items'}
+                            Under {categoryFieldType === 'materials' ? 'Materials' : categoryFieldType === 'power_tools' ? 'Power Tools' : categoryFieldType === 'hand_tools' ? 'Hand Tools' : categoryFieldType === 'spare_parts' ? 'Spare Parts' : 'For Sale Materials'}
                         </p>
                     </div>
 
@@ -3820,7 +4449,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 Manage Sub-categories
                             </h2>
                             <p style={{ fontSize: 12, color: '#64748B', margin: '2px 0 0' }}>
-                                {categoryFieldType === 'materials' ? 'Materials' : categoryFieldType === 'power_tools' ? 'Power Tools' : categoryFieldType === 'hand_tools' ? 'Hand Tools' : 'For Sale Items'}
+                                {categoryFieldType === 'materials' ? 'Materials' : categoryFieldType === 'power_tools' ? 'Power Tools' : categoryFieldType === 'hand_tools' ? 'Hand Tools' : categoryFieldType === 'spare_parts' ? 'Spare Parts' : 'For Sale Materials'}
                             </p>
                         </div>
                         <button
@@ -3859,7 +4488,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     ) : null}
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
-                        {(categoryFieldType === 'materials' ? materialCategories : categoryFieldType === 'power_tools' ? powerCategories : categoryFieldType === 'hand_tools' ? handCategories : saleCategories).map(cat => {
+                        {getCategoriesForFieldType(categoryFieldType).map(cat => {
                             const count = items.filter(i => i.sub_category === cat.name || i.folder_id === cat.id).length;
                             return (
                                 <div key={cat.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0' }}>
@@ -4348,54 +4977,144 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             ))}
             <Modal open={confirmAddHT} title="Add Hand Tool?" message={`Add "${htAddForm.item_name}" (${htAddForm.quantity} ${htAddForm.unit}) under "${htAddForm.sub_category || 'Hand Tools'}"?`} confirmLabel="Yes, Add" onConfirm={handleAddHandTool} onCancel={() => setConfirmAddHT(false)} />
 
-            {/* ── Add For-Sale Item Modal (with Sub-category selection) ── */}
-            {addSaleModal && !confirmAddSale && renderModalWrapper(true, () => setAddSaleModal(false), (
+            {/* ── Add For-Sale Item Modal (with Type & Serial Support) ── */}
+            {addSaleModal && !confirmAddSale && renderModalWrapper(true, () => setAddSaleModal(false), (() => {
+                const isSerialItem = saleForm.item_type === 'Spare Part' || (saleForm.item_type === 'Tool' && (saleForm.tool_subtype || 'hand') === 'power');
+                const modalSubCats = saleForm.item_type === 'Spare Part'
+                    ? Array.from(new Set([...SPARE_PART_CATEGORIES, ...sparePartFolders.map(f => f.name)]))
+                    : saleForm.item_type === 'Tool' && saleForm.tool_subtype === 'power'
+                    ? powerCategories.map(f => f.name)
+                    : saleForm.item_type === 'Tool'
+                    ? handCategories.map(f => f.name)
+                    : saleCategories.map(f => f.name);
+                const subCatOptions = saleForm.sub_category && !modalSubCats.includes(saleForm.sub_category)
+                    ? [saleForm.sub_category, ...modalSubCats]
+                    : modalSubCats;
+
+                return (
                 <>
-                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 20px' }}>Add Item to For Sale Inventory</h2>
+                    <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: '0 0 20px' }}>
+                        {saleForm.item_type === 'Spare Part'
+                            ? (saleForm.status === 'Order Base' ? 'Add Order Base Spare Part' : 'Register On-Hand Spare Part')
+                            : saleForm.item_type === 'Tool' && saleForm.tool_subtype === 'power'
+                            ? 'Register Power Tool (1 Unit per Serial)'
+                            : 'Add Item to For Sale Inventory'}
+                    </h2>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Target Sub-category *</p>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Type / Sub-category *</p>
                             <select
                                 className="input-field"
                                 value={saleForm.sub_category}
                                 onChange={e => {
                                     if (e.target.value === '__new__') {
-                                        handleOpenCreateCategory('sale_items');
+                                        const targetFieldType = saleForm.item_type === 'Spare Part'
+                                            ? 'spare_parts'
+                                            : saleForm.item_type === 'Tool'
+                                            ? ((saleForm.tool_subtype || 'hand') === 'power' ? 'power_tools' : 'hand_tools')
+                                            : 'sale_items';
+                                        handleOpenCreateCategory(targetFieldType);
                                     } else {
-                                        const f = saleCategories.find(x => x.name === e.target.value);
+                                        const f = [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(x => x.name === e.target.value);
                                         setSaleForm(p => ({ ...p, sub_category: e.target.value, folder_id: f?.id || null }));
                                     }
                                 }}>
-                                {saleCategories.map(f => (
-                                    <option key={f.id} value={f.name}>{f.name}</option>
+                                {subCatOptions.map(name => (
+                                    <option key={name} value={name}>{name}</option>
                                 ))}
                                 <option value="__new__">+ Create New Sub-category...</option>
                             </select>
                         </div>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Item Name</p>
-                            <Combobox value={saleForm.item_name} onChange={v => setSaleForm(p => ({ ...p, item_name: v }))} options={SALE_ITEM_NAMES} placeholder="e.g. AC Coil Cleaner" />
+                            <p className="section-label" style={{ marginBottom: 5 }}>Item Name *</p>
+                            <Combobox
+                                value={saleForm.item_name}
+                                onChange={v => setSaleForm(p => ({ ...p, item_name: v }))}
+                                options={saleForm.item_type === 'Spare Part' ? SPARE_PART_NAMES : saleForm.tool_subtype === 'power' ? POWER_TOOL_NAMES : SALE_ITEM_NAMES}
+                                placeholder={saleForm.item_type === 'Spare Part' ? 'e.g. Dual Run Capacitor 35+5 uF' : 'e.g. AC Coil Cleaner'}
+                            />
                         </div>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Item Type</p>
-                            <select className="input-field" value={saleForm.item_type} onChange={e => setSaleForm(p => ({ ...p, item_type: e.target.value }))}>
+                            <select className="input-field" value={saleForm.item_type} onChange={e => setSaleForm(p => ({
+                                ...p,
+                                item_type: e.target.value,
+                                status: e.target.value === 'Tool' && p.status === 'Order Base' ? 'Available' : p.status,
+                            }))}>
                                 <option value="Material">Material</option>
                                 <option value="Tool">Tool</option>
                                 <option value="Spare Part">Spare Part</option>
                             </select>
                         </div>
+                        {saleForm.item_type === 'Tool' && (
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Tool Category</p>
+                                <select className="input-field" value={saleForm.tool_subtype || 'hand'} onChange={e => setSaleForm(p => ({ ...p, tool_subtype: e.target.value, status: 'Available' }))}>
+                                    <option value="power">Power Tool</option>
+                                    <option value="hand">Hand Tool &amp; Hardware</option>
+                                </select>
+                            </div>
+                        )}
+                        {saleForm.item_type === 'Spare Part' && (
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Status</p>
+                                <select className="input-field" value={saleForm.status || 'Available'} onChange={e => setSaleForm(p => ({ ...p, status: e.target.value }))}>
+                                    <option value="Available">On-Hand (Available)</option>
+                                    <option value="Order Base">Order Base</option>
+                                </select>
+                            </div>
+                        )}
+                        {isSerialItem && (
+                            <div style={{ gridColumn: saleForm.item_type === 'Spare Part' ? '1 / -1' : 'auto' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>
+                                    Serial Number {saleForm.status === 'Order Base' ? '(Optional)' : '*'}
+                                </p>
+                                <input
+                                    className="input-field"
+                                    placeholder={saleForm.item_type === 'Spare Part' ? 'e.g. SP-CAR-CAP-004' : 'e.g. FS-PW-1400-04'}
+                                    value={saleForm.serial_number || ''}
+                                    onChange={e => setSaleForm(p => ({ ...p, serial_number: e.target.value }))}
+                                />
+                            </div>
+                        )}
+                        {saleForm.item_type === 'Spare Part' && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Compatible Brands</p>
+                                <input
+                                    className="input-field"
+                                    placeholder="e.g. Carrier, Daikin, Universal"
+                                    value={saleForm.compatible_brands || ''}
+                                    onChange={e => setSaleForm(p => ({ ...p, compatible_brands: e.target.value }))}
+                                />
+                            </div>
+                        )}
+                        {saleForm.item_type === 'Spare Part' && saleForm.status === 'Order Base' && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Expected Arrival Date</p>
+                                <input
+                                    type="date"
+                                    className="input-field"
+                                    value={saleForm.expected_arrival || ''}
+                                    onChange={e => setSaleForm(p => ({ ...p, expected_arrival: e.target.value }))}
+                                />
+                            </div>
+                        )}
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Unit</p>
-                            <Combobox value={saleForm.unit} onChange={v => setSaleForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="e.g. can, roll, pcs" />
+                            <Combobox value={saleForm.unit} onChange={v => setSaleForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="e.g. unit, pc, set" />
                         </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Qty on Hand</p>
-                            <input type="number" className="input-field" placeholder="e.g. 10" value={saleForm.quantity_on_hand} onChange={e => setSaleForm(p => ({ ...p, quantity_on_hand: e.target.value }))} />
-                        </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level</p>
-                            <input type="number" className="input-field" placeholder="e.g. 3" value={saleForm.reorder_level} onChange={e => setSaleForm(p => ({ ...p, reorder_level: e.target.value }))} />
-                        </div>
+                        {!isSerialItem && (
+                            <>
+                                <div>
+                                    <p className="section-label" style={{ marginBottom: 5 }}>Qty on Hand</p>
+                                    <input type="number" className="input-field" placeholder="e.g. 10" value={saleForm.quantity_on_hand} onChange={e => setSaleForm(p => ({ ...p, quantity_on_hand: e.target.value }))} />
+                                </div>
+                                <div>
+                                    <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level</p>
+                                    <input type="number" className="input-field" placeholder="e.g. 3" value={saleForm.reorder_level} onChange={e => setSaleForm(p => ({ ...p, reorder_level: e.target.value }))} />
+                                </div>
+                            </>
+                        )}
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Cost Price (₱)</p>
                             <input
@@ -4461,7 +5180,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         <button className="btn-primary" onClick={() => setConfirmAddSale(true)}>Add Item →</button>
                     </div>
                 </>
-            ))}
+                );
+            })())}
             <Modal open={confirmAddSale} title="Add to For Sale Inventory?" message={`Add "${saleForm.item_name}" under "${saleForm.sub_category || 'For Sale'}" (Selling Price: ₱${(parseFloat(saleForm.selling_price || '0')).toLocaleString()} each)?`} confirmLabel="Yes, Add" onConfirm={handleAddSaleItem} onCancel={() => setConfirmAddSale(false)} />
 
             {/* ── Manage Worker Material Modal ── */}
@@ -4877,13 +5597,35 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
             ))}
 
             {/* ── Manage For Sale Item Modal ── */}
-            {editSaleTarget && renderModalWrapper(true, () => setEditSaleTarget(null), (
+            {editSaleTarget && renderModalWrapper(true, () => setEditSaleTarget(null), (() => {
+                const isSerialEdit = editSaleForm.item_type === 'Spare Part' || (editSaleForm.item_type === 'Tool' && (editSaleForm.tool_subtype || 'hand') === 'power');
+                const editSubCats = editSaleForm.item_type === 'Spare Part'
+                    ? Array.from(new Set([...SPARE_PART_CATEGORIES, ...sparePartFolders.map(f => f.name)]))
+                    : editSaleForm.item_type === 'Tool' && editSaleForm.tool_subtype === 'power'
+                    ? powerCategories.map(f => f.name)
+                    : editSaleForm.item_type === 'Tool'
+                    ? handCategories.map(f => f.name)
+                    : saleCategories.map(f => f.name);
+                const editSubCatOptions = editSaleForm.sub_category && !editSubCats.includes(editSaleForm.sub_category)
+                    ? [editSaleForm.sub_category, ...editSubCats]
+                    : editSubCats;
+
+                return (
                 <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>Manage For Sale Item</h2>
+                        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1E2F5F', margin: 0 }}>
+                            {editSaleForm.item_type === 'Spare Part' ? 'Manage Spare Part' : editSaleForm.item_type === 'Tool' && editSaleForm.tool_subtype === 'power' ? 'Manage Power Tool' : 'Manage For Sale Item'}
+                        </h2>
                         <button
                             type="button"
-                            onClick={() => handleOpenMoveItem(editSaleTarget, 'for_sale')}
+                            onClick={() => handleOpenMoveItem(
+                                editSaleTarget,
+                                editSaleForm.item_type === 'Spare Part'
+                                    ? 'spare_parts'
+                                    : editSaleForm.item_type === 'Tool'
+                                    ? ((editSaleForm.tool_subtype || 'hand') === 'power' ? 'power_tools' : 'hand_tools')
+                                    : 'for_sale'
+                            )}
                             style={{
                                 background: '#EFF6FF',
                                 color: '#2563EB',
@@ -4903,47 +5645,105 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                         <div style={{ gridColumn: '1 / -1' }}>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Sub-category</p>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Type / Sub-category</p>
                             <select
                                 className="input-field"
                                 value={editSaleForm.sub_category}
                                 onChange={e => {
-                                    const f = saleCategories.find(x => x.name === e.target.value);
+                                    const f = [...saleCategories, ...powerCategories, ...handCategories, ...sparePartFolders].find(x => x.name === e.target.value);
                                     setEditSaleForm(p => ({ ...p, sub_category: e.target.value, folder_id: f?.id || null }));
                                 }}>
-                                {saleCategories.map(f => (
-                                    <option key={f.id} value={f.name}>{f.name}</option>
+                                {editSubCatOptions.map(name => (
+                                    <option key={name} value={name}>{name}</option>
                                 ))}
                             </select>
                         </div>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <p className="section-label" style={{ marginBottom: 5 }}>Item Name</p>
-                            <Combobox value={editSaleForm.item_name} onChange={v => setEditSaleForm(p => ({ ...p, item_name: v }))} options={SALE_ITEM_NAMES} placeholder="Item name" />
+                            <Combobox
+                                value={editSaleForm.item_name}
+                                onChange={v => setEditSaleForm(p => ({ ...p, item_name: v }))}
+                                options={editSaleForm.item_type === 'Spare Part' ? SPARE_PART_NAMES : editSaleForm.tool_subtype === 'power' ? POWER_TOOL_NAMES : SALE_ITEM_NAMES}
+                                placeholder="Item name"
+                            />
                         </div>
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Item Type</p>
-                            <select className="input-field" value={editSaleForm.item_type} onChange={e => setEditSaleForm(p => ({ ...p, item_type: e.target.value }))}>
+                            <select className="input-field" value={editSaleForm.item_type} onChange={e => setEditSaleForm(p => ({
+                                ...p,
+                                item_type: e.target.value,
+                                status: e.target.value === 'Tool' && p.status === 'Order Base' ? 'Available' : p.status,
+                            }))}>
                                 <option value="Material">Material</option>
                                 <option value="Tool">Tool</option>
                                 <option value="Spare Part">Spare Part</option>
                             </select>
                         </div>
+                        {editSaleForm.item_type === 'Tool' && (
+                            <div>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Tool Category</p>
+                                <select className="input-field" value={editSaleForm.tool_subtype || 'hand'} onChange={e => setEditSaleForm(p => ({
+                                    ...p,
+                                    tool_subtype: e.target.value,
+                                    status: e.target.value === 'power' && p.status === 'Order Base' ? 'Available' : p.status,
+                                }))}>
+                                    <option value="power">Power Tool</option>
+                                    <option value="hand">Hand Tool &amp; Hardware</option>
+                                </select>
+                            </div>
+                        )}
+                        <div>
+                            <p className="section-label" style={{ marginBottom: 5 }}>Status</p>
+                            <select className="input-field" value={editSaleForm.status || 'Available'} onChange={e => setEditSaleForm(p => ({ ...p, status: e.target.value }))}>
+                                <option value="Available">Available</option>
+                                {editSaleForm.item_type === 'Spare Part' && <option value="Order Base">Order Base</option>}
+                                <option value="Damaged">Damaged</option>
+                                <option value="Lost">Lost</option>
+                                <option value="Lost/Damaged">Lost / Damaged</option>
+                                {editSaleForm.item_type === 'Spare Part' && <option value="Defect">Defect</option>}
+                                <option value="Out of Stock">Out of Stock</option>
+                            </select>
+                        </div>
+                        {isSerialEdit && (
+                            <div style={{ gridColumn: editSaleForm.item_type === 'Spare Part' ? '1 / -1' : 'auto' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>
+                                    Serial Number {editSaleForm.status === 'Order Base' ? '(Optional)' : '*'}
+                                </p>
+                                <input className="input-field" value={editSaleForm.serial_number || ''} onChange={e => setEditSaleForm(p => ({ ...p, serial_number: e.target.value }))} />
+                            </div>
+                        )}
+                        {editSaleForm.item_type === 'Spare Part' && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Compatible Brands</p>
+                                <input className="input-field" placeholder="e.g. Carrier, Daikin, Universal" value={editSaleForm.compatible_brands || ''} onChange={e => setEditSaleForm(p => ({ ...p, compatible_brands: e.target.value }))} />
+                            </div>
+                        )}
+                        {editSaleForm.item_type === 'Spare Part' && editSaleForm.status === 'Order Base' && (
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <p className="section-label" style={{ marginBottom: 5 }}>Expected Arrival Date</p>
+                                <input type="date" className="input-field" value={editSaleForm.expected_arrival || ''} onChange={e => setEditSaleForm(p => ({ ...p, expected_arrival: e.target.value }))} />
+                            </div>
+                        )}
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Unit</p>
                             <Combobox value={editSaleForm.unit} onChange={v => setEditSaleForm(p => ({ ...p, unit: v }))} options={UNIT_OPTIONS} placeholder="Unit" />
                         </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Initial Stock (Total)</p>
-                            <input type="number" className="input-field" value={editSaleForm.initial_stock} onChange={e => setEditSaleForm(p => ({ ...p, initial_stock: e.target.value }))} />
-                        </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Qty on Hand</p>
-                            <input type="number" className="input-field" value={editSaleForm.quantity_on_hand} onChange={e => setEditSaleForm(p => ({ ...p, quantity_on_hand: e.target.value }))} />
-                        </div>
-                        <div>
-                            <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level</p>
-                            <input type="number" className="input-field" value={editSaleForm.reorder_level} onChange={e => setEditSaleForm(p => ({ ...p, reorder_level: e.target.value }))} />
-                        </div>
+                        {!isSerialEdit && (
+                            <>
+                                <div>
+                                    <p className="section-label" style={{ marginBottom: 5 }}>Initial Stock (Total)</p>
+                                    <input type="number" className="input-field" value={editSaleForm.initial_stock} onChange={e => setEditSaleForm(p => ({ ...p, initial_stock: e.target.value }))} />
+                                </div>
+                                <div>
+                                    <p className="section-label" style={{ marginBottom: 5 }}>Qty on Hand</p>
+                                    <input type="number" className="input-field" value={editSaleForm.quantity_on_hand} onChange={e => setEditSaleForm(p => ({ ...p, quantity_on_hand: e.target.value }))} />
+                                </div>
+                                <div>
+                                    <p className="section-label" style={{ marginBottom: 5 }}>Reorder Level</p>
+                                    <input type="number" className="input-field" value={editSaleForm.reorder_level} onChange={e => setEditSaleForm(p => ({ ...p, reorder_level: e.target.value }))} />
+                                </div>
+                            </>
+                        )}
                         <div>
                             <p className="section-label" style={{ marginBottom: 5 }}>Cost Price (₱)</p>
                             <input
@@ -5072,7 +5872,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                         </div>
                     </div>
                 </>
-            ))}
+                );
+            })())}
 
             {/* ── Move Item to Another Existing Sub-Category Modal ── */}
             {moveItemModal && renderModalWrapper(true, () => !movingItem && setMoveItemModal(null), (() => {

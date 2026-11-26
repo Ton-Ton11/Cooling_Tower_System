@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import StatusBadge from "../../Components/StatusBadge";
-import { formatDateTime } from "../../utils/superAdmin";
+import { CompletedBookingDueAlertBanner } from "../../Components/MaintenanceReminderCountdown";
+import { CUSTOMER_ENDPOINTS, formatDateTime } from "../../utils/superAdmin";
 import { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
 import { isGeospatialAlertAcknowledged, persistGeospatialAlertAcknowledgment } from "../../utils/geospatialAlert";
 
@@ -32,10 +33,11 @@ const COMPANY_DETAILS = {
     facebookUrl: "https://www.facebook.com/share/19w3XmbCza/",
 };
 
-export default function CustomerOverview({ onNavigate, dashboardData, isLoading, onSelectServiceToBook }) {
+export default function CustomerOverview({ onNavigate, dashboardData, isLoading, onSelectServiceToBook, addToast, onDataChanged }) {
     const [activeTab, setActiveTab] = useState("services"); // "services" | "requests"
     const [copiedKey, setCopiedKey] = useState(null);
     const [outsideZamboangaAlertOpen, setOutsideZamboangaAlertOpen] = useState(false);
+    const triggeredForecastRef = useRef({});
 
     const user = dashboardData?.user ?? {};
     const isUnverifiedBusiness =
@@ -90,6 +92,53 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
     };
 
     const recentBookings = dashboardData?.recent_bookings ?? [];
+    const serviceForecasts = dashboardData?.service_forecasts ?? [];
+    const dueAlerts = useMemo(
+        () => serviceForecasts.filter((f) => Boolean(f?.is_alert_active)),
+        [serviceForecasts],
+    );
+
+    useEffect(() => {
+        if (!serviceForecasts.length) return undefined;
+
+        const checkDueForecasts = () => {
+            const nowMs = Date.now();
+            serviceForecasts.forEach((f) => {
+                if (!f?.forecast_id || f.urgency_level === "Scheduled" || !f.target_iso) {
+                    return;
+                }
+                const targetMs = Date.parse(f.target_iso);
+                if (!Number.isFinite(targetMs) || nowMs < targetMs) {
+                    return;
+                }
+                const cycleKey = `${f.forecast_id}:${f.target_iso}`;
+                if (triggeredForecastRef.current[cycleKey]) {
+                    return;
+                }
+                triggeredForecastRef.current[cycleKey] = true;
+
+                window.axios
+                    .post(CUSTOMER_ENDPOINTS.completeForecastCycle(f.forecast_id))
+                    .then(({ data }) => {
+                        window.dispatchEvent(new CustomEvent("topbar-widgets-refresh"));
+                        if (data?.rolled_over && typeof addToast === "function") {
+                            addToast("Maintenance due. New 3-month cycle started.", "warning");
+                        }
+                        if (typeof onDataChanged === "function") {
+                            onDataChanged();
+                        }
+                    })
+                    .catch(() => {
+                        delete triggeredForecastRef.current[cycleKey];
+                    });
+            });
+        };
+
+        checkDueForecasts();
+        const timer = setInterval(checkDueForecasts, 5000);
+        return () => clearInterval(timer);
+    }, [serviceForecasts, addToast, onDataChanged]);
+
     const services = useMemo(() => {
         return (dashboardData?.services ?? []).filter(s => s.is_active !== false && s.is_active !== 0);
     }, [dashboardData?.services]);
@@ -154,6 +203,15 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
 
     return (
         <div className="space-y-6 max-w-7xl mx-auto">
+            {dueAlerts.length > 0 && (
+                <CompletedBookingDueAlertBanner
+                    alerts={dueAlerts}
+                    onBookService={(serviceId) => handleAttemptBookService(serviceId)}
+                    onDismissed={() => onDataChanged?.()}
+                    addToast={addToast}
+                />
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* ──────────────────────────────────────────────────────────────
                     MAIN CONTENT COLUMN (8 COLS)
@@ -499,22 +557,26 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                 {dashboardData?.service_forecasts && dashboardData.service_forecasts.length > 0 ? (
                                     (() => {
                                         const f = dashboardData.service_forecasts[0];
-                                        const isDueWeek = f.urgency_level === "Due This Week";
+                                        const isAlert = Boolean(f.is_alert_active);
+                                        const isDueWeek = f.urgency_level === "Due This Week" || isAlert;
                                         const isScheduled = f.urgency_level === "Scheduled";
+                                        const cycleNum = Number(f.cycle_number || 1);
                                         return (
                                             <div className={`p-3.5 rounded-lg border text-xs space-y-1.5 ${
                                                 isDueWeek
-                                                    ? "bg-[#FFFBEB] border-[#FDE68A]"
+                                                    ? "bg-[#FFFBEB] border-amber-300"
                                                     : "bg-[#EAF2FF] border-[#C7DDFD]"
                                             }`}>
                                                 <div className="flex items-center justify-between gap-2">
-                                                    <span className="font-semibold text-[#172B4D] block">3-Month Maintenance Cycle</span>
+                                                    <span className="font-semibold text-[#172B4D] block">
+                                                        {cycleNum > 1 ? `3-Month Cycle #${cycleNum}` : "3-Month Maintenance Cycle"}
+                                                    </span>
                                                     <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                                                         isDueWeek
                                                             ? "bg-amber-200/70 text-[#B45309]"
                                                             : "bg-white text-[#2563EB] border border-[#C7DDFD]"
                                                     }`}>
-                                                        {f.urgency_level}
+                                                        {isAlert ? "Maintenance Due" : f.urgency_level}
                                                     </span>
                                                 </div>
                                                 <p className="text-[#172B4D]">
@@ -525,17 +587,13 @@ export default function CustomerOverview({ onNavigate, dashboardData, isLoading,
                                                 </p>
                                                 {!isScheduled && (
                                                     <button
-                                                        onClick={() => {
-                                                            if (onSelectServiceToBook && f.recommended_service_id) {
-                                                                onSelectServiceToBook(f.recommended_service_id);
-                                                            }
-                                                            onNavigate("book");
-                                                        }}
+                                                        type="button"
+                                                        onClick={() => handleAttemptBookService(f.recommended_service_id || null)}
                                                         className={`font-semibold hover:underline pt-0.5 block cursor-pointer ${
                                                             isDueWeek ? "text-[#B45309]" : "text-[#2563EB]"
                                                         }`}
                                                     >
-                                                        Reserve Maintenance &rarr;
+                                                        Book Service &rarr;
                                                     </button>
                                                 )}
                                             </div>

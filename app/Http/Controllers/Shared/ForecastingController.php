@@ -505,4 +505,43 @@ class ForecastingController extends Controller
             'data'    => $sync,
         ]);
     }
+
+    /**
+     * Handle a customer completed-booking countdown reaching end: notify & loop the 3-month cycle.
+     */
+    public function completeCustomerForecastCycle(Request $request, int $forecastId): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user || (int) $user->role_id !== 6) {
+            abort(403);
+        }
+
+        $result = $this->forecastingService->completeCustomerForecastCycle((int) $user->user_id, $forecastId);
+
+        return response()->json([
+            'message'     => $result['rolled_over']
+                ? 'Maintenance due! Your next 3-month countdown has started.'
+                : 'Maintenance reminder synchronized.',
+            'rolled_over' => $result['rolled_over'],
+            'reminder'    => $result['reminder'],
+        ]);
+    }
+
+    /**
+     * Dismiss the visible alert banner on a completed booking forecast after acknowledgement.
+     */
+    public function acknowledgeCustomerForecastAlert(Request $request, int $forecastId): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user || (int) $user->role_id !== 6) {
+            abort(403);
+        }
+
+        $forecast = $this->forecastingService->acknowledgeCustomerForecastAlert((int) $user->user_id, $forecastId);
+
+        return response()->json([
+            'acknowledged' => true,
+            'forecast_id'  => (int) $forecast->forecast_id,
+        ]);
+    }
 }

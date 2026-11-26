@@ -149,16 +149,16 @@ class ToolsManInventoryController extends ToolsManBaseController
         ]);
 
         $hasAddedStock = $request->has('added_stock');
-        $isPowerTool = $this->isPowerToolInventoryItem(
+        $isSerialTracked = $this->isSerialTrackedInventoryItem(
             $validated['item_type'] ?? $item->item_type,
             array_key_exists('tool_subtype', $validated) ? $validated['tool_subtype'] : $item->tool_subtype
         );
 
-        // Reject stacking stock via added_stock on individual Power Tools; otherwise add stock for materials/hand tools
+        // Reject stacking stock via added_stock on individual serial-tracked items
         if ($hasAddedStock) {
-            if ($isPowerTool) {
+            if ($isSerialTracked) {
                 throw ValidationException::withMessages([
-                    'added_stock' => ['Power tools are tracked individually by serial number and cannot be stacked by stock quantity.'],
+                    'added_stock' => ['Serial-tracked items (power tools and spare parts) cannot be stacked by stock quantity.'],
                 ]);
             }
             $added = (int) $request->input('added_stock');
