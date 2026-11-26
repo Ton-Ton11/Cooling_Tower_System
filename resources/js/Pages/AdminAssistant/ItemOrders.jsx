@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePage } from "@inertiajs/react";
 import StatusBadge from "../../Components/StatusBadge";
 import Modal from "../../Components/Modal";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 import {
     ADMIN_ASSISTANT_ENDPOINTS,
     extractErrorMessage,
@@ -870,6 +871,11 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
                                         </button>
                                     ))}
                                 </div>
+                                {pickupMethod === "GCash" && (
+                                    <div style={{ marginTop: 10 }}>
+                                        <GcashPaymentCard variant="light" compact />
+                                    </div>
+                                )}
                             </div>
                         )}
 

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 import {
     INVENTORY_TYPE_OPTIONS,
     SUPER_ADMIN_ENDPOINTS,
@@ -4769,6 +4770,12 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 </select>
                             </div>
                         </div>
+
+                        {sellMethod === 'GCash' && (
+                            <div style={{ marginBottom: 14 }}>
+                                <GcashPaymentCard variant="light" compact />
+                            </div>
+                        )}
 
                         {/* Financial Breakdown */}
                         <div style={{ background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0', padding: '12px 14px', marginBottom: 18 }}>

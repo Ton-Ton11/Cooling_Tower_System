@@ -10,6 +10,7 @@ import {
     recordUserActivity,
     saveOcularWorkspaceState,
 } from "../../utils/userActivityHistory";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 
 const FULFILLMENT_LABELS = {
     pickup: "Store Pick Up",
@@ -1184,22 +1185,10 @@ export default function OcularInspectionPage({
                         {/* GCash Reference Details */}
                         {paymentMethod === "GCash" && (
                             <div className="bg-gray-50 rounded-2xl p-4 border border-gray-200 space-y-3.5">
-                                <div className="bg-white rounded-xl p-3.5 border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                    <div>
-                                        <span className="text-[10px] font-bold uppercase text-gray-400 block">
-                                            GCash Account
-                                        </span>
-                                        <p className="font-extrabold text-gray-900 text-sm font-mono">
-                                            0917 877 7670
-                                        </p>
-                                        <p className="text-[11px] text-gray-500">
-                                            Cooling Tower Airconditioning Services
-                                        </p>
-                                    </div>
-                                    <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 font-bold self-start sm:self-auto">
-                                        Down Payment: {formatCurrency(downPayment)}
-                                    </span>
-                                </div>
+                                <GcashPaymentCard
+                                    variant="light"
+                                    badge={`Down Payment: ${formatCurrency(downPayment)}`}
+                                />
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                                     <div>

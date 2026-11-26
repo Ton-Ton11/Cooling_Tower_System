@@ -259,7 +259,7 @@ class CustomerBookingController extends Controller
             'unit_down_payment_rate' => 0.50,
             'default_delivery_fee' => 500.00,
             'allowed_cancellation_hours' => 24,
-            'gcash_account' => '0917-123-4567',
+            'gcash_account' => '0917-877-7670',
             'gcash_name' => 'Cooling Tower Airconditioning Services',
             'bank_name' => 'BDO Unibank',
             'bank_account_number' => '0042-8891-2045',

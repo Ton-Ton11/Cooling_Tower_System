@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import ReceiptActionButton from "../../Components/ReceiptActionButton";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 import MaintenanceReminderCountdown, { CompletedBookingDueAlertBanner } from "../../Components/MaintenanceReminderCountdown";
 import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
@@ -803,6 +804,7 @@ export default function MyBookings({
                             <p className="text-gray-600 leading-relaxed">
                                 Please submit your valid 13-digit GCash reference number and receipt proof to complete your ₱{Number(completePaymentBooking?.booking_fee_paid || completePaymentBooking?.service?.booking_fee || 50).toFixed(2)} reservation payment before the 10-minute timer expires.
                             </p>
+                            <GcashPaymentCard variant="light" compact />
                             <div>
                                 <label className="block font-bold text-gray-700 uppercase mb-1">
                                     GCash Reference Number (Max 13 digits) <span className="text-red-500">*</span>

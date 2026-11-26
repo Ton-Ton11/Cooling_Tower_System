@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import AcBrandSelect from "../../Components/AcBrandSelect";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 import {
     AC_MOTOR_TYPE_OPTIONS,
     AC_STATUS_OPTIONS,
@@ -3937,6 +3938,9 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                 </select>
                             </div>
                         </div>
+                        {soldForm.payment_method === 'GCash' && (
+                            <GcashPaymentCard variant="light" compact />
+                        )}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                             <div>
                                 <p className="section-label" style={{ marginBottom: 5 }}>Customer Name (Optional)</p>
@@ -4339,6 +4343,9 @@ function AcUnits({ addToast, onDataChanged, endpoints, currentUser }) {
                                 </select>
                             </div>
                         </div>
+                        {partSoldForm.payment_method === 'GCash' && (
+                            <GcashPaymentCard variant="light" compact />
+                        )}
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                         <button className="btn-secondary" onClick={() => setPartSoldModal(null)}>Cancel</button>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
 import ReceiptActionButton from "../../Components/ReceiptActionButton";
+import GcashPaymentCard, { OFFICIAL_GCASH_NUMBER } from "../../Components/GcashPaymentCard";
 import Modal from "../../Components/Modal";
 import {
     CUSTOMER_ENDPOINTS,
@@ -28,7 +29,7 @@ export default function BuyItems({
     const [items, setItems] = useState([]);
     const [orders, setOrders] = useState([]);
     const [gcashInfo, setGcashInfo] = useState({
-        account_number: "0917-123-4567",
+        account_number: OFFICIAL_GCASH_NUMBER,
         account_name: "Cooling Tower Airconditioning Services",
     });
     const [loading, setLoading] = useState(true);
@@ -220,7 +221,7 @@ export default function BuyItems({
     };
 
     const handleCopyGcash = () => {
-        navigator.clipboard.writeText((gcashInfo.account_number || "09171234567").replace(/[^0-9]/g, ""));
+        navigator.clipboard.writeText((gcashInfo.account_number || "09178777670").replace(/[^0-9]/g, ""));
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -946,7 +947,7 @@ export default function BuyItems({
                                 {/* GCash Payment Section (Spare Parts OR >= 6 Materials/Tools) */}
                                 {requiresGcash && (
                                     <div className="space-y-3.5">
-                                        <div className="bg-[#10213F] rounded-xl p-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div className="bg-[#10213F] rounded-xl p-4 text-white space-y-3">
                                             <div>
                                                 <span className="text-[10px] font-bold uppercase tracking-wider text-blue-200">
                                                     Min. 50% GCash Down Payment
@@ -959,22 +960,12 @@ export default function BuyItems({
                                                 </div>
                                             </div>
 
-                                            <div className="bg-white/10 rounded-xl px-3.5 py-2.5 border border-white/10 flex items-center gap-3">
-                                                <div>
-                                                    <div className="text-[10px] text-blue-200 uppercase font-semibold">
-                                                        GCash Express Send
-                                                    </div>
-                                                    <div className="text-sm font-bold font-mono">{gcashInfo.account_number}</div>
-                                                    <div className="text-[10px] text-blue-200">{gcashInfo.account_name}</div>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleCopyGcash}
-                                                    className="px-2.5 py-1 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold cursor-pointer"
-                                                >
-                                                    {copied ? "Copied" : "Copy"}
-                                                </button>
-                                            </div>
+                                            <GcashPaymentCard
+                                                variant="dark"
+                                                compact
+                                                accountNumber={gcashInfo.account_number}
+                                                accountName={gcashInfo.account_name}
+                                            />
                                         </div>
 
                                         <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
@@ -1143,10 +1134,14 @@ export default function BuyItems({
                                 <strong>{formatCurrency(settleOrder.down_payment_amount)}</strong> (Total:{" "}
                                 {formatCurrency(settleOrder.total_amount)})
                             </div>
-                            <div>
-                                Send via GCash: <strong className="font-mono">{gcashInfo.account_number}</strong>
-                            </div>
                         </div>
+
+                        <GcashPaymentCard
+                            variant="light"
+                            compact
+                            accountNumber={gcashInfo.account_number}
+                            accountName={gcashInfo.account_name}
+                        />
 
                         <div>
                             <label className="block text-xs font-bold text-slate-700 mb-1">

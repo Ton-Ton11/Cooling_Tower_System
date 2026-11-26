@@ -15,6 +15,7 @@ import {
     findFirstAvailableSlotId,
 } from "../../utils/bookingSchedule";
 import BookingCalendarPicker from "../../Components/BookingCalendarPicker";
+import GcashPaymentCard, { OFFICIAL_GCASH_NUMBER } from "../../Components/GcashPaymentCard";
 import { recordUserActivity } from "../../utils/userActivityHistory";
 
 export default function ReschedulePage({
@@ -221,7 +222,7 @@ export default function ReschedulePage({
         }
     }, [newDate, scheduleSlotsData, currentTime, isSlotBlocked]);
 
-    const gcashAccount = scheduleConfig?.payment_gcash_account || "0917 877 7670";
+    const gcashAccount = scheduleConfig?.payment_gcash_account || OFFICIAL_GCASH_NUMBER;
     const gcashName = scheduleConfig?.payment_gcash_name || "Cooling Tower Airconditioning Services";
 
     const handleCopyGcash = async () => {
@@ -833,24 +834,12 @@ export default function ReschedulePage({
                                     Because this service is currently in progress with technician and equipment allocated, a ₱{rescheduleFee.toFixed(2)} rescheduling fee applies to coordinate new team dispatch.
                                 </p>
 
-                                {/* GCash Account Box */}
-                                <div className="bg-blue-50/90 rounded-xl p-3.5 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div>
-                                        <p className="text-[11px] text-gray-500 font-medium">
-                                            Account Name: <strong className="text-gray-900">{gcashName}</strong>
-                                        </p>
-                                        <p className="text-sm font-extrabold text-blue-700 font-mono tracking-wide mt-0.5">
-                                            {gcashAccount}
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCopyGcash}
-                                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer"
-                                    >
-                                        <span>{copied ? "Copied!" : "Copy"}</span>
-                                    </button>
-                                </div>
+                                {/* GCash Account & QR Box */}
+                                <GcashPaymentCard
+                                    variant="light"
+                                    accountNumber={gcashAccount}
+                                    accountName={gcashName}
+                                />
 
                                 {/* Reference Number */}
                                 <div className="space-y-1.5">

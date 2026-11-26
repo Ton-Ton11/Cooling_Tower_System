@@ -16,6 +16,7 @@ import {
 import GeospatialAddressAutocomplete, { evaluateZamboangaGeospatial } from "../../Components/GeospatialAddressAutocomplete";
 import BookingCalendarPicker from "../../Components/BookingCalendarPicker";
 import AcBrandSelect from "../../Components/AcBrandSelect";
+import GcashPaymentCard, { OFFICIAL_GCASH_NUMBER } from "../../Components/GcashPaymentCard";
 import { isGeospatialAlertAcknowledged, persistGeospatialAlertAcknowledgment } from "../../utils/geospatialAlert";
 
 // Fallback primary services if catalog fetch is delayed
@@ -422,7 +423,7 @@ export default function BookingWizard({
     const [submitting, setSubmitting] = useState(false);
     const [submittedBooking, setSubmittedBooking] = useState(null);
 
-    const gcashAccount = policyData?.gcash_account || "0917 877 7670";
+    const gcashAccount = policyData?.gcash_account || OFFICIAL_GCASH_NUMBER;
     const gcashName = policyData?.gcash_name || "Cooling Tower Airconditioning Services";
 
     // Load Catalog Data
@@ -2036,7 +2037,7 @@ export default function BookingWizard({
                         <>
                         {/* Distinction & Clarity Notice */}
                         <div className="bg-[#10213F] rounded-xl p-5 sm:p-6 text-white space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                            <div className="flex flex-col gap-4 border-b border-white/10 pb-4">
                                 <div>
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-200 text-[11px] font-bold uppercase tracking-wider">
                                         Schedule Security Fee
@@ -2046,20 +2047,11 @@ export default function BookingWizard({
                                         Your reservation fee is separate from the final service quotation.
                                     </p>
                                 </div>
-                                <div className="bg-white/10 rounded-xl p-3 border border-white/10 flex items-center gap-3 self-start sm:self-auto">
-                                    <div>
-                                        <p className="text-[10px] text-blue-200 font-semibold uppercase tracking-wider">GCash Express Send No.</p>
-                                        <p className="text-base font-bold font-mono tracking-wider text-white mt-0.5">{gcashAccount}</p>
-                                        <p className="text-[10px] text-blue-300 font-medium">{gcashName}</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleCopyGCash}
-                                        className="px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-xs font-bold transition shrink-0"
-                                    >
-                                        {copied ? "Copied!" : "Copy"}
-                                    </button>
-                                </div>
+                                <GcashPaymentCard
+                                    variant="dark"
+                                    accountNumber={gcashAccount}
+                                    accountName={gcashName}
+                                />
                             </div>
 
                             <p className="text-xs text-blue-100/90 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/10">

@@ -3,6 +3,7 @@ import { usePage } from "@inertiajs/react";
 import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
 import AcBrandSelect from "../../Components/AcBrandSelect";
+import GcashPaymentCard from "../../Components/GcashPaymentCard";
 import {
     TECHNICIAN_ENDPOINTS,
     extractErrorMessage,
@@ -2480,6 +2481,10 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         </select>
                                     </div>
                                 </div>
+
+                                {reportForm.payment_method === "GCash" && (
+                                    <GcashPaymentCard variant="light" compact />
+                                )}
 
                                 {(reportForm.payment_method === "GCash" || reportForm.payment_method === "Bank Transfer") && (
                                     <div>

@@ -330,7 +330,7 @@ class CustomerItemOrderController extends Controller
             'items' => $catalogItems,
             'orders' => $orders,
             'gcash' => [
-                'account_number' => '0917-123-4567',
+                'account_number' => '0917-877-7670',
                 'account_name' => 'Cooling Tower Airconditioning Services',
             ],
         ]);
