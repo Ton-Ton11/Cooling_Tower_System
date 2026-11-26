@@ -51,6 +51,7 @@ class SuperAdminSalesController extends SuperAdminBaseController
                 'cash_revenue' => (float) $paidRecords->where('payment_method', 'Cash')->sum('amount_paid'),
                 'bank_revenue' => (float) $paidRecords->whereIn('payment_method', ['Bank Transfer', 'Credit Card'])->sum('amount_paid'),
             ],
+            'daily_closeout' => app(\App\Services\ReceiptService::class)->getDailyCloseoutSummary($request->query('closeout_date')),
             'weekly_revenue' => $this->buildWeeklyRevenueSeries($paidRecords),
             'monthly_revenue' => $this->buildMonthlyRevenueSeries($paidRecords),
             'inventory_sales' => $inventorySales,

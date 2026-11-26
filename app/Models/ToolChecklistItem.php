@@ -20,6 +20,7 @@ class ToolChecklistItem extends Model
         'item_type',
         'quantity_requested',
         'quantity_approved',
+        'quantity_returned',
         'status',
         'notes',
     ];
@@ -30,6 +31,7 @@ class ToolChecklistItem extends Model
         'item_id' => 'integer',
         'quantity_requested' => 'integer',
         'quantity_approved' => 'integer',
+        'quantity_returned' => 'integer',
     ];
 
     public function checklist()

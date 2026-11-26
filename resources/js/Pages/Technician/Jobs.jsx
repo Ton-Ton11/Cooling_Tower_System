@@ -10,7 +10,7 @@ import {
     formatStorageUrl,
 } from "../../utils/superAdmin";
 
-const tabs = ["All", "Approved", "In-Progress", "Completed"];
+const tabs = ["All", "Approved", "In-Progress", "Completed", "Cancelled"];
 
 const WORK_PERFORMED_SERVICES = [
     "Installation",
@@ -18,6 +18,81 @@ const WORK_PERFORMED_SERVICES = [
     "Cleaning / Preventive Maintenance",
     "Ocular Inspection",
 ];
+
+const OCULAR_ROOM_CATEGORIES = [
+    "Bedroom",
+    "Living Room",
+    "Kitchen",
+    "Office",
+    "Server Room",
+    "Dining Room",
+    "Conference Room",
+    "Commercial Space",
+    "Others",
+];
+
+const OCULAR_SUN_LEVELS = ["Heavy/West", "Moderate", "Shaded"];
+const OCULAR_WINDOW_SIZES = ["Small", "Medium", "Large Glass Facade"];
+
+const createDefaultOcularRoom = (index = 1) => ({
+    room_id: null,
+    room_name: `Room ${index}`,
+    unit_of_measurement: "Meters",
+    room_length: "",
+    room_width: "",
+    ceiling_height: "2.7",
+    room_category: "Bedroom",
+    sun_exposure_level: "Moderate",
+    maximum_occupancy: "2",
+    window_size_glazing: "Medium",
+    heat_generating_equipment: "0",
+});
+
+const computeOcularRoomEstimate = (room) => {
+    const length = parseFloat(room?.room_length);
+    const width = parseFloat(room?.room_width);
+    const height = parseFloat(room?.ceiling_height || "2.7");
+    if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(width) || width <= 0) {
+        return null;
+    }
+    const isFeet = (room?.unit_of_measurement || "Meters") === "Feet";
+    const lengthM = isFeet ? length * 0.3048 : length;
+    const widthM = isFeet ? width * 0.3048 : width;
+    const heightM = isFeet ? (Number.isFinite(height) && height > 0 ? height : 8.86) * 0.3048 : (Number.isFinite(height) && height > 0 ? height : 2.7);
+
+    let btu = Math.max(1, lengthM * widthM) * 600 * Math.max(1, heightM / 2.7);
+    const cat = String(room?.room_category || "").toLowerCase();
+    if (cat.includes("server")) btu *= 1.35;
+    else if (cat.includes("kitchen")) btu += 4000;
+    else if (cat.includes("office") || cat.includes("commercial")) btu *= 1.12;
+
+    if (room?.sun_exposure_level === "Heavy/West") btu *= 1.12;
+    else if (room?.sun_exposure_level === "Shaded") btu *= 0.92;
+
+    if (room?.window_size_glazing === "Large Glass Facade") btu *= 1.15;
+    else if (room?.window_size_glazing === "Small") btu *= 0.96;
+
+    const occ = Math.max(1, parseInt(room?.maximum_occupancy, 10) || 1);
+    if (occ > 2) btu += (occ - 2) * 600;
+
+    const eq = Math.max(0, parseInt(room?.heat_generating_equipment, 10) || 0);
+    if (eq > 0) btu += eq <= 30 ? eq * 350 : eq * 3.412;
+
+    const rawHp = Math.max(0.5, btu / 9000);
+    const standards = [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+    let hp = Math.round(rawHp * 2) / 2;
+    for (const s of standards) {
+        if (rawHp <= s + 0.05) {
+            hp = s;
+            break;
+        }
+    }
+
+    return {
+        btu: Math.round(btu),
+        hp,
+    };
+};
 
 const COMPLETE_AC_TYPES = [
     { value: "Split", label: "Split Type (Wall-Mounted)" },
@@ -142,6 +217,13 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
     // View Checklist Modal State
     const [viewChecklistModal, setViewChecklistModal] = useState(null);
     const [updatingToolItemId, setUpdatingToolItemId] = useState(null);
+    const [returningMaterialId, setReturningMaterialId] = useState(null);
+    const [materialReturnQtys, setMaterialReturnQtys] = useState({});
+
+    // Failed Booking Modal State
+    const [failedModal, setFailedModal] = useState(null);
+    const [failedReason, setFailedReason] = useState("");
+    const [reportingFailed, setReportingFailed] = useState(false);
 
     // Complete Job / Turn Over Payment Modal
     const [completeModal, setCompleteModal] = useState(null);
@@ -162,6 +244,21 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
     });
 
     const [viewReportModal, setViewReportModal] = useState(null);
+
+    // Ocular Inspection Result Submission Modal
+    const [ocularModalJob, setOcularModalJob] = useState(null);
+    const [ocularReadOnly, setOcularReadOnly] = useState(false);
+    const [ocularSubmitting, setOcularSubmitting] = useState(false);
+    const [ocularStage, setOcularStage] = useState("before"); // "before" | "after"
+    const [ocularRooms, setOcularRooms] = useState([createDefaultOcularRoom(1)]);
+    const [ocularTechNotes, setOcularTechNotes] = useState("");
+    const [ocularBeforeNotes, setOcularBeforeNotes] = useState("");
+    const [ocularAfterNotes, setOcularAfterNotes] = useState("");
+    const [ocularBeforePhoto, setOcularBeforePhoto] = useState(null);
+    const [ocularBeforePreview, setOcularBeforePreview] = useState("");
+    const [ocularAfterPhoto, setOcularAfterPhoto] = useState(null);
+    const [ocularAfterPreview, setOcularAfterPreview] = useState("");
+    const [ocularFormError, setOcularFormError] = useState("");
 
     const fetchBookings = useCallback(async (showLoader = true) => {
         if (showLoader) setLoading(true);
@@ -194,6 +291,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
         if (tab === "Approved") return bookings.filter((b) => ["Approved", "Dispatched"].includes(b.booking_status));
         if (tab === "In-Progress") return bookings.filter((b) => b.booking_status === "In-Progress");
         if (tab === "Completed") return bookings.filter((b) => ["Partially Completed", "Completed"].includes(b.booking_status));
+        if (tab === "Cancelled") return bookings.filter((b) => b.booking_status === "Cancelled");
         return bookings;
     }, [bookings, tab]);
 
@@ -518,6 +616,167 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             addToast(extractErrorMessage(error, "Unable to update tool status."), "error");
         } finally {
             setUpdatingToolItemId(null);
+        }
+    };
+
+    const handleReturnMaterialQty = async (checklistId, item, newQty) => {
+        if (returningMaterialId) return;
+        const maxQty = Number(item.quantity_approved ?? item.quantity_requested ?? 1);
+        const qty = Math.max(0, Math.min(maxQty, parseInt(newQty, 10) || 0));
+        setReturningMaterialId(item.id);
+        try {
+            const { data } = await window.axios.post(
+                TECHNICIAN_ENDPOINTS.returnChecklistMaterial(checklistId, item.id),
+                { quantity_returned: qty }
+            );
+            addToast(data?.message || `Updated returned quantity for ${item.item_name}.`);
+            if (data?.data) {
+                setViewChecklistModal((prev) =>
+                    prev && prev.checklist_id === checklistId
+                        ? { ...prev, ...data.data, client_name: prev.client_name, service_name: prev.service_name }
+                        : prev
+                );
+            }
+            await fetchBookings(false);
+            await fetchCatalog();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to return material quantity."), "error");
+        } finally {
+            setReturningMaterialId(null);
+        }
+    };
+
+    const handleReportFailedBooking = async () => {
+        if (!failedModal || reportingFailed) return;
+        if (failedReason.trim().length < 5) {
+            addToast("Please enter the reason for the failed booking (at least 5 characters).", "error");
+            return;
+        }
+        setReportingFailed(true);
+        try {
+            const { data } = await window.axios.post(
+                TECHNICIAN_ENDPOINTS.reportFailedBooking(failedModal.booking_id),
+                { reason: failedReason.trim() }
+            );
+            addToast(data?.message || "Failed booking report submitted for Manager review.");
+            setFailedModal(null);
+            setFailedReason("");
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to submit failed booking report."), "error");
+        } finally {
+            setReportingFailed(false);
+        }
+    };
+
+    const openOcularResultModal = (job, readOnly = false) => {
+        if (!job) return;
+        const existingResult = job.technician_ocular_result || {};
+        const latestChecklist =
+            (Array.isArray(job.checklists) && job.checklists.length > 0 ? job.checklists[0] : job.checklist) || null;
+        const defaultStage =
+            job.booking_status === "In-Progress" ||
+            latestChecklist?.status === "Completed" ||
+            existingResult.last_submitted_stage === "before"
+                ? "after"
+                : "before";
+
+        const existingRooms = Array.isArray(job.ocular_rooms) && job.ocular_rooms.length > 0
+            ? job.ocular_rooms.map((rm, idx) => ({
+                  room_id: rm.room_id || null,
+                  room_name: rm.room_name || `Room ${idx + 1}`,
+                  unit_of_measurement: rm.unit_of_measurement || "Meters",
+                  room_length: String(rm.room_length ?? ""),
+                  room_width: String(rm.room_width ?? ""),
+                  ceiling_height: String(rm.ceiling_height ?? "2.7"),
+                  room_category: rm.room_category || "Bedroom",
+                  sun_exposure_level: rm.sun_exposure_level || "Moderate",
+                  maximum_occupancy: String(rm.maximum_occupancy ?? "2"),
+                  window_size_glazing: rm.window_size_glazing || "Medium",
+                  heat_generating_equipment: String(rm.heat_generating_equipment ?? "0"),
+              }))
+            : [createDefaultOcularRoom(1)];
+
+        setOcularModalJob(job);
+        setOcularReadOnly(readOnly);
+        setOcularStage(defaultStage);
+        setOcularRooms(existingRooms);
+        setOcularTechNotes(existingResult.technician_notes || "");
+        const existingTaskNote = existingResult.after_notes || existingResult.before_notes || "";
+        const existingTaskAttachmentUrl = formatStorageUrl(existingResult.after_photo_url || existingResult.before_photo_url || "");
+        setOcularBeforeNotes(existingTaskNote);
+        setOcularAfterNotes("");
+        setOcularBeforePhoto(null);
+        setOcularBeforePreview(existingTaskAttachmentUrl);
+        setOcularAfterPhoto(null);
+        setOcularAfterPreview("");
+        setOcularFormError("");
+    };
+
+    const handleSubmitOcularResult = async (e) => {
+        e.preventDefault();
+        if (!ocularModalJob || ocularSubmitting || ocularReadOnly) return;
+        setOcularFormError("");
+
+        const formEl = e.currentTarget;
+        if (typeof formEl.checkValidity === "function" && !formEl.checkValidity()) {
+            const firstInvalid = formEl.querySelector(":invalid");
+            if (firstInvalid && typeof firstInvalid.focus === "function") {
+                firstInvalid.focus();
+            }
+            setOcularFormError("Please complete the highlighted required room measurements.");
+            return;
+        }
+
+        if (!Array.isArray(ocularRooms) || ocularRooms.length === 0) {
+            setOcularFormError("Please add at least one inspected room.");
+            return;
+        }
+
+        const sanitizedRooms = ocularRooms.map((rm, idx) => ({
+            room_id: rm.room_id || null,
+            room_name: (rm.room_name || "").trim() || `Room ${idx + 1}`,
+            unit_of_measurement: rm.unit_of_measurement || "Meters",
+            room_length: parseFloat(rm.room_length),
+            room_width: parseFloat(rm.room_width),
+            ceiling_height: parseFloat(rm.ceiling_height) || 2.7,
+            room_category: (rm.room_category || "").trim() || "Bedroom",
+            sun_exposure_level: rm.sun_exposure_level || "Moderate",
+            maximum_occupancy: Math.max(1, parseInt(rm.maximum_occupancy, 10) || 1),
+            window_size_glazing: rm.window_size_glazing || "Medium",
+            heat_generating_equipment: Math.max(0, parseInt(rm.heat_generating_equipment, 10) || 0),
+        }));
+
+        setOcularSubmitting(true);
+        try {
+            const fd = new FormData();
+            fd.append("submission_stage", ocularStage);
+            fd.append("rooms", JSON.stringify(sanitizedRooms));
+            if (ocularTechNotes.trim()) fd.append("technician_notes", ocularTechNotes.trim());
+            if (ocularBeforeNotes.trim()) {
+                fd.append(ocularStage === "after" ? "after_notes" : "before_notes", ocularBeforeNotes.trim());
+            }
+            if (ocularBeforePhoto) {
+                fd.append(ocularStage === "after" ? "after_photo" : "before_photo", ocularBeforePhoto);
+            }
+
+            const { data } = await window.axios.post(
+                TECHNICIAN_ENDPOINTS.submitOcularResult(ocularModalJob.booking_id),
+                fd,
+                { headers: { "Content-Type": "multipart/form-data" } }
+            );
+            addToast(data?.message || "Ocular inspection result sent to Admin Assistant.");
+            setOcularModalJob(null);
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            const msg = extractErrorMessage(error, "Unable to submit ocular inspection result.");
+            setOcularFormError(msg);
+            addToast(msg, "error");
+        } finally {
+            setOcularSubmitting(false);
         }
     };
 
@@ -1159,7 +1418,9 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                             ? bookings.filter((b) => ["Approved", "Dispatched"].includes(b.booking_status)).length
                             : t === "In-Progress"
                             ? bookings.filter((b) => b.booking_status === "In-Progress").length
-                            : bookings.filter((b) => ["Partially Completed", "Completed"].includes(b.booking_status)).length;
+                            : t === "Completed"
+                            ? bookings.filter((b) => ["Partially Completed", "Completed"].includes(b.booking_status)).length
+                            : bookings.filter((b) => b.booking_status === "Cancelled").length;
 
                     return (
                         <button
@@ -1206,11 +1467,17 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     ? job.checklists[0]
                                     : job.checklist) || null;
                             const isChecklistCompleted = latestChecklist?.status === "Completed";
+                            const isChecklistApprovedOrCompleted = ["Approved", "Completed"].includes(latestChecklist?.status);
                             const isOcularJob = Boolean(
                                 job.is_ocular_inspection ||
                                     Number(job.service_id) === 4 ||
                                     String(job.service || "").toLowerCase().includes("ocular")
                             );
+                            const failedBooking = job.failed_booking || job.service_details?.failed_booking || null;
+                            const failedStatus = failedBooking?.status || null;
+                            const isFailedPending = failedStatus === "Pending Manager Review";
+                            const isFailedInvalid = failedStatus === "Invalid";
+                            const isFailedValid = failedStatus === "Valid" || job.booking_status === "Cancelled";
 
                             const clItems = Array.isArray(latestChecklist?.items) ? latestChecklist.items : [];
                             const handToolsCount = clItems.filter((i) => getItemCategoryGroup(i) === "hand_tool").length;
@@ -1238,6 +1505,34 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                     #{job.booking_id} · {job.client_name}
                                                 </span>
                                                 <StatusBadge status={job.booking_status} />
+                                                {!isOcularJob && job.quotation_status && (
+                                                    <span
+                                                        style={{
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            padding: "2px 8px",
+                                                            borderRadius: 6,
+                                                            border: "1px solid",
+                                                            background: String(job.quotation_status).startsWith("Signed by ") || job.quotation_status === "Accepted"
+                                                                ? "#F0FDF4"
+                                                                : ["Declined", "Customer Refused to Sign"].includes(job.quotation_status)
+                                                                ? "#FEF2F2"
+                                                                : "#FFFBEB",
+                                                            color: String(job.quotation_status).startsWith("Signed by ") || job.quotation_status === "Accepted"
+                                                                ? "#15803D"
+                                                                : ["Declined", "Customer Refused to Sign"].includes(job.quotation_status)
+                                                                ? "#DC2626"
+                                                                : "#B45309",
+                                                            borderColor: String(job.quotation_status).startsWith("Signed by ") || job.quotation_status === "Accepted"
+                                                                ? "#BBF7D0"
+                                                                : ["Declined", "Customer Refused to Sign"].includes(job.quotation_status)
+                                                                ? "#FECACA"
+                                                                : "#FDE68A",
+                                                        }}
+                                                    >
+                                                        Quotation: {job.quotation_status}
+                                                    </span>
+                                                )}
                                                 {job.rating && (
                                                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#FEF3C7", color: "#D97706", padding: "2px 8px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>
                                                         <StarIcon size={12} color="#D97706" />
@@ -1352,6 +1647,97 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                         <span>View Checklist</span>
                                                     </button>
                                                 </>
+                                            )}
+
+                                            {isOcularJob && job.booking_status !== "Pending" && job.booking_status !== "Cancelled" && (
+                                                job.inspection_status === "Submitted" ? (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-secondary"
+                                                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "8px 14px", borderColor: "#BBF7D0", background: "#F0FDF4", color: "#15803D", fontWeight: 700 }}
+                                                        onClick={() => openOcularResultModal(job, true)}
+                                                    >
+                                                        <Icon d={ic.fileText} size={14} /> View Ocular Result
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        className="btn-primary"
+                                                        disabled={!isChecklistApprovedOrCompleted}
+                                                        title={
+                                                            !isChecklistApprovedOrCompleted
+                                                                ? "Tools & materials checklist must be approved first."
+                                                                : job.technician_ocular_result
+                                                                ? "Update Ocular Result"
+                                                                : "Submit Ocular Result"
+                                                        }
+                                                        style={{
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            gap: 6,
+                                                            fontSize: 12,
+                                                            padding: "8px 14px",
+                                                            background: !isChecklistApprovedOrCompleted
+                                                                ? "#E5E7EB"
+                                                                : job.technician_ocular_result
+                                                                ? "#0F766E"
+                                                                : "#1D4ED8",
+                                                            color: !isChecklistApprovedOrCompleted ? "#9CA3AF" : "#FFFFFF",
+                                                            cursor: isChecklistApprovedOrCompleted ? "pointer" : "not-allowed",
+                                                            opacity: isChecklistApprovedOrCompleted ? 1 : 0.75,
+                                                            fontWeight: 700,
+                                                        }}
+                                                        onClick={() => {
+                                                            if (!isChecklistApprovedOrCompleted) return;
+                                                            openOcularResultModal(job, false);
+                                                        }}
+                                                    >
+                                                        <Icon d={ic.check} size={14} />
+                                                        {job.technician_ocular_result ? "Update Ocular Result" : "Submit Ocular Result"}
+                                                    </button>
+                                                )
+                                            )}
+
+                                            {isInProgress && !isOcularJob && !hasPaymentTurnedOver && !isFailedValid && (
+                                                <button
+                                                    type="button"
+                                                    disabled={!isChecklistCompleted || isFailedPending}
+                                                    title={
+                                                        isFailedPending
+                                                            ? "Failed booking report submitted and awaiting Manager review."
+                                                            : !isChecklistCompleted
+                                                            ? "Return tools and unused materials and wait for the Tools Man to complete the checklist first."
+                                                            : "Customer did not sign the quotation in person — report failed booking"
+                                                    }
+                                                    style={{
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        gap: 6,
+                                                        fontSize: 12,
+                                                        padding: "8px 14px",
+                                                        borderRadius: 10,
+                                                        fontWeight: 700,
+                                                        border: "1px solid #FECACA",
+                                                        background: isFailedPending || !isChecklistCompleted ? "#F3F4F6" : "#FEF2F2",
+                                                        color: isFailedPending || !isChecklistCompleted ? "#9CA3AF" : "#DC2626",
+                                                        cursor: isChecklistCompleted && !isFailedPending ? "pointer" : "not-allowed",
+                                                        opacity: isChecklistCompleted && !isFailedPending ? 1 : 0.7,
+                                                    }}
+                                                    onClick={() => {
+                                                        if (!isChecklistCompleted) {
+                                                            addToast(
+                                                                "Please return all tools and unused materials and have the Tools Man complete the checklist first.",
+                                                                "error"
+                                                            );
+                                                            return;
+                                                        }
+                                                        if (isFailedPending) return;
+                                                        setFailedModal(job);
+                                                        setFailedReason(isFailedInvalid ? (failedBooking?.reason || "") : "");
+                                                    }}
+                                                >
+                                                    {isFailedPending ? "Failed Booking Pending Review" : "Failed Booking"}
+                                                </button>
                                             )}
 
                                             {isInProgress && !isOcularJob && !hasPaymentTurnedOver && (
@@ -1562,6 +1948,84 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                         )}
                                     </div>
 
+                                    {isOcularJob && (Array.isArray(job.ocular_rooms) && job.ocular_rooms.length > 0 || job.technician_ocular_result) && (
+                                        <div
+                                            style={{
+                                                padding: "10px 14px",
+                                                background: job.inspection_status === "Submitted" ? "#F0FDF4" : "#EFF6FF",
+                                                border: `1px solid ${job.inspection_status === "Submitted" ? "#BBF7D0" : "#BFDBFE"}`,
+                                                borderRadius: 10,
+                                                fontSize: 12,
+                                                display: "flex",
+                                                flexDirection: "column",
+                                                gap: 6,
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                                    <strong style={{ color: job.inspection_status === "Submitted" ? "#166534" : "#1E3A8A" }}>
+                                                        Ocular Result
+                                                    </strong>
+                                                    <span
+                                                        style={{
+                                                            fontSize: 10,
+                                                            fontWeight: 700,
+                                                            padding: "2px 8px",
+                                                            borderRadius: 999,
+                                                            background: "#FFFFFF",
+                                                            border: "1px solid #CBD5E1",
+                                                            color: job.inspection_status === "Submitted" ? "#15803D" : "#1D4ED8",
+                                                        }}
+                                                    >
+                                                        {job.inspection_status === "Submitted"
+                                                            ? "Sent to Customer"
+                                                            : "Sent to Admin Asst"}
+                                                    </span>
+                                                    {Array.isArray(job.technician_ocular_result?.stages_submitted) &&
+                                                        job.technician_ocular_result.stages_submitted.map((st) => (
+                                                            <span
+                                                                key={st}
+                                                                style={{
+                                                                    fontSize: 10,
+                                                                    fontWeight: 700,
+                                                                    padding: "2px 7px",
+                                                                    borderRadius: 6,
+                                                                    background: st === "after" ? "#DCFCE7" : "#DBEAFE",
+                                                                    color: st === "after" ? "#166534" : "#1E40AF",
+                                                                }}
+                                                            >
+                                                                {st === "before" ? "Before Task" : "After Task"}
+                                                            </span>
+                                                        ))}
+                                                </div>
+                                                <span style={{ fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                                                    {(job.ocular_rooms || []).length} Room(s)
+                                                </span>
+                                            </div>
+
+                                            {Array.isArray(job.ocular_rooms) && job.ocular_rooms.length > 0 && (
+                                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                                    {job.ocular_rooms.map((rm, idx) => (
+                                                        <span
+                                                            key={rm.room_id || idx}
+                                                            style={{
+                                                                fontSize: 11,
+                                                                padding: "3px 8px",
+                                                                borderRadius: 6,
+                                                                background: "#FFFFFF",
+                                                                border: "1px solid #E2E8F0",
+                                                                color: "#1E293B",
+                                                            }}
+                                                        >
+                                                            <strong>{rm.room_name || rm.room_category}</strong> ({rm.room_length}×{rm.room_width} {rm.unit_of_measurement}) · Est.{" "}
+                                                            <strong style={{ color: "#059669" }}>{rm.estimated_hp} HP</strong>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {isTurnoverInvalid && (
                                         <div
                                             style={{
@@ -1586,6 +2050,66 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                     Reason: {job.payment_turnover?.invalid_reason || "Please review and update your turnover details."}
                                                 </span>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {isFailedPending && (
+                                        <div
+                                            style={{
+                                                padding: "10px 14px",
+                                                background: "#FFFBEB",
+                                                border: "1px solid #FDE68A",
+                                                borderRadius: 10,
+                                                fontSize: 12,
+                                                color: "#92400E",
+                                            }}
+                                        >
+                                            <strong style={{ display: "block", color: "#B45309" }}>
+                                                Failed Booking Report — Awaiting Manager Review
+                                            </strong>
+                                            <span>
+                                                Submitted reason: {failedBooking?.reason}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {isFailedInvalid && (
+                                        <div
+                                            style={{
+                                                padding: "10px 14px",
+                                                background: "#FEF2F2",
+                                                border: "1px solid #FECACA",
+                                                borderRadius: 10,
+                                                fontSize: 12,
+                                                color: "#991B1B",
+                                            }}
+                                        >
+                                            <strong style={{ display: "block", color: "#DC2626" }}>
+                                                Notice: Invalid Failed Booking Report
+                                            </strong>
+                                            <span>
+                                                Manager marked your failed booking report as Invalid: {failedBooking?.invalid_reason || "Please review and either follow up on customer signature & payment turnover or submit an updated failed booking reason."}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {isFailedValid && (
+                                        <div
+                                            style={{
+                                                padding: "10px 14px",
+                                                background: "#F8FAFC",
+                                                border: "1px solid #E2E8F0",
+                                                borderRadius: 10,
+                                                fontSize: 12,
+                                                color: "#475569",
+                                            }}
+                                        >
+                                            <strong style={{ display: "block", color: "#991B1B" }}>
+                                                Booking Cancelled — Customer Did Not Sign Quotation
+                                            </strong>
+                                            <span>
+                                                {job.cancellation_reason || failedBooking?.reason || "Approved by Manager. Reservation booking fee retained."}
+                                            </span>
                                         </div>
                                     )}
 
@@ -1733,9 +2257,66 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <span style={{ fontSize: 11, color: "#64748B", fontWeight: 500 }}>
-                                                        Consumed
-                                                    </span>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                        {(() => {
+                                                            const approvedQty = Number(item.quantity_approved || item.quantity_requested || 1);
+                                                            const returnedQty = Number(item.quantity_returned || 0);
+                                                            const usedQty = Math.max(0, approvedQty - returnedQty);
+                                                            const draftVal = materialReturnQtys[item.id] !== undefined ? materialReturnQtys[item.id] : returnedQty;
+                                                            return (
+                                                                <>
+                                                                    <span style={{ fontSize: 11, color: returnedQty > 0 ? "#15803D" : "#64748B", fontWeight: 600 }}>
+                                                                        {returnedQty > 0
+                                                                            ? `${returnedQty} returned · ${usedQty} used`
+                                                                            : `${usedQty} consumed`}
+                                                                    </span>
+                                                                    {viewChecklistModal.status === "Approved" && (
+                                                                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                                            <input
+                                                                                type="number"
+                                                                                min={0}
+                                                                                max={approvedQty}
+                                                                                value={draftVal}
+                                                                                disabled={returningMaterialId === item.id}
+                                                                                onChange={(e) =>
+                                                                                    setMaterialReturnQtys((prev) => ({
+                                                                                        ...prev,
+                                                                                        [item.id]: Math.max(0, Math.min(approvedQty, parseInt(e.target.value || "0", 10) || 0)),
+                                                                                    }))
+                                                                                }
+                                                                                style={{
+                                                                                    width: 52,
+                                                                                    padding: "3px 6px",
+                                                                                    fontSize: 11,
+                                                                                    fontWeight: 700,
+                                                                                    borderRadius: 6,
+                                                                                    border: "1px solid #CBD5E1",
+                                                                                    textAlign: "center",
+                                                                                }}
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={returningMaterialId === item.id}
+                                                                                onClick={() => handleReturnMaterialQty(viewChecklistModal.checklist_id, item, draftVal)}
+                                                                                style={{
+                                                                                    fontSize: 10,
+                                                                                    fontWeight: 700,
+                                                                                    padding: "4px 8px",
+                                                                                    borderRadius: 6,
+                                                                                    border: "1px solid #86EFAC",
+                                                                                    background: "#F0FDF4",
+                                                                                    color: "#15803D",
+                                                                                    cursor: returningMaterialId === item.id ? "not-allowed" : "pointer",
+                                                                                }}
+                                                                            >
+                                                                                {returningMaterialId === item.id ? "Saving..." : "Return Qty"}
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div>
                                                 )}
                                             </div>
                                         ))}
@@ -1752,6 +2333,70 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                     </div>
                 )}
             </Modal>
+
+            {/* Modal: Report Failed Booking (Customer Did Not Sign Quotation) */}
+            {failedModal && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                    <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 480, padding: 24, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, borderBottom: "1px solid #F0F2F5", paddingBottom: 10 }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#991B1B" }}>
+                                    Report Failed Booking
+                                </h3>
+                                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#6B7280" }}>
+                                    Booking #{failedModal.booking_id} · {failedModal.service} ({failedModal.client_name})
+                                </p>
+                            </div>
+                            <button onClick={() => !reportingFailed && setFailedModal(null)} style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#9CA3AF" }}>✕</button>
+                        </div>
+
+                        <p style={{ fontSize: 12, color: "#475569", margin: "0 0 12px" }}>
+                            Tools and materials are verified returned. Please explain why the customer failed or refused to sign the quotation so the Manager can review and verify.
+                        </p>
+
+                        <div>
+                            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                                Reason for Failed Booking *
+                            </label>
+                            <textarea
+                                className="input-field"
+                                rows={3}
+                                placeholder="e.g. Customer did not sign the quotation in person due to disagreement on service scope / price."
+                                value={failedReason}
+                                onChange={(e) => setFailedReason(e.target.value)}
+                            />
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                disabled={reportingFailed}
+                                onClick={() => setFailedModal(null)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={reportingFailed || failedReason.trim().length < 5}
+                                onClick={handleReportFailedBooking}
+                                style={{
+                                    padding: "8px 16px",
+                                    borderRadius: 10,
+                                    border: "none",
+                                    background: reportingFailed || failedReason.trim().length < 5 ? "#FCA5A5" : "#DC2626",
+                                    color: "#FFFFFF",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    cursor: reportingFailed || failedReason.trim().length < 5 ? "not-allowed" : "pointer",
+                                }}
+                            >
+                                {reportingFailed ? "Submitting..." : "Submit Failed Booking"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Modal: Collect Payment, Submit Service Report & Turn Over to Manager */}
             {completeModal && (
@@ -2151,6 +2796,424 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                 Close
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: Submit / View Ocular Inspection Result (Before & After Task) */}
+            {ocularModalJob && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                    <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, borderBottom: "1px solid #F1F5F9", paddingBottom: 12 }}>
+                            <div>
+                                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#1E2F5F" }}>
+                                    {ocularReadOnly ? "Ocular Inspection Result" : "Submit Ocular Inspection Result"}
+                                </h3>
+                                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#64748B" }}>
+                                    Booking #{ocularModalJob.booking_id} · {ocularModalJob.client_name}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Close modal"
+                                onClick={() => !ocularSubmitting && setOcularModalJob(null)}
+                                style={{ border: "none", background: "transparent", fontSize: 18, cursor: "pointer", color: "#94A3B8" }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <form className="ct-user-form" onSubmit={handleSubmitOcularResult} noValidate style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                            {ocularFormError && (
+                                <div role="alert" style={{ padding: "10px 12px", borderRadius: 10, background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", fontSize: 12, fontWeight: 600 }}>
+                                    {ocularFormError}
+                                </div>
+                            )}
+
+                            {/* Rooms List */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#1E2F5F" }}>
+                                        Inspected Rooms ({ocularRooms.length})
+                                    </span>
+                                    {!ocularReadOnly && (
+                                        <button
+                                            type="button"
+                                            className="btn-secondary"
+                                            style={{ padding: "5px 10px", fontSize: 11 }}
+                                            onClick={() => setOcularRooms((prev) => [...prev, createDefaultOcularRoom(prev.length + 1)])}
+                                        >
+                                            + Add Room
+                                        </button>
+                                    )}
+                                </div>
+
+                                {ocularRooms.map((room, idx) => {
+                                    const est = computeOcularRoomEstimate(room);
+                                    return (
+                                        <div
+                                            key={`tech-room-${idx}`}
+                                            style={{
+                                                border: "1px solid #E2E8F0",
+                                                borderRadius: 12,
+                                                padding: 12,
+                                                background: "#F8FAFC",
+                                                display: "flex",
+                                                flexDirection: "column",
+                                                gap: 10,
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                                <span style={{ fontSize: 12, fontWeight: 700, color: "#1E2F5F" }}>
+                                                    Room #{idx + 1}
+                                                </span>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                    {est && (
+                                                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#065F46" }}>
+                                                            Est. {est.hp} HP · {est.btu.toLocaleString()} BTU/hr
+                                                        </span>
+                                                    )}
+                                                    {!ocularReadOnly && ocularRooms.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setOcularRooms((prev) => prev.filter((_, i) => i !== idx))}
+                                                            style={{ border: "none", background: "transparent", color: "#DC2626", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 8 }}>
+                                                <div>
+                                                    <label htmlFor={`tech-room-name-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Room Name
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-name-${idx}`}
+                                                        type="text"
+                                                        disabled={ocularReadOnly}
+                                                        value={room.room_name}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, room_name: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        placeholder="e.g. Living Area"
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-cat-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Type <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                                    </label>
+                                                    <select
+                                                        id={`tech-room-cat-${idx}`}
+                                                        disabled={ocularReadOnly}
+                                                        required
+                                                        value={room.room_category}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, room_category: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    >
+                                                        {OCULAR_ROOM_CATEGORIES.map((cat) => (
+                                                            <option key={cat} value={cat}>
+                                                                {cat}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-unit-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Unit
+                                                    </label>
+                                                    <select
+                                                        id={`tech-room-unit-${idx}`}
+                                                        disabled={ocularReadOnly}
+                                                        value={room.unit_of_measurement}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, unit_of_measurement: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    >
+                                                        <option value="Meters">Meters</option>
+                                                        <option value="Feet">Feet</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                                                <div>
+                                                    <label htmlFor={`tech-room-len-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Length ({room.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-len-${idx}`}
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.5"
+                                                        required
+                                                        disabled={ocularReadOnly}
+                                                        value={room.room_length}
+                                                        onChange={(ev) => {
+                                                            setOcularFormError("");
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, room_length: ev.target.value } : r))
+                                                            );
+                                                        }}
+                                                        placeholder="e.g. 4.5"
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-wid-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Width ({room.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-wid-${idx}`}
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.5"
+                                                        required
+                                                        disabled={ocularReadOnly}
+                                                        value={room.room_width}
+                                                        onChange={(ev) => {
+                                                            setOcularFormError("");
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, room_width: ev.target.value } : r))
+                                                            );
+                                                        }}
+                                                        placeholder="e.g. 3.5"
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-hei-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Height ({room.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-hei-${idx}`}
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="1"
+                                                        required
+                                                        disabled={ocularReadOnly}
+                                                        value={room.ceiling_height}
+                                                        onChange={(ev) => {
+                                                            setOcularFormError("");
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, ceiling_height: ev.target.value } : r))
+                                                            );
+                                                        }}
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px 90px", gap: 8 }}>
+                                                <div>
+                                                    <label htmlFor={`tech-room-sun-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Sun Exposure
+                                                    </label>
+                                                    <select
+                                                        id={`tech-room-sun-${idx}`}
+                                                        disabled={ocularReadOnly}
+                                                        value={room.sun_exposure_level}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, sun_exposure_level: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    >
+                                                        {OCULAR_SUN_LEVELS.map((opt) => (
+                                                            <option key={opt} value={opt}>
+                                                                {opt}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-win-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Window Size
+                                                    </label>
+                                                    <select
+                                                        id={`tech-room-win-${idx}`}
+                                                        disabled={ocularReadOnly}
+                                                        value={room.window_size_glazing}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, window_size_glazing: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    >
+                                                        {OCULAR_WINDOW_SIZES.map((opt) => (
+                                                            <option key={opt} value={opt}>
+                                                                {opt}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-occ-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Pax
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-occ-${idx}`}
+                                                        type="number"
+                                                        min="1"
+                                                        required
+                                                        disabled={ocularReadOnly}
+                                                        value={room.maximum_occupancy}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, maximum_occupancy: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label htmlFor={`tech-room-heat-${idx}`} style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                                        Appliances
+                                                    </label>
+                                                    <input
+                                                        id={`tech-room-heat-${idx}`}
+                                                        type="number"
+                                                        min="0"
+                                                        required
+                                                        disabled={ocularReadOnly}
+                                                        value={room.heat_generating_equipment}
+                                                        onChange={(ev) =>
+                                                            setOcularRooms((prev) =>
+                                                                prev.map((r, i) => (i === idx ? { ...r, heat_generating_equipment: ev.target.value } : r))
+                                                            )
+                                                        }
+                                                        className="input-field"
+                                                        style={{ fontSize: 12, padding: "6px 8px" }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Task Note & Attachment */}
+                            <div>
+                                <label htmlFor="ocular-task-notes" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                    Task Note
+                                </label>
+                                <input
+                                    id="ocular-task-notes"
+                                    type="text"
+                                    disabled={ocularReadOnly}
+                                    value={ocularBeforeNotes}
+                                    onChange={(ev) => setOcularBeforeNotes(ev.target.value)}
+                                    placeholder="Site observation or inspection note..."
+                                    className="input-field"
+                                    style={{ fontSize: 12, padding: "7px 10px" }}
+                                />
+                                {!ocularReadOnly && (
+                                    <input
+                                        type="file"
+                                        aria-label="Task note attachment"
+                                        accept="image/jpeg,image/png,image/jpg,image/webp,.pdf,.doc,.docx"
+                                        style={{ marginTop: 6, fontSize: 11, width: "100%" }}
+                                        onChange={(ev) => {
+                                            const f = ev.target.files?.[0] || null;
+                                            setOcularBeforePhoto(f);
+                                            if (!f) {
+                                                setOcularBeforePreview("");
+                                                return;
+                                            }
+                                            setOcularBeforePreview(
+                                                f.type?.startsWith("image/") ? URL.createObjectURL(f) : `file:${f.name}`
+                                            );
+                                        }}
+                                    />
+                                )}
+                                {ocularBeforePreview && (
+                                    ocularBeforePreview.startsWith("file:") ? (
+                                        <div style={{ marginTop: 6, fontSize: 11, color: "#334155", fontWeight: 600 }}>
+                                            Attached file: {ocularBeforePreview.slice(5)}
+                                        </div>
+                                    ) : /\.(pdf|docx?)($|\?)/i.test(ocularBeforePreview) ? (
+                                        <a
+                                            href={ocularBeforePreview}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: "#1D4ED8", fontWeight: 600, textDecoration: "underline" }}
+                                        >
+                                            View Attached File
+                                        </a>
+                                    ) : (
+                                        <img
+                                            src={ocularBeforePreview}
+                                            alt="Task note attachment preview"
+                                            style={{ marginTop: 6, maxHeight: 90, borderRadius: 8, border: "1px solid #E2E8F0", objectFit: "cover" }}
+                                        />
+                                    )
+                                )}
+                            </div>
+
+                            <div>
+                                <label htmlFor="ocular-tech-notes" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}>
+                                    Recommendations / Notes for Admin Assistant (Optional)
+                                </label>
+                                <textarea
+                                    id="ocular-tech-notes"
+                                    rows={2}
+                                    disabled={ocularReadOnly}
+                                    value={ocularTechNotes}
+                                    onChange={(ev) => setOcularTechNotes(ev.target.value)}
+                                    placeholder="e.g. Suggest 1.5 HP Inverter split unit; breaker is ready..."
+                                    className="input-field"
+                                    style={{ fontSize: 12 }}
+                                />
+                            </div>
+
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, paddingTop: 10, borderTop: "1px solid #F1F5F9" }}>
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    disabled={ocularSubmitting}
+                                    onClick={() => setOcularModalJob(null)}
+                                >
+                                    {ocularReadOnly ? "Close" : "Cancel"}
+                                </button>
+                                {!ocularReadOnly && (
+                                    <button
+                                        type="submit"
+                                        className="btn-primary"
+                                        disabled={ocularSubmitting}
+                                        style={{ background: "#2563EB" }}
+                                    >
+                                        {ocularSubmitting
+                                            ? "Submitting..."
+                                            : ocularModalJob.technician_ocular_result
+                                            ? "Update & Send to Admin Asst"
+                                            : "Submit to Admin Asst"}
+                                    </button>
+                                )}
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

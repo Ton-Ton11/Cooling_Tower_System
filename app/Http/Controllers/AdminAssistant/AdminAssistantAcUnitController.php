@@ -353,6 +353,20 @@ class AdminAssistantAcUnitController extends AdminAssistantBaseController
                     }
                 }
 
+                if ($bookingId && $paymentId && $soldByUser) {
+                    $bModel = \App\Models\Booking::find($bookingId);
+                    $pModel = \App\Models\Payment::find($paymentId);
+                    if ($bModel && $pModel) {
+                        $directAcReceipt = app(\App\Services\ReceiptService::class)->issueForBookingPayment($bModel, $pModel, $soldByUser);
+                        if ($directAcReceipt && $soldRecord && Schema::hasColumn('inventory_sales', 'receipt_reference_number')) {
+                            DB::table('inventory_sales')->where('sale_id', $soldRecord->sale_id)->update([
+                                'receipt_reference_number' => $directAcReceipt->receipt_number,
+                            ]);
+                            $soldRecord = DB::table('inventory_sales')->where('sale_id', $soldRecord->sale_id)->first();
+                        }
+                    }
+                }
+
                 // Activate Warranty Forecasting & Automatically Reserve Spare Parts (On-Hand or Order Base)
                 $warrantyForecastResult = app(\App\Services\ForecastingService::class)->activateAcUnitWarrantyForecast($acUnitId, [
                     'warranty_period'      => $warrantyPeriod,

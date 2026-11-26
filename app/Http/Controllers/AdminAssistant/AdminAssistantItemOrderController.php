@@ -38,7 +38,7 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
             ]);
         }
 
-        $rows = DB::table('item_orders as o')
+        $rawRows = DB::table('item_orders as o')
             ->join('users as c', 'c.user_id', '=', 'o.client_id')
             ->leftJoin('inventory_items as i', 'i.item_id', '=', 'o.item_id')
             ->leftJoin('bookings as b', 'b.booking_id', '=', 'o.linked_booking_id')
@@ -58,8 +58,30 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
                 'b.scheduled_date as linked_scheduled_date',
             ])
             ->orderByDesc('o.order_id')
-            ->get()
-            ->map(fn ($r) => CustomerItemOrderController::formatOrderRow($r))
+            ->get();
+
+        $rolePrefix = (int) ($request->user()?->role_id ?? 3) === 1 ? 'super-admin' : 'admin-assistant';
+        $receiptsMap = app(\App\Services\ReceiptService::class)->getFormattedReceiptsBySource(
+            \App\Models\Receipt::SOURCE_ITEM_ORDER,
+            $rawRows->pluck('order_id')->map(fn ($id) => (int) $id)->all(),
+            $rolePrefix
+        );
+
+        $rows = $rawRows
+            ->map(function ($r) use ($receiptsMap) {
+                $formatted = CustomerItemOrderController::formatOrderRow($r);
+                $orderReceipts = $receiptsMap[(int) $r->order_id] ?? [];
+                $primaryReceipt = collect($orderReceipts)
+                    ->sortByDesc(fn ($rcp) => ($rcp['document_kind'] !== 'acknowledgement_receipt' ? 1000000 : 0) + (int) $rcp['receipt_id'])
+                    ->first();
+                $formatted['receipts'] = $orderReceipts;
+                $formatted['receipt'] = $primaryReceipt;
+                if ($primaryReceipt && ! empty($primaryReceipt['receipt_number'])) {
+                    $formatted['receipt_reference_number'] = $primaryReceipt['receipt_number'];
+                }
+
+                return $formatted;
+            })
             ->values();
 
         $counts = [
@@ -104,7 +126,7 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
         $staffId = (int) $staff->user_id;
         $staffName = $this->formatName($staff->given_name ?? '', $staff->middle_name ?? null, $staff->last_name ?? '') ?: 'Admin Assistant';
 
-        DB::transaction(function () use ($order, $validated, $staffId, $staffName) {
+        DB::transaction(function () use ($order, $validated, $staff, $staffId, $staffName) {
             if ($validated['decision'] === 'sufficient') {
                 $isSparePart = $order->item_category === 'spare_part';
                 $nextOrderStatus = $isSparePart ? 'Awaiting Fulfillment Choice' : 'Ready for Pickup';
@@ -121,6 +143,14 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
                         ? trim(($order->notes ? $order->notes . "\n" : '') . "[Payment Confirmed by {$staffName}]: {$validated['notes']}")
                         : $order->notes,
                 ]);
+
+                if ((float) $order->amount_paid > 0) {
+                    app(\App\Services\ReceiptService::class)->issueForItemOrder(
+                        $order->fresh(),
+                        'down_payment',
+                        $staff
+                    );
+                }
 
                 $this->logActivity(
                     $staffId,
@@ -178,7 +208,7 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
         $staffId = (int) $staff->user_id;
         $staffName = $this->formatName($staff->given_name ?? '', $staff->middle_name ?? null, $staff->last_name ?? '') ?: 'Admin Assistant';
 
-        DB::transaction(function () use ($orderId, $validated, $staffId, $staffName) {
+        DB::transaction(function () use ($orderId, $validated, $staff, $staffId, $staffName) {
             $order = ItemOrder::where('order_id', $orderId)->lockForUpdate()->firstOrFail();
 
             if ($order->order_status !== 'Ready for Pickup') {
@@ -231,7 +261,6 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
             }
 
             $txDate = now();
-            $receiptRef = $this->generateUniqueReceiptRef();
             $walkInMethod = $validated['payment_method'] ?? 'Cash';
 
             $prevPaid = (float) $order->amount_paid;
@@ -257,7 +286,16 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
                 ? $this->formatName($customer->given_name ?? '', $customer->middle_name ?? null, $customer->last_name ?? '')
                 : 'Customer';
 
+            $order->payment_method = $finalMethod;
+            $invReceipt = app(\App\Services\ReceiptService::class)->issueForItemOrder(
+                $order,
+                'final_pickup',
+                $staff
+            );
+            $receiptRef = $invReceipt?->receipt_number ?: $this->generateUniqueReceiptRef();
+
             $order->update([
+                'payment_method' => $finalMethod,
                 'amount_paid' => $totalAmount,
                 'remaining_balance' => 0.00,
                 'stock_deducted' => true,
@@ -441,6 +479,26 @@ class AdminAssistantItemOrderController extends AdminAssistantBaseController
             ])
             ->first();
 
-        return $row ? CustomerItemOrderController::formatOrderRow($row) : null;
+        if (! $row) {
+            return null;
+        }
+
+        $formatted = CustomerItemOrderController::formatOrderRow($row);
+        $receiptsMap = app(\App\Services\ReceiptService::class)->getFormattedReceiptsBySource(
+            \App\Models\Receipt::SOURCE_ITEM_ORDER,
+            [(int) $row->order_id],
+            'admin-assistant'
+        );
+        $orderReceipts = $receiptsMap[(int) $row->order_id] ?? [];
+        $primaryReceipt = collect($orderReceipts)
+            ->sortByDesc(fn ($rcp) => ($rcp['document_kind'] !== 'acknowledgement_receipt' ? 1000000 : 0) + (int) $rcp['receipt_id'])
+            ->first();
+        $formatted['receipts'] = $orderReceipts;
+        $formatted['receipt'] = $primaryReceipt;
+        if ($primaryReceipt && ! empty($primaryReceipt['receipt_number'])) {
+            $formatted['receipt_reference_number'] = $primaryReceipt['receipt_number'];
+        }
+
+        return $formatted;
     }
 }

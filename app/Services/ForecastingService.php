@@ -1815,6 +1815,23 @@ class ForecastingService
 
         $today = now()->startOfDay();
 
+        $receiptService = app(\App\Services\ReceiptService::class);
+        $orderIdsForReceipts = $ordersByUnitId->pluck('order_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $bookingIdsForReceipts = $salesByUnitId->pluck('booking_id')
+            ->concat($ordersByUnitId->pluck('installation_booking_id'))
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $acOrderReceiptsMap = ! empty($orderIdsForReceipts)
+            ? $receiptService->getFormattedReceiptsBySource(\App\Models\Receipt::SOURCE_AC_UNIT_ORDER, $orderIdsForReceipts, 'customer')
+            : [];
+        $bookingReceiptsMap = ! empty($bookingIdsForReceipts)
+            ? $receiptService->getFormattedReceiptsBySource(\App\Models\Receipt::SOURCE_BOOKING, $bookingIdsForReceipts, 'customer')
+            : [];
+
         return $unitRows->map(function ($u) use (
             $salesByUnitId,
             $ordersByUnitId,
@@ -1823,7 +1840,9 @@ class ForecastingService
             $hasActiveMaintenanceBooking,
             $recommendedServiceId,
             $user,
-            $today
+            $today,
+            $acOrderReceiptsMap,
+            $bookingReceiptsMap
         ) {
             $uid = (int) $u->ac_unit_id;
             $sale = $salesByUnitId->get($uid);
@@ -1929,10 +1948,23 @@ class ForecastingService
                 'quantity'           => (int) $p->quantity_on_hand,
             ])->values()->all();
 
+            $unitReceipts = collect();
+            if ($order && ! empty($order->order_id)) {
+                $unitReceipts = $unitReceipts->concat($acOrderReceiptsMap[(int) $order->order_id] ?? []);
+            }
+            if ($order && ! empty($order->installation_booking_id)) {
+                $unitReceipts = $unitReceipts->concat($bookingReceiptsMap[(int) $order->installation_booking_id] ?? []);
+            }
+            if ($sale && ! empty($sale->booking_id)) {
+                $unitReceipts = $unitReceipts->concat($bookingReceiptsMap[(int) $sale->booking_id] ?? []);
+            }
+            $dedupedUnitReceipts = $unitReceipts->unique('receipt_id')->sortBy('receipt_id')->values()->all();
+
             return [
                 'ac_unit_id'                            => $uid,
                 'sale_id'                               => $sale ? (int) $sale->sale_id : null,
                 'order_id'                              => $order ? (int) $order->order_id : null,
+                'receipts'                              => $dedupedUnitReceipts,
                 'brand'                                 => $u->brand,
                 'model'                                 => $u->model,
                 'serial_number'                         => $u->serial_number,

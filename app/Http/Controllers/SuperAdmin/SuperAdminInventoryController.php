@@ -831,6 +831,22 @@ class SuperAdminInventoryController extends SuperAdminBaseController
                 'last_updated' => now(),
             ]);
 
+            $bookingModel = \App\Models\Booking::find($bookingId);
+            $paymentModel = \App\Models\Payment::find($paymentId);
+            if ($bookingModel && $paymentModel && $request->user()) {
+                $invReceipt = app(\App\Services\ReceiptService::class)->issueForBookingPayment(
+                    $bookingModel,
+                    $paymentModel,
+                    $request->user()
+                );
+                if ($invReceipt && isset($saleId) && \Illuminate\Support\Facades\Schema::hasColumn('inventory_sales', 'receipt_reference_number')) {
+                    DB::table('inventory_sales')->where('sale_id', $saleId)->update([
+                        'receipt_reference_number' => $invReceipt->receipt_number,
+                    ]);
+                    $saleRecord = DB::table('inventory_sales')->where('sale_id', $saleId)->first();
+                }
+            }
+
             $this->logActivity(
                 (int) $request->user()->user_id,
                 'SALE',

@@ -354,6 +354,12 @@ class TopbarWidgetController extends Controller
                     $msg = 'Your booking is complete! Thank you for choosing Cooling Tower — you can now leave a rating and feedback.';
                 } elseif ($b->quotation_status === 'Quotation Issued') {
                     $msg = 'Your official quotation is ready for review and acceptance.';
+                } elseif ($b->quotation_status === 'waiting for customer to sign') {
+                    $msg = 'Service is now in progress. Quotation is waiting for your signature in person.';
+                } elseif (is_string($b->quotation_status) && str_starts_with($b->quotation_status, 'Signed by ')) {
+                    $msg = 'Quotation ' . $b->quotation_status . '. Service payment turned over for verification.';
+                } elseif ($status === 'Cancelled' && ! empty($sDetails['booking_fee_forfeited'])) {
+                    $msg = 'Booking cancelled because quotation was not signed. The reservation booking fee is forfeited and recorded.';
                 } else {
                     $msg = 'Scheduled for ' . ($b->scheduled_date ? $b->scheduled_date->format('M d, Y h:i A') : 'TBD');
                 }
@@ -414,6 +420,42 @@ class TopbarWidgetController extends Controller
                         'time_ago'    => $created->diffForHumans(),
                         'target_page' => 'bookings',
                         'unread'      => ! $lastReadAt || $created->gt($lastReadAt),
+                    ];
+                }
+            }
+
+            // 3.5. Official Receipts & Invoices (Issued / Voided)
+            if (Schema::hasTable('receipts')) {
+                $customerReceipts = DB::table('receipts')
+                    ->where('client_id', $userId)
+                    ->orderByDesc('updated_at')
+                    ->limit(5)
+                    ->get();
+
+                foreach ($customerReceipts as $rcp) {
+                    $eventTime = ($rcp->status === 'Voided' && $rcp->voided_at)
+                        ? Carbon::parse($rcp->voided_at)
+                        : ($rcp->issued_at ? Carbon::parse($rcp->issued_at) : Carbon::parse($rcp->created_at));
+                    $isVoided = $rcp->status === 'Voided';
+                    $kindLabel = $rcp->document_kind === 'acknowledgement_receipt'
+                        ? 'Acknowledgement Receipt'
+                        : ($rcp->document_kind === 'sales_invoice' ? 'Sales Invoice' : 'Service Invoice');
+                    $targetPage = $rcp->source_type === 'item_order'
+                        ? 'buy_items'
+                        : ($rcp->source_type === 'ac_unit_order' ? 'warranty' : 'bookings');
+
+                    $items[] = [
+                        'id'          => 'cust_receipt_' . $rcp->receipt_id . '_' . strtolower($rcp->status),
+                        'type'        => 'receipt',
+                        'badge'       => $isVoided ? 'Receipt Voided' : 'Official Receipt',
+                        'badge_color' => $isVoided ? 'rose' : 'emerald',
+                        'title'       => ($isVoided ? "Voided: {$rcp->receipt_number}" : "{$kindLabel} Issued: {$rcp->receipt_number}"),
+                        'message'     => $isVoided
+                            ? "Receipt {$rcp->receipt_number} was voided" . ($rcp->void_reason ? " ({$rcp->void_reason})." : '.')
+                            : "Amount paid: ₱" . number_format((float) $rcp->amount_paid_now, 2) . " via {$rcp->payment_method}. Ready to view or download PDF.",
+                        'time_ago'    => $eventTime->diffForHumans(),
+                        'target_page' => $targetPage,
+                        'unread'      => ! $lastReadAt || $eventTime->gt($lastReadAt),
                     ];
                 }
             }
@@ -556,7 +598,37 @@ class TopbarWidgetController extends Controller
                 }
             }
 
-            // 4. Active & Upcoming Team Dispatches
+            // 4. Invalid Failed Booking Notices for Head Technician / Crew
+            $invalidFailedBookings = Booking::with(['service', 'client'])
+                ->where('service_details', 'like', '%failed_booking%')
+                ->orderByDesc('updated_at')
+                ->limit(5)
+                ->get();
+
+            foreach ($invalidFailedBookings as $ifb) {
+                $details = is_array($ifb->service_details)
+                    ? $ifb->service_details
+                    : (is_string($ifb->service_details) ? (json_decode($ifb->service_details, true) ?: []) : []);
+                $fb = $details['failed_booking'] ?? null;
+                if (($fb['status'] ?? '') !== 'Invalid') {
+                    continue;
+                }
+                $fbTime = ! empty($fb['reviewed_at']) ? Carbon::parse($fb['reviewed_at']) : ($ifb->updated_at ? Carbon::parse($ifb->updated_at) : now());
+                $srvName = $ifb->service?->service_name ?? 'Service';
+                $items[] = [
+                    'id'          => 'head_invalid_failed_' . $ifb->booking_id,
+                    'type'        => 'failed_booking_invalid',
+                    'badge'       => 'Invalid Failed Booking',
+                    'badge_color' => 'rose',
+                    'title'       => "Invalid Failed Booking Notice: Booking #{$ifb->booking_id} ({$srvName})",
+                    'message'     => 'Manager marked failed booking report as Invalid: ' . ($fb['invalid_reason'] ?? 'Please review and proceed with service or resubmit.'),
+                    'time_ago'    => $fbTime->diffForHumans(),
+                    'target_page' => 'bookings',
+                    'unread'      => ! $lastReadAt || $fbTime->gt($lastReadAt),
+                ];
+            }
+
+            // 5. Active & Upcoming Team Dispatches
             $teamBookings = Booking::with(['service', 'client'])
                 ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
                 ->orderBy('scheduled_date', 'asc')
@@ -780,6 +852,109 @@ class TopbarWidgetController extends Controller
                         'time_ago'    => $coTime->diffForHumans(),
                         'target_page' => 'ac-units',
                         'unread'      => ! $lastReadAt || $coTime->gt($lastReadAt),
+                    ];
+                }
+            }
+
+            // Pending Receipt Void Requests awaiting Manager / Super Admin Approval
+            if (in_array($roleId, [1, 2], true) && Schema::hasTable('receipts')) {
+                $pendingVoidReceipts = DB::table('receipts')
+                    ->where('status', 'Void Requested')
+                    ->orderByDesc('updated_at')
+                    ->limit(5)
+                    ->get();
+
+                foreach ($pendingVoidReceipts as $vr) {
+                    $vrTime = $vr->updated_at ? Carbon::parse($vr->updated_at) : now();
+                    $items[] = [
+                        'id'          => 'void_req_' . $vr->receipt_id,
+                        'type'        => 'receipt_void_request',
+                        'badge'       => 'Void Requested',
+                        'badge_color' => 'amber',
+                        'title'       => "Void Approval Needed: {$vr->receipt_number}",
+                        'message'     => "Customer: {$vr->customer_name} • ₱" . number_format((float) $vr->amount_paid_now, 2) . ($vr->void_reason ? " — Reason: {$vr->void_reason}" : ''),
+                        'time_ago'    => $vrTime->diffForHumans(),
+                        'target_page' => 'sales',
+                        'unread'      => ! $lastReadAt || $vrTime->gt($lastReadAt),
+                    ];
+                }
+            }
+
+            // Pending Failed Booking Reports awaiting Manager / Super Admin Review
+            if (in_array($roleId, [1, 2], true)) {
+                $pendingFailedBookings = Booking::with(['service', 'client'])
+                    ->where('booking_status', 'In-Progress')
+                    ->where('service_details', 'like', '%Pending Manager Review%')
+                    ->orderByDesc('updated_at')
+                    ->limit(5)
+                    ->get();
+
+                foreach ($pendingFailedBookings as $pfb) {
+                    $details = is_array($pfb->service_details)
+                        ? $pfb->service_details
+                        : (is_string($pfb->service_details) ? (json_decode($pfb->service_details, true) ?: []) : []);
+                    $fb = $details['failed_booking'] ?? null;
+                    if (($fb['status'] ?? '') !== 'Pending Manager Review') {
+                        continue;
+                    }
+                    $fbTime = ! empty($fb['submitted_at']) ? Carbon::parse($fb['submitted_at']) : ($pfb->updated_at ? Carbon::parse($pfb->updated_at) : now());
+                    $srvName = $pfb->service?->service_name ?? 'Service';
+                    $techName = $fb['submitted_by_name'] ?? 'Technician';
+                    $items[] = [
+                        'id'          => 'failed_booking_review_' . $pfb->booking_id,
+                        'type'        => 'failed_booking_review',
+                        'badge'       => 'Failed Booking Review',
+                        'badge_color' => 'rose',
+                        'title'       => "Failed Booking Report: Booking #{$pfb->booking_id} ({$srvName})",
+                        'message'     => "Submitted by {$techName}: " . \Illuminate\Support\Str::limit((string) ($fb['reason'] ?? ''), 130),
+                        'time_ago'    => $fbTime->diffForHumans(),
+                        'target_page' => 'bookings',
+                        'unread'      => ! $lastReadAt || $fbTime->gt($lastReadAt),
+                    ];
+                }
+            }
+
+            // Invalid Failed Booking Notices for Assigned Technician (roleId = 5)
+            if ($roleId === 5) {
+                $myTeamIds = DB::table('technician_team_members')
+                    ->where('technician_id', $userId)
+                    ->pluck('team_id')
+                    ->all();
+
+                $techInvalidFailed = Booking::with(['service', 'client'])
+                    ->where('service_details', 'like', '%failed_booking%')
+                    ->where(function ($q) use ($userId, $myTeamIds) {
+                        $q->where('lead_technician_id', $userId)
+                            ->orWhere('assistant_technician_id', $userId)
+                            ->orWhere('assigned_tech_id', $userId);
+                        if (! empty($myTeamIds)) {
+                            $q->orWhereIn('assigned_team_id', $myTeamIds);
+                        }
+                    })
+                    ->orderByDesc('updated_at')
+                    ->limit(5)
+                    ->get();
+
+                foreach ($techInvalidFailed as $tif) {
+                    $details = is_array($tif->service_details)
+                        ? $tif->service_details
+                        : (is_string($tif->service_details) ? (json_decode($tif->service_details, true) ?: []) : []);
+                    $fb = $details['failed_booking'] ?? null;
+                    if (($fb['status'] ?? '') !== 'Invalid') {
+                        continue;
+                    }
+                    $fbTime = ! empty($fb['reviewed_at']) ? Carbon::parse($fb['reviewed_at']) : ($tif->updated_at ? Carbon::parse($tif->updated_at) : now());
+                    $srvName = $tif->service?->service_name ?? 'Service';
+                    $items[] = [
+                        'id'          => 'tech_invalid_failed_' . $tif->booking_id,
+                        'type'        => 'failed_booking_invalid',
+                        'badge'       => 'Invalid Failed Booking',
+                        'badge_color' => 'rose',
+                        'title'       => "Notice: Invalid Failed Booking Report (Booking #{$tif->booking_id})",
+                        'message'     => "{$srvName}: Manager rejected failed booking report — " . ($fb['invalid_reason'] ?? 'Please review and follow up.'),
+                        'time_ago'    => $fbTime->diffForHumans(),
+                        'target_page' => 'bookings',
+                        'unread'      => ! $lastReadAt || $fbTime->gt($lastReadAt),
                     ];
                 }
             }

@@ -54,6 +54,7 @@ class ManagerSalesController extends ManagerBaseController
         return response()->json([
             'data'            => $records->values(),
             'summary'         => $summary,
+            'daily_closeout'  => app(\App\Services\ReceiptService::class)->getDailyCloseoutSummary($request->query('closeout_date')),
             'weekly_revenue'  => $this->buildWeeklyRevenueSeries($paidRecords),
             'monthly_revenue' => $this->buildMonthlyRevenueSeries($paidRecords),
             'inventory_sales' => $inventorySales,

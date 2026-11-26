@@ -46,6 +46,7 @@ use App\Http\Controllers\Customer\CustomerItemOrderController;
 use App\Http\Controllers\Customer\CustomerFeedbackController;
 use App\Http\Controllers\Customer\CustomerComplaintController;
 use App\Http\Controllers\Shared\CustomerSupportController;
+use App\Http\Controllers\Shared\ReceiptController;
 use App\Http\Controllers\Shared\TechnicianTeamController;
 use App\Http\Controllers\Shared\ToolChecklistController;
 use App\Http\Controllers\Shared\LocationAutocompleteController;
@@ -69,6 +70,10 @@ Route::get('/', function () {
 // Public & Authenticated Geospatial Address Autocomplete + Forward Geocoding
 Route::get('/api/location/autocomplete', [LocationAutocompleteController::class, 'autocomplete'])
     ->name('location.autocomplete');
+
+// Public / Authenticated Official Receipt Cryptographic Verification
+Route::get('/verify-receipt/{receiptNumber}/{code}', [ReceiptController::class, 'verify'])
+    ->name('receipts.verify');
 
 Route::get('/dashboard', function () {
     if (! auth()->check()) {
@@ -107,6 +112,7 @@ Route::prefix('super-admin')
             Route::patch('/bookings/{bookingId}/approve', 'approveBooking')->name('bookings.approve');
             Route::match(['post', 'patch'], '/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
             Route::patch('/bookings/{bookingId}/invalidate-turnover', 'invalidateTurnover')->name('bookings.invalidate-turnover');
+            Route::post('/bookings/{bookingId}/failed-booking/review', 'reviewFailedBooking')->name('bookings.failed.review');
             Route::post('/bookings/{bookingId}/report', 'reportBooking')->name('bookings.report');
             Route::post('/bookings/{bookingId}/report/confirm', 'confirmReportReview')->name('bookings.report.confirm');
             Route::post('/unit-orders/{orderId}/confirm', 'confirmUnitOrder')->name('unit-orders.confirm');
@@ -141,6 +147,7 @@ Route::prefix('super-admin')
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
+            Route::post('/checklists/{checklistId}/items/{itemId}/return-material', 'returnMaterial')->name('checklists.items.return-material');
             Route::post('/checklists/{checklistId}/complete', 'complete')->name('checklists.complete');
         });
 
@@ -236,9 +243,17 @@ Route::prefix('super-admin')
             Route::delete('/spare-parts/{itemId}', 'destroySparePart')->name('spare-parts.destroy');
         });
 
-        // ─── Sales Records ───
+        // ─── Sales Records & Official Receipts ───
         Route::controller(SuperAdminSalesController::class)->group(function () {
             Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
+        });
+
+        Route::controller(ReceiptController::class)->group(function () {
+            Route::get('/receipts', 'index')->name('receipts.index');
+            Route::get('/receipts/{receiptId}/print', 'staffPrint')->name('receipts.print');
+            Route::get('/receipts/{receiptId}/pdf', 'staffPdf')->name('receipts.pdf');
+            Route::post('/receipts/{receiptId}/request-void', 'requestVoid')->name('receipts.request-void');
+            Route::post('/receipts/{receiptId}/approve-void', 'approveVoid')->name('receipts.approve-void');
         });
 
         // ─── Documents ───
@@ -332,6 +347,7 @@ Route::prefix('manager')
             Route::patch('/bookings/{bookingId}/approve', 'approveBooking')->name('bookings.approve');
             Route::match(['post', 'patch'], '/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
             Route::patch('/bookings/{bookingId}/invalidate-turnover', 'invalidateTurnover')->name('bookings.invalidate-turnover');
+            Route::post('/bookings/{bookingId}/failed-booking/review', 'reviewFailedBooking')->name('bookings.failed.review');
             Route::post('/bookings/{bookingId}/report', 'reportBooking')->name('bookings.report');
             Route::post('/unit-orders/{orderId}/confirm', 'confirmUnitOrder')->name('unit-orders.confirm');
         });
@@ -362,6 +378,14 @@ Route::prefix('manager')
 
         Route::controller(ManagerSalesController::class)->group(function () {
             Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
+        });
+
+        Route::controller(ReceiptController::class)->group(function () {
+            Route::get('/receipts', 'index')->name('receipts.index');
+            Route::get('/receipts/{receiptId}/print', 'staffPrint')->name('receipts.print');
+            Route::get('/receipts/{receiptId}/pdf', 'staffPdf')->name('receipts.pdf');
+            Route::post('/receipts/{receiptId}/request-void', 'requestVoid')->name('receipts.request-void');
+            Route::post('/receipts/{receiptId}/approve-void', 'approveVoid')->name('receipts.approve-void');
         });
 
         // ─── Documents / Forms ───
@@ -542,6 +566,7 @@ Route::prefix('admin-assistant')
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
+            Route::post('/checklists/{checklistId}/items/{itemId}/return-material', 'returnMaterial')->name('checklists.items.return-material');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -561,6 +586,13 @@ Route::prefix('admin-assistant')
 
         Route::controller(AdminAssistantSalesController::class)->group(function () {
             Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
+        });
+
+        Route::controller(ReceiptController::class)->group(function () {
+            Route::get('/receipts', 'index')->name('receipts.index');
+            Route::get('/receipts/{receiptId}/print', 'staffPrint')->name('receipts.print');
+            Route::get('/receipts/{receiptId}/pdf', 'staffPdf')->name('receipts.pdf');
+            Route::post('/receipts/{receiptId}/request-void', 'requestVoid')->name('receipts.request-void');
         });
 
         // ─── Documents / Forms ───
@@ -636,6 +668,7 @@ Route::prefix('tools-man')
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
+            Route::post('/checklists/{checklistId}/items/{itemId}/return-material', 'returnMaterial')->name('checklists.items.return-material');
             Route::post('/checklists/{checklistId}/complete', 'complete')->name('checklists.complete');
         });
 
@@ -663,6 +696,8 @@ Route::prefix('technician')
             Route::get('/bookings', 'bookingsIndex')->name('bookings.index');
             Route::post('/bookings/{bookingId}/start', 'startJob')->name('bookings.start');
             Route::post('/bookings/{bookingId}/complete', 'completeJob')->name('bookings.complete');
+            Route::post('/bookings/{bookingId}/failed-booking', 'reportFailedBooking')->name('bookings.failed');
+            Route::post('/bookings/{bookingId}/ocular-result', 'submitOcularResult')->name('bookings.ocular-result');
             Route::post('/bookings/{bookingId}/materials', 'logMaterial')->name('bookings.materials');
             Route::get('/materials-list', 'materialsList')->name('materials.list');
             Route::get('/my-tools', 'myTools')->name('tools.mine');
@@ -675,6 +710,7 @@ Route::prefix('technician')
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
+            Route::post('/checklists/{checklistId}/items/{itemId}/return-material', 'returnMaterial')->name('checklists.items.return-material');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -718,6 +754,8 @@ Route::prefix('head-technician')
             Route::get('/bookings', 'bookingsIndex')->name('bookings.index');
             Route::post('/bookings/{bookingId}/start', 'startJob')->name('bookings.start');
             Route::post('/bookings/{bookingId}/complete', 'completeJob')->name('bookings.complete');
+            Route::post('/bookings/{bookingId}/failed-booking', 'reportFailedBooking')->name('bookings.failed');
+            Route::post('/bookings/{bookingId}/ocular-result', 'submitOcularResult')->name('bookings.ocular-result');
             Route::post('/bookings/{bookingId}/materials', 'logMaterial')->name('bookings.materials');
             Route::get('/materials-list', 'materialsList')->name('materials.list');
             Route::get('/my-tools', 'myTools')->name('tools.mine');
@@ -731,6 +769,7 @@ Route::prefix('head-technician')
             Route::delete('/checklists/{checklistId}/items', 'removeItems')->name('checklists.items.remove');
             Route::patch('/checklists/{checklistId}/items/{itemId}/status', 'updateToolStatus')->name('checklists.items.status');
             Route::patch('/checklists/{checklistId}/items/batch-status', 'batchUpdateToolStatus')->name('checklists.items.batch-status');
+            Route::post('/checklists/{checklistId}/items/{itemId}/return-material', 'returnMaterial')->name('checklists.items.return-material');
             Route::get('/available-catalog', 'availableCatalog')->name('available-catalog');
         });
 
@@ -776,6 +815,11 @@ Route::prefix('customer')
             Route::post('/item-orders', 'store')->name('item-orders.store');
             Route::post('/item-orders/{orderId}/complete-payment', 'completePayment')->name('item-orders.complete-payment');
             Route::post('/item-orders/{orderId}/fulfillment', 'selectFulfillment')->name('item-orders.fulfillment');
+        });
+
+        Route::controller(ReceiptController::class)->group(function () {
+            Route::get('/receipts/{receiptId}/print', 'customerPrint')->name('receipts.print');
+            Route::get('/receipts/{receiptId}/pdf', 'customerPdf')->name('receipts.pdf');
         });
 
         Route::controller(CustomerFeedbackController::class)->group(function () {

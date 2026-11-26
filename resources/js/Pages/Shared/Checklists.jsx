@@ -312,6 +312,8 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
     const [completing, setCompleting] = useState(false);
     const [updatingStatusId, setUpdatingStatusId] = useState(null);
     const [updatingQtyItemId, setUpdatingQtyItemId] = useState(null);
+    const [materialReturnDrafts, setMaterialReturnDrafts] = useState({});
+    const [returningMaterialId, setReturningMaterialId] = useState(null);
 
     // Reduction / Removal mode state per category group ('hand_tool', 'power_tool', 'material')
     const [removeModeByCategory, setRemoveModeByCategory] = useState({});
@@ -640,6 +642,36 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
             await fetchChecklists(false);
         } finally {
             setUpdatingStatusId(null);
+        }
+    };
+
+    // Handle Consumable Material Return Quantity back into Worker Inventory
+    const handleReturnMaterialQty = async (checklistId, item, newQty) => {
+        if (returningMaterialId) return;
+        const approvedQty = Number(item.quantity_approved ?? item.quantity_requested ?? 1);
+        const qty = Math.max(0, Math.min(approvedQty, parseInt(newQty, 10) || 0));
+        setReturningMaterialId(item.id);
+        try {
+            const url = ep.returnChecklistMaterial
+                ? ep.returnChecklistMaterial(checklistId, item.id)
+                : `/tools-man/checklists/${checklistId}/items/${item.id}/return-material`;
+            const { data } = await window.axios.post(url, {
+                quantity_returned: qty,
+            });
+            addToast(data?.message || `Updated returned quantity for ${item.item_name}.`);
+            if (data?.data) {
+                setManagingChecklist(data.data);
+            }
+            await fetchCatalog();
+            await fetchChecklists(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(
+                extractErrorMessage(error, "Unable to return material quantity."),
+                "error",
+            );
+        } finally {
+            setReturningMaterialId(null);
         }
     };
 
@@ -2302,20 +2334,35 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                                         ? "Damaged"
                                                                                         : item.status}
                                                                                 </span>
-                                                                            ) : (
-                                                                                <span
-                                                                                    style={{
-                                                                                        fontSize: 11,
-                                                                                        color: "#64748B",
-                                                                                        background: "#F1F5F9",
-                                                                                        padding: "2px 8px",
-                                                                                        borderRadius: 6,
-                                                                                        fontWeight: 600,
-                                                                                    }}
-                                                                                >
-                                                                                    Material
-                                                                                </span>
-                                                                            )}
+                                                                            ) : (() => {
+                                                                                const approvedQty = Number(item.quantity_approved ?? item.quantity_requested ?? 1);
+                                                                                const returnedQty = Number(item.quantity_returned ?? 0);
+                                                                                const usedQty = Math.max(0, approvedQty - returnedQty);
+                                                                                const matBg = returnedQty >= approvedQty ? "#D1FAE5" : returnedQty > 0 ? "#FEF3C7" : "#F1F5F9";
+                                                                                const matColor = returnedQty >= approvedQty ? "#065F46" : returnedQty > 0 ? "#92400E" : "#64748B";
+                                                                                const matLabel = returnedQty >= approvedQty ? "Returned" : returnedQty > 0 ? `Partial Return (${returnedQty}/${approvedQty})` : "Consumed";
+                                                                                return (
+                                                                                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                                                                        <span
+                                                                                            style={{
+                                                                                                fontSize: 11,
+                                                                                                color: matColor,
+                                                                                                background: matBg,
+                                                                                                padding: "2px 8px",
+                                                                                                borderRadius: 6,
+                                                                                                fontWeight: 700,
+                                                                                                display: "inline-block",
+                                                                                                width: "fit-content",
+                                                                                            }}
+                                                                                        >
+                                                                                            {matLabel}
+                                                                                        </span>
+                                                                                        <span style={{ fontSize: 10, color: "#64748B" }}>
+                                                                                            {usedQty} used · {returnedQty} returned
+                                                                                        </span>
+                                                                                    </div>
+                                                                                );
+                                                                            })()}
                                                                         </td>
                                                                         <td style={{ padding: "8px 12px" }}>
                                                                             {isTool ? (
@@ -2344,8 +2391,59 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                                     <option value="damaged">Damaged</option>
                                                                                     <option value="lost">Lost</option>
                                                                                 </select>
-                                                                            ) : (
-                                                                                <span style={{ color: "#94A3B8", fontSize: 11 }}>—</span>
+                                                                            ) : managingChecklist.status === "Approved" ? (() => {
+                                                                                const approvedQty = Number(item.quantity_approved ?? item.quantity_requested ?? 1);
+                                                                                const currentReturned = Number(item.quantity_returned ?? 0);
+                                                                                const draftQty = materialReturnDrafts[item.id] !== undefined ? materialReturnDrafts[item.id] : currentReturned;
+                                                                                const isSavingMat = returningMaterialId === item.id;
+                                                                                return (
+                                                                                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                                                                        <input
+                                                                                            type="number"
+                                                                                            min={0}
+                                                                                            max={approvedQty}
+                                                                                            value={draftQty}
+                                                                                            disabled={isSavingMat}
+                                                                                            onChange={(e) =>
+                                                                                                setMaterialReturnDrafts((prev) => ({
+                                                                                                    ...prev,
+                                                                                                    [item.id]: Math.max(0, Math.min(approvedQty, parseInt(e.target.value || "0", 10) || 0)),
+                                                                                                }))
+                                                                                            }
+                                                                                            style={{
+                                                                                                width: 48,
+                                                                                                height: 24,
+                                                                                                fontSize: 11,
+                                                                                                fontWeight: 700,
+                                                                                                textAlign: "center",
+                                                                                                border: "1px solid #CBD5E1",
+                                                                                                borderRadius: 5,
+                                                                                            }}
+                                                                                        />
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            disabled={isSavingMat}
+                                                                                            onClick={() => handleReturnMaterialQty(managingChecklist.checklist_id, item, draftQty)}
+                                                                                            style={{
+                                                                                                fontSize: 10,
+                                                                                                fontWeight: 700,
+                                                                                                padding: "4px 8px",
+                                                                                                borderRadius: 6,
+                                                                                                border: "1px solid #86EFAC",
+                                                                                                background: "#F0FDF4",
+                                                                                                color: "#15803D",
+                                                                                                cursor: isSavingMat ? "not-allowed" : "pointer",
+                                                                                                whiteSpace: "nowrap",
+                                                                                            }}
+                                                                                        >
+                                                                                            {isSavingMat ? "..." : "Return"}
+                                                                                        </button>
+                                                                                    </div>
+                                                                                );
+                                                                            })() : (
+                                                                                <span style={{ color: "#94A3B8", fontSize: 11 }}>
+                                                                                    {Number(item.quantity_returned ?? 0)} returned
+                                                                                </span>
                                                                             )}
                                                                         </td>
                                                                     </tr>

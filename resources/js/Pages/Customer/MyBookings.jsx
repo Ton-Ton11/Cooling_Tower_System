@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
+import ReceiptActionButton from "../../Components/ReceiptActionButton";
 import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
 import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
@@ -346,11 +347,11 @@ export default function MyBookings({
                                                     </span>
                                                 )}
                                                 <span className={`px-2.5 py-0.5 rounded-md text-[11px] font-semibold border ${
-                                                    qStatus === "Accepted"
+                                                    qStatus === "Accepted" || qStatus.startsWith("Signed by ")
                                                         ? "bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]"
                                                         : qStatus === "Quotation Issued"
                                                         ? "bg-[#EAF2FF] text-[#2563EB] border-[#C7DDFD]"
-                                                        : qStatus === "Declined"
+                                                        : ["Declined", "Customer Refused to Sign"].includes(qStatus)
                                                         ? "bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]"
                                                         : "bg-[#FFFBEB] text-[#B45309] border-[#FDE68A]"
                                                 }`}>
@@ -375,6 +376,7 @@ export default function MyBookings({
 
                                     {/* Action Buttons */}
                                     <div className="flex items-center gap-2 flex-wrap self-start lg:self-auto">
+                                        <ReceiptActionButton receipts={b.receipts} />
                                         {hasQuotationToReview && (
                                             <button
                                                 onClick={() => setViewDetailsBooking(b)}
@@ -967,9 +969,9 @@ export default function MyBookings({
                                     </div>
                                 </div>
                                 <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
-                                    viewDetailsBooking.quotation_status === "Accepted"
+                                    viewDetailsBooking.quotation_status === "Accepted" || String(viewDetailsBooking.quotation_status || "").startsWith("Signed by ")
                                         ? "bg-emerald-100 text-emerald-800"
-                                        : viewDetailsBooking.quotation_status === "Declined"
+                                        : ["Declined", "Customer Refused to Sign"].includes(viewDetailsBooking.quotation_status)
                                         ? "bg-rose-100 text-rose-800"
                                         : viewDetailsBooking.quotation_status === "Quotation Issued"
                                         ? "bg-blue-600 text-white shadow-sm"
@@ -1210,8 +1212,10 @@ export default function MyBookings({
                             </div>
                         )}
 
-                        <div className="pt-3 border-t border-gray-100 flex justify-end">
+                        <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-2">
+                            <ReceiptActionButton receipts={viewDetailsBooking.receipts} />
                             <button
+                                type="button"
                                 onClick={() => setViewDetailsBooking(null)}
                                 className="px-5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold transition"
                             >

@@ -67,6 +67,8 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
     const [catalogCategoryFilter, setCatalogCategoryFilter] = useState("All"); // 'All' | 'hand_tool' | 'power_tool' | 'material'
     const [updatingToolItemId, setUpdatingToolItemId] = useState(null);
     const [toolActions, setToolActions] = useState({}); // { [toolChecklistItemId]: 'returned' | 'damaged' | 'lost' }
+    const [materialReturnQtys, setMaterialReturnQtys] = useState({});
+    const [returningMaterialId, setReturningMaterialId] = useState(null);
     const [confirmModalOpen, setConfirmModalOpen] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
@@ -164,6 +166,58 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
         () => issuedTools.filter((t) => t.category_group === "power_tool"),
         [issuedTools]
     );
+
+    const issuedMaterials = useMemo(() => {
+        const list = [];
+        checklists.forEach((cl) => {
+            const clStatus = (cl.status || "").toLowerCase();
+            const bookingStatus = (cl.booking?.booking_status || cl.booking_status || "").toLowerCase();
+            if (clStatus !== "approved" || bookingStatus === "completed" || bookingStatus === "cancelled") return;
+            const items = Array.isArray(cl.items) ? cl.items : [];
+            items.forEach((item) => {
+                if ((item.item_type || "").toLowerCase() === "tool") return;
+                const q = searchQuery.trim().toLowerCase();
+                if (q) {
+                    const match =
+                        (item.item_name || "").toLowerCase().includes(q) ||
+                        (cl.client_name || "").toLowerCase().includes(q) ||
+                        (cl.service_name || "").toLowerCase().includes(q) ||
+                        String(cl.booking_id || "").includes(q);
+                    if (!match) return;
+                }
+                list.push({
+                    ...item,
+                    checklist_id: cl.checklist_id,
+                    checklist_status: cl.status,
+                    booking_id: cl.booking_id,
+                    client_name: cl.client_name || cl.booking?.client_name || "Customer",
+                    service_name: cl.service_name || cl.booking?.service_name || "Service",
+                });
+            });
+        });
+        return list;
+    }, [checklists, searchQuery]);
+
+    const handleReturnMaterialQty = async (materialItem, newQty) => {
+        if (returningMaterialId) return;
+        const maxQty = Number(materialItem.quantity_approved ?? materialItem.quantity_requested ?? 1);
+        const qty = Math.max(0, Math.min(maxQty, parseInt(newQty, 10) || 0));
+        setReturningMaterialId(materialItem.id);
+        try {
+            const { data } = await window.axios.post(
+                TECHNICIAN_ENDPOINTS.returnChecklistMaterial(materialItem.checklist_id, materialItem.id),
+                { quantity_returned: qty }
+            );
+            addToast(data?.message || `Updated returned quantity for ${materialItem.item_name}.`);
+            await fetchChecklists(false);
+            await fetchCatalog();
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to return material quantity."), "error");
+        } finally {
+            setReturningMaterialId(null);
+        }
+    };
 
     // Active pending tools requiring inspection
     const pendingTools = useMemo(() => {
@@ -645,7 +699,7 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                         className={`tab-item ${viewTab === "issued" ? "active" : ""}`}
                         onClick={() => setViewTab("issued")}
                     >
-                        Issued Tools ({issuedTools.length})
+                        Issued Tools &amp; Materials ({issuedTools.length + issuedMaterials.length})
                     </button>
                     <button
                         type="button"
@@ -831,6 +885,143 @@ export default function TechnicianTools({ addToast, onNavigate, onDataChanged })
                             "#10213F",
                             issuedPowerTools
                         )}
+
+                        {/* Consumable Materials Return Section */}
+                        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                            <div
+                                style={{
+                                    padding: "12px 16px",
+                                    background: "#F8FAFC",
+                                    borderBottom: "1px solid #E2E8F0",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                }}
+                            >
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <PackageIcon size={15} color="#B45309" />
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: "#1E2F5F" }}>
+                                        Consumable Materials (Return Unused Quantity)
+                                    </span>
+                                </div>
+                                <span
+                                    style={{
+                                        fontSize: 11,
+                                        fontWeight: 700,
+                                        padding: "2px 8px",
+                                        borderRadius: 999,
+                                        background: "#FFFBEB",
+                                        color: "#B45309",
+                                    }}
+                                >
+                                    {issuedMaterials.length}
+                                </span>
+                            </div>
+
+                            {issuedMaterials.length === 0 ? (
+                                <div style={{ padding: 24, textAlign: "center", color: "#94A3B8", fontSize: 13 }}>
+                                    No consumable materials currently issued on active approved checklists.
+                                </div>
+                            ) : (
+                                <div style={{ overflowX: "auto" }}>
+                                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                        <thead>
+                                            <tr style={{ borderBottom: "1px solid #E2E8F0", background: "#FFFFFF" }}>
+                                                {["Material", "Booking", "Issued", "Used / Returned", "Return Qty to Inventory"].map((h) => (
+                                                    <th
+                                                        key={h}
+                                                        style={{
+                                                            padding: "10px 14px",
+                                                            textAlign: "left",
+                                                            fontSize: 11,
+                                                            fontWeight: 700,
+                                                            color: "#64748B",
+                                                            textTransform: "uppercase",
+                                                        }}
+                                                    >
+                                                        {h}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {issuedMaterials.map((mat) => {
+                                                const approvedQty = Number(mat.quantity_approved ?? mat.quantity_requested ?? 1);
+                                                const returnedQty = Number(mat.quantity_returned ?? 0);
+                                                const usedQty = Math.max(0, approvedQty - returnedQty);
+                                                const draftQty = materialReturnQtys[mat.id] !== undefined ? materialReturnQtys[mat.id] : returnedQty;
+                                                return (
+                                                    <tr key={`${mat.checklist_id}-${mat.id}`} style={{ borderBottom: "1px solid #F1F5F9" }}>
+                                                        <td style={{ padding: "12px 14px", fontSize: 13, fontWeight: 700, color: "#1E2F5F" }}>
+                                                            {mat.item_name}
+                                                        </td>
+                                                        <td style={{ padding: "12px 14px" }}>
+                                                            <div style={{ fontSize: 12, fontWeight: 600, color: "#1E293B" }}>
+                                                                #{mat.booking_id} · {mat.client_name}
+                                                            </div>
+                                                            <div style={{ fontSize: 11, color: "#64748B" }}>
+                                                                {mat.service_name}
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ padding: "12px 14px", fontSize: 13, fontWeight: 700, color: "#1E2F5F" }}>
+                                                            {approvedQty} {mat.unit || "pcs"}
+                                                        </td>
+                                                        <td style={{ padding: "12px 14px", fontSize: 12 }}>
+                                                            <span style={{ fontWeight: 700, color: returnedQty > 0 ? "#15803D" : "#475569" }}>
+                                                                {usedQty} used · {returnedQty} returned
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: "12px 14px" }}>
+                                                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                                                <input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    max={approvedQty}
+                                                                    value={draftQty}
+                                                                    disabled={returningMaterialId === mat.id}
+                                                                    onChange={(e) =>
+                                                                        setMaterialReturnQtys((prev) => ({
+                                                                            ...prev,
+                                                                            [mat.id]: Math.max(0, Math.min(approvedQty, parseInt(e.target.value || "0", 10) || 0)),
+                                                                        }))
+                                                                    }
+                                                                    style={{
+                                                                        width: 60,
+                                                                        padding: "4px 8px",
+                                                                        borderRadius: 6,
+                                                                        border: "1px solid #CBD5E1",
+                                                                        fontSize: 12,
+                                                                        fontWeight: 700,
+                                                                        textAlign: "center",
+                                                                    }}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={returningMaterialId === mat.id}
+                                                                    onClick={() => handleReturnMaterialQty(mat, draftQty)}
+                                                                    style={{
+                                                                        padding: "5px 10px",
+                                                                        borderRadius: 6,
+                                                                        border: "1px solid #86EFAC",
+                                                                        background: "#F0FDF4",
+                                                                        color: "#15803D",
+                                                                        fontSize: 11,
+                                                                        fontWeight: 700,
+                                                                        cursor: returningMaterialId === mat.id ? "not-allowed" : "pointer",
+                                                                    }}
+                                                                >
+                                                                    {returningMaterialId === mat.id ? "Saving..." : "Return"}
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )
             ) : (

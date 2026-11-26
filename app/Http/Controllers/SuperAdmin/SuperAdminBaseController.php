@@ -307,6 +307,7 @@ abstract class SuperAdminBaseController extends Controller
                 'bookings.scheduled_date',
                 'bookings.alternative_schedule',
                 'bookings.booking_status',
+                'bookings.quotation_status',
                 'bookings.service_payment_method',
                 'bookings.service_details',
                 'bookings.units_data',
@@ -377,6 +378,8 @@ abstract class SuperAdminBaseController extends Controller
                 'bookings.assigned_by',
                 'bookings.scheduled_date',
                 'bookings.booking_status',
+                'bookings.quotation_status',
+                'bookings.cancellation_reason',
                 'bookings.service_details',
                 'bookings.notes as booking_notes',
                 'bookings.created_at',
@@ -877,6 +880,8 @@ abstract class SuperAdminBaseController extends Controller
                 'rate_type' => $serviceDetails['rate_type'] ?? null,
                 'is_differential' => (bool) ($serviceDetails['is_differential'] ?? false),
                 'booking_status' => $row->booking_status,
+                'quotation_status' => $row->quotation_status ?? ($isOcular ? 'Not Applicable' : 'Pending Assessment'),
+                'failed_booking' => $serviceDetails['failed_booking'] ?? null,
                 'service_payment_method' => $row->service_payment_method ?? ($isOcular ? 'Free' : 'Cash'),
                 'service_details' => $serviceDetails,
                 'units_data' => $unitsData,
@@ -987,13 +992,91 @@ abstract class SuperAdminBaseController extends Controller
         $defaultAdminAssistant = $staffUsers->firstWhere('role_id', 3);
         $defaultManager = $staffUsers->firstWhere('role_id', 2) ?? $staffUsers->firstWhere('role_id', 1);
 
+        $receiptsByBookingId = [];
+        $receiptsByItemOrderId = [];
+        $receiptsByAcOrderId = [];
+        if (\Illuminate\Support\Facades\Schema::hasTable('receipts')) {
+            $receiptService = app(\App\Services\ReceiptService::class);
+            if ($bookingIds->isNotEmpty()) {
+                $receiptsByBookingId = $receiptService->getFormattedReceiptsBySource(
+                    \App\Models\Receipt::SOURCE_BOOKING,
+                    $bookingIds->all()
+                );
+            }
+
+            $itemOrderIds = $salesByBookingId
+                ->pluck('item_order_id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+            if (! empty($itemOrderIds)) {
+                $receiptsByItemOrderId = $receiptService->getFormattedReceiptsBySource(
+                    \App\Models\Receipt::SOURCE_ITEM_ORDER,
+                    $itemOrderIds
+                );
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('ac_unit_orders') && ($bookingIds->isNotEmpty() || $salesByBookingId->isNotEmpty())) {
+                $acUnitIds = $salesByBookingId->pluck('ac_unit_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+                $acOrders = DB::table('ac_unit_orders')
+                    ->where(function ($q) use ($bookingIds, $acUnitIds) {
+                        if ($bookingIds->isNotEmpty()) {
+                            $q->whereIn('ocular_booking_id', $bookingIds)
+                                ->orWhereIn('installation_booking_id', $bookingIds);
+                        }
+                        if (! empty($acUnitIds)) {
+                            $q->orWhereIn('ac_unit_id', $acUnitIds);
+                        }
+                    })
+                    ->get(['order_id', 'ocular_booking_id', 'installation_booking_id', 'ac_unit_id']);
+
+                $acOrderIds = $acOrders->pluck('order_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
+                if (! empty($acOrderIds)) {
+                    $rawAcOrderReceipts = $receiptService->getFormattedReceiptsBySource(
+                        \App\Models\Receipt::SOURCE_AC_UNIT_ORDER,
+                        $acOrderIds
+                    );
+                    foreach ($acOrders as $ao) {
+                        $rList = $rawAcOrderReceipts[(int) $ao->order_id] ?? [];
+                        if (empty($rList)) {
+                            continue;
+                        }
+                        if ($ao->ocular_booking_id) {
+                            $receiptsByAcOrderId['booking_' . (int) $ao->ocular_booking_id] = array_merge(
+                                $receiptsByAcOrderId['booking_' . (int) $ao->ocular_booking_id] ?? [],
+                                $rList
+                            );
+                        }
+                        if ($ao->installation_booking_id) {
+                            $receiptsByAcOrderId['booking_' . (int) $ao->installation_booking_id] = array_merge(
+                                $receiptsByAcOrderId['booking_' . (int) $ao->installation_booking_id] ?? [],
+                                $rList
+                            );
+                        }
+                        if ($ao->ac_unit_id) {
+                            $receiptsByAcOrderId['unit_' . (int) $ao->ac_unit_id] = array_merge(
+                                $receiptsByAcOrderId['unit_' . (int) $ao->ac_unit_id] ?? [],
+                                $rList
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         return $rows->map(function ($row) use (
             $salesByBookingId,
             $paymentsByBooking,
             $consumedMaterialsByBooking,
             $serviceReportsByBooking,
             $staffUsers,
-            $defaultManager
+            $defaultAdminAssistant,
+            $defaultManager,
+            $receiptsByBookingId,
+            $receiptsByItemOrderId,
+            $receiptsByAcOrderId
         ) {
             $invSale = $salesByBookingId->get($row->booking_id);
             $serviceName = (string) ($row->service_name ?? '');
@@ -1055,29 +1138,48 @@ abstract class SuperAdminBaseController extends Controller
                 $sparePartsPrice = max($paySpareParts, $turnoverSpareParts, $consumedSparePartsTotal);
             }
 
+            $failedBookingStatus = $serviceDetails['failed_booking']['status'] ?? null;
+            $isCancelledService = ($row->booking_status === 'Cancelled') && $saleType === 'service';
+            $reservationPaidAmt = (float) ($paymentsByBooking->get($row->booking_id) ?? collect())
+                ->filter(function ($p) {
+                    $t = strtolower((string) ($p->payment_type ?? ''));
+                    return (str_contains($t, 'reservation') || str_contains($t, 'appointment'))
+                        && ($p->payment_status ?? '') !== 'Returned';
+                })
+                ->sum('amount_paid');
+
             // Booking Fee
             $isBookingFeeWaived = ! empty($serviceDetails['booking_fee_waived']) || ! empty($serviceDetails['item_order_id']);
             $bookingFee = $saleType === 'service'
-                ? ($isBookingFeeWaived ? 0.00 : ($downPaymentCredited > 0 ? $downPaymentCredited : 50.00))
+                ? ($isBookingFeeWaived ? 0.00 : ($downPaymentCredited > 0 ? $downPaymentCredited : ($reservationPaidAmt > 0 ? $reservationPaidAmt : 50.00)))
                 : null;
 
-            // Base Price
+            // Base Price & Total Cost (for cancelled bookings with forfeited reservation fee, only record the paid booking fee)
+            $isCancelledForfeited = $isCancelledService && ! $turnoverVerified;
             $rowBookingPrice = (float) ($row->booking_price ?? 0.0);
             $rowBasePrice = (float) ($row->base_price ?? 0.0);
-            if ($rowBookingPrice > 0) {
-                $basePrice = $rowBookingPrice;
-            } elseif ($rowBasePrice > 0) {
-                $basePrice = $rowBasePrice;
-            } elseif (isset($turnover['total_service_price']) && (float) $turnover['total_service_price'] > 0) {
-                $basePrice = max(0.0, (float) $turnover['total_service_price'] - $sparePartsPrice);
-            } elseif ($row->amount_paid !== null && (float) $row->amount_paid > 0) {
-                $basePrice = max(0.0, (float) $row->amount_paid - $sparePartsPrice);
-            } else {
+            if ($isCancelledForfeited) {
+                $sparePartsPrice = 0.0;
                 $basePrice = 0.0;
+                $bookingFee = $reservationPaidAmt > 0
+                    ? $reservationPaidAmt
+                    : ($row->amount_paid !== null && (float) $row->amount_paid > 0 ? (float) $row->amount_paid : ($isBookingFeeWaived ? 0.00 : 50.00));
+                $totalCost = $bookingFee;
+            } else {
+                if ($rowBookingPrice > 0) {
+                    $basePrice = $rowBookingPrice;
+                } elseif ($rowBasePrice > 0) {
+                    $basePrice = $rowBasePrice;
+                } elseif (isset($turnover['total_service_price']) && (float) $turnover['total_service_price'] > 0) {
+                    $basePrice = max(0.0, (float) $turnover['total_service_price'] - $sparePartsPrice);
+                } elseif ($row->amount_paid !== null && (float) $row->amount_paid > 0) {
+                    $basePrice = max(0.0, (float) $row->amount_paid - $sparePartsPrice);
+                } else {
+                    $basePrice = 0.0;
+                }
+                $totalCost = $basePrice + $sparePartsPrice;
             }
 
-            // Total Cost / Total Paid
-            $totalCost = $basePrice + $sparePartsPrice;
             $amountPaid = $row->amount_paid !== null
                 ? (float) $row->amount_paid
                 : ($invSale ? (float) $invSale->total_amount : 0.0);
@@ -1086,6 +1188,17 @@ abstract class SuperAdminBaseController extends Controller
                 $amountPaid = $totalCost > 0 ? $totalCost : ($amountTurnedOver + $downPaymentCredited);
             } elseif ($amountPaid === 0.0 && $invSale) {
                 $amountPaid = (float) $invSale->total_amount;
+            } elseif ($isCancelledForfeited && $amountPaid === 0.0 && ($row->payment_status ?? '') === 'Paid') {
+                $amountPaid = (float) $bookingFee;
+            }
+
+            $isForfeitedBookingFee = $isCancelledService
+                && ($row->payment_status === 'Paid')
+                && ($amountPaid > 0 || ($bookingFee ?? 0) > 0);
+            if ($isForfeitedBookingFee) {
+                $saleCategory = $failedBookingStatus === 'Valid' || ! empty($serviceDetails['booking_fee_forfeited'])
+                    ? 'Cancelled Booking (Forfeited Fee)'
+                    : 'Cancelled Booking Fee';
             }
 
             // Managed by / Sold by
@@ -1188,6 +1301,19 @@ abstract class SuperAdminBaseController extends Controller
                 ];
             })->values()->all();
 
+            $mergedReceipts = collect($receiptsByBookingId[(int) $row->booking_id] ?? []);
+            if ($invSale && ! empty($invSale->item_order_id)) {
+                $mergedReceipts = $mergedReceipts->concat($receiptsByItemOrderId[(int) $invSale->item_order_id] ?? []);
+            }
+            $mergedReceipts = $mergedReceipts->concat($receiptsByAcOrderId['booking_' . (int) $row->booking_id] ?? []);
+            if ($invSale && ! empty($invSale->ac_unit_id)) {
+                $mergedReceipts = $mergedReceipts->concat($receiptsByAcOrderId['unit_' . (int) $invSale->ac_unit_id] ?? []);
+            }
+            $rowReceipts = $mergedReceipts->unique('receipt_id')->sortBy('receipt_id')->values()->all();
+            $primaryReceipt = collect($rowReceipts)
+                ->sortByDesc(fn ($r) => ($r['document_kind'] !== 'acknowledgement_receipt' ? 1000000 : 0) + (int) $r['receipt_id'])
+                ->first();
+
             return [
                 'booking_id' => (int) $row->booking_id,
                 'sale_id' => $invSale ? (int) $invSale->sale_id : null,
@@ -1222,12 +1348,18 @@ abstract class SuperAdminBaseController extends Controller
                 'profit' => $profit,
                 'warranty_period' => $invSale->warranty_period ?? null,
                 'sold_by_name' => $invSale->sold_by_name ?? null,
-                'receipt_reference_number' => $invSale->receipt_reference_number ?? null,
+                'receipt_reference_number' => $primaryReceipt['receipt_number'] ?? ($invSale->receipt_reference_number ?? null),
+                'receipt' => $primaryReceipt,
+                'receipts' => $rowReceipts,
                 'item_order_id' => $invSale->item_order_id ?? null,
                 'transaction_date' => $invSale->sold_at ?? ($row->payment_date ?? $row->created_at),
                 'notes' => $invSale->notes ?? ($row->booking_notes ?? null),
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
+                'quotation_status' => $row->quotation_status ?? null,
+                'cancellation_reason' => $row->cancellation_reason ?? null,
+                'is_forfeited_booking_fee' => $isForfeitedBookingFee,
+                'failed_booking' => $serviceDetails['failed_booking'] ?? null,
                 'amount_paid' => $amountPaid,
                 'amount_turned_over' => $amountTurnedOver,
                 'down_payment_credited' => $downPaymentCredited,
@@ -2073,19 +2205,36 @@ abstract class SuperAdminBaseController extends Controller
             $serviceDetails['job_started_at']
         );
 
-        DB::table('bookings')
-            ->where('booking_id', $bookingId)
-            ->update([
-                'lead_technician_id' => $leadTechId,
-                'assistant_technician_id' => $assistantTechId,
-                'assigned_tech_id' => $leadTechId,
-                'assigned_team_id' => $teamId,
-                'assigned_by' => $currentUserId,
-                'assigned_at' => now(),
-                'booking_status' => $targetStatus,
-                'service_details' => json_encode($serviceDetails),
-                'updated_at' => now(),
-            ]);
+        DB::transaction(function () use ($bookingId, $leadTechId, $assistantTechId, $teamId, $currentUserId, $targetStatus, $serviceDetails, $request) {
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'lead_technician_id' => $leadTechId,
+                    'assistant_technician_id' => $assistantTechId,
+                    'assigned_tech_id' => $leadTechId,
+                    'assigned_team_id' => $teamId,
+                    'assigned_by' => $currentUserId,
+                    'assigned_at' => now(),
+                    'booking_status' => $targetStatus,
+                    'service_details' => json_encode($serviceDetails),
+                    'updated_at' => now(),
+                ]);
+
+            // Issue Acknowledgement Receipt (AR) for confirmed reservation/reschedule booking fee
+            $bookingModel = \App\Models\Booking::find($bookingId);
+            if ($bookingModel && $request->user()) {
+                $paidFees = \App\Models\Payment::where('booking_id', $bookingId)
+                    ->where('payment_status', 'Paid')
+                    ->where('amount_paid', '>', 0)
+                    ->orderBy('payment_id')
+                    ->get();
+
+                $receiptService = app(\App\Services\ReceiptService::class);
+                foreach ($paidFees as $feePay) {
+                    $receiptService->issueForBookingPayment($bookingModel, $feePay, $request->user());
+                }
+            }
+        });
 
         if ($targetStatus === 'Approved') {
             self::syncAutoStartForTechnicians([(int) $leadTechId, (int) $assistantTechId]);
@@ -2472,6 +2621,26 @@ abstract class SuperAdminBaseController extends Controller
                 }
             }
 
+            // Automatically issue official Service Invoice (INV) inside the completion transaction
+            $completedBookingModel = \App\Models\Booking::find($bookingId);
+            $finalPaymentModel = \App\Models\Payment::where('booking_id', $bookingId)
+                ->orderByDesc('payment_id')
+                ->first();
+            $issuedInvoice = null;
+            if ($completedBookingModel && $finalPaymentModel && $request->user()) {
+                $issuedInvoice = app(\App\Services\ReceiptService::class)->issueForBookingPayment(
+                    $completedBookingModel,
+                    $finalPaymentModel,
+                    $request->user()
+                );
+            }
+
+            if ($issuedInvoice && isset($linkedItemOrder) && $linkedItemOrder) {
+                DB::table('item_orders')
+                    ->where('order_id', $linkedItemOrder->order_id)
+                    ->update(['receipt_reference_number' => $issuedInvoice->receipt_number]);
+            }
+
             $this->logActivity(
                 (int) $request->user()->user_id,
                 'COMPLETE_BOOKING',
@@ -2653,7 +2822,8 @@ abstract class SuperAdminBaseController extends Controller
             $deliveryFee,
             $clientName,
             $clientUser,
-            $validated
+            $validated,
+            $request
         ) {
             $this->finalizeAcUnitPurchaseSale(
                 $order,
@@ -2668,6 +2838,23 @@ abstract class SuperAdminBaseController extends Controller
                 $order->contact_number ?: ($clientUser->contact_number ?? null),
                 $order->delivery_address ?: ($clientUser->address ?? null)
             );
+
+            $acOrderModel = \App\Models\AcUnitOrder::find($order->order_id);
+            $invReceipt = null;
+            if ($acOrderModel && $request->user()) {
+                $invReceipt = app(\App\Services\ReceiptService::class)->issueForAcUnitOrder(
+                    $acOrderModel,
+                    'final_settlement',
+                    $request->user()
+                );
+            }
+
+            if ($invReceipt && \Illuminate\Support\Facades\Schema::hasTable('inventory_sales') && \Illuminate\Support\Facades\Schema::hasColumn('inventory_sales', 'receipt_reference_number')) {
+                DB::table('inventory_sales')
+                    ->where('sale_type', 'ac_unit')
+                    ->where('ac_unit_id', $order->ac_unit_id)
+                    ->update(['receipt_reference_number' => $invReceipt->receipt_number]);
+            }
 
             if ($order->ocular_booking_id) {
                 $remPaid = (float) ($order->remaining_unit_balance ?? 0) + $deliveryFee;
@@ -2788,6 +2975,198 @@ abstract class SuperAdminBaseController extends Controller
 
         return [
             'message' => 'Turnover marked as Invalid. The technician has been notified to edit and resubmit.',
+            'data' => $this->mapBookings(collect([$updated]))->first(),
+        ];
+    }
+
+    /**
+     * Manager/Super Admin reviews a technician's Failed Booking report (Valid -> Cancel booking & forfeit fee; Invalid -> Notify technician).
+     */
+    protected function handleReviewFailedBookingAction(Request $request, int $bookingId): array
+    {
+        $booking = DB::table('bookings')->where('booking_id', $bookingId)->first();
+
+        if (! $booking) {
+            abort(404);
+        }
+
+        if (in_array($booking->booking_status, ['Completed', 'Cancelled'], true)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'booking_id' => ['This booking has already been finalized (' . $booking->booking_status . ').'],
+            ]);
+        }
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : (array) $booking->service_details)
+            : [];
+
+        if (empty($serviceDetails['failed_booking'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'failed_booking' => ['No failed booking report has been submitted for this booking yet.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'decision' => ['required', 'string', \Illuminate\Validation\Rule::in(['valid', 'invalid'])],
+            'reason' => ['nullable', 'string', 'min:3', 'max:1000'],
+            'invalid_reason' => ['nullable', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $decision = strtolower($validated['decision']);
+        $reviewNote = trim((string) ($validated['invalid_reason'] ?? $validated['reason'] ?? ''));
+
+        if ($decision === 'invalid' && $reviewNote === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'invalid_reason' => ['Please enter a reason why this failed booking report is invalid.'],
+            ]);
+        }
+
+        $reviewerId = (int) $request->user()->user_id;
+        $reviewerName = $request->user()->name ?: $this->formatName(
+            $request->user()->given_name,
+            $request->user()->middle_name ?? null,
+            $request->user()->last_name
+        );
+
+        $failedReason = (string) ($serviceDetails['failed_booking']['reason'] ?? 'Customer refused to sign the quotation.');
+
+        if ($decision === 'valid') {
+            $serviceDetails['failed_booking']['status'] = 'Valid';
+            $serviceDetails['failed_booking']['decision'] = 'valid';
+            $serviceDetails['failed_booking']['reviewed_by_user_id'] = $reviewerId;
+            $serviceDetails['failed_booking']['reviewed_by_name'] = $reviewerName;
+            $serviceDetails['failed_booking']['reviewed_at'] = now()->toISOString();
+            $serviceDetails['failed_booking']['review_notes'] = $reviewNote !== '' ? $reviewNote : null;
+            $serviceDetails['failed_booking']['invalid_reason'] = null;
+
+            $serviceDetails['booking_fee_forfeited'] = true;
+            $serviceDetails['booking_fee_non_refundable'] = true;
+            $serviceDetails['failed_booking_cancelled_at'] = now()->toISOString();
+
+            $cancellationReason = $reviewNote !== ''
+                ? "Customer refused to sign quotation — {$failedReason} (Verified: {$reviewNote})"
+                : "Customer refused to sign quotation — {$failedReason}";
+
+            DB::transaction(function () use ($bookingId, $booking, $reviewerId, $reviewerName, $failedReason, $cancellationReason, $serviceDetails, $request) {
+                DB::table('bookings')
+                    ->where('booking_id', $bookingId)
+                    ->update([
+                        'booking_status' => 'Cancelled',
+                        'quotation_status' => 'Customer Refused to Sign',
+                        'cancellation_reason' => $cancellationReason,
+                        'service_details' => json_encode($serviceDetails),
+                        'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
+                            '[Manager Confirmed Failed Booking]: Valid — Booking cancelled. Customer refused to sign quotation (%s). Reservation booking fee forfeited and recorded in Sales & Records.',
+                            $failedReason
+                        )),
+                        'updated_at' => now(),
+                    ]);
+
+                // Remove any unpaid balance payment rows so latestPayment reflects the Paid reservation booking fee in Sales & Records
+                DB::table('payment')
+                    ->where('booking_id', $bookingId)
+                    ->where('payment_status', 'Pending')
+                    ->where(function ($q) {
+                        $q->where('payment_type', 'like', '%Balance%')
+                            ->orWhere('payment_type', 'like', '%Turnover%');
+                    })
+                    ->delete();
+
+                // Ensure existing reservation payment remains marked Paid & annotated cleanly
+                DB::table('payment')
+                    ->where('booking_id', $bookingId)
+                    ->where(function ($q) {
+                        $q->where('payment_type', 'like', '%Reservation%')
+                            ->orWhere('payment_type', 'like', '%Appointment%');
+                    })
+                    ->where('payment_status', '!=', 'Returned')
+                    ->update([
+                        'payment_status' => 'Paid',
+                        'notes' => 'Booking cancelled after quotation refusal — reservation fee forfeited and recorded in Sales & Records.',
+                        'updated_at' => now(),
+                    ]);
+
+                $forfeitedBookingModel = \App\Models\Booking::find($bookingId);
+                $forfeitedPayModel = \App\Models\Payment::where('booking_id', $bookingId)
+                    ->where('payment_status', 'Paid')
+                    ->where('amount_paid', '>', 0)
+                    ->orderBy('payment_id')
+                    ->first();
+                if ($forfeitedBookingModel && $forfeitedPayModel && $request->user()) {
+                    app(\App\Services\ReceiptService::class)->issueForBookingPayment(
+                        $forfeitedBookingModel,
+                        $forfeitedPayModel,
+                        $request->user()
+                    );
+                }
+
+                if (DB::table('service_reports')->where('booking_id', $bookingId)->exists()) {
+                    DB::table('service_reports')
+                        ->where('booking_id', $bookingId)
+                        ->update([
+                            'status' => 'Incomplete',
+                            'recommendations' => 'Booking cancelled due to failed quotation signature: ' . $failedReason,
+                            'updated_at' => now(),
+                        ]);
+                }
+
+                $this->logActivity(
+                    $reviewerId,
+                    'FAILED_BOOKING_VALID',
+                    sprintf(
+                        'Manager %s confirmed Failed Booking #%d as Valid -> Cancelled booking and recorded booking fee in Sales & Records.',
+                        $reviewerName,
+                        $bookingId
+                    )
+                );
+            });
+
+            self::syncAutoStartForTechnicians(self::getAssignedTechnicianIdsForBooking($booking));
+
+            $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+            return [
+                'message' => 'Failed booking marked Valid. Booking has been Cancelled and the booking fee is recorded in Sales & Records.',
+                'data' => $this->mapBookings(collect([$updated]))->first(),
+            ];
+        }
+
+        // Decision === 'invalid'
+        $serviceDetails['failed_booking']['status'] = 'Invalid';
+        $serviceDetails['failed_booking']['decision'] = 'invalid';
+        $serviceDetails['failed_booking']['reviewed_by_user_id'] = $reviewerId;
+        $serviceDetails['failed_booking']['reviewed_by_name'] = $reviewerName;
+        $serviceDetails['failed_booking']['reviewed_at'] = now()->toISOString();
+        $serviceDetails['failed_booking']['review_notes'] = $reviewNote;
+        $serviceDetails['failed_booking']['invalid_reason'] = $reviewNote;
+
+        DB::table('bookings')
+            ->where('booking_id', $bookingId)
+            ->update([
+                'service_details' => json_encode($serviceDetails),
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
+                    '[Manager Invalidated Failed Booking]: Report marked Invalid by %s. Notice: %s',
+                    $reviewerName,
+                    $reviewNote
+                )),
+                'updated_at' => now(),
+            ]);
+
+        $this->logActivity(
+            $reviewerId,
+            'FAILED_BOOKING_INVALID',
+            sprintf(
+                'Manager %s marked Failed Booking #%d as Invalid and notified technician. Reason: %s',
+                $reviewerName,
+                $bookingId,
+                $reviewNote
+            )
+        );
+
+        $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+        return [
+            'message' => 'Failed booking report marked as Invalid. The technician has been notified.',
             'data' => $this->mapBookings(collect([$updated]))->first(),
         ];
     }
@@ -3046,6 +3425,7 @@ abstract class SuperAdminBaseController extends Controller
             ->orderBy('booking_id')
             ->get([
                 'booking_id',
+                'service_id',
                 'booking_status',
                 'scheduled_date',
                 'service_details',
@@ -3090,12 +3470,14 @@ abstract class SuperAdminBaseController extends Controller
 
             $latestCl = $latestChecklists->get($other->booking_id);
             $wasStartedInWorkflow = ! empty($otherDetails['job_started_by_tech']);
+            $isOtherOcular = ((int) ($other->service_id ?? 0) === 4) || ! empty($otherDetails['is_ocular_inspection']);
 
             $isBookingCompleted = in_array($other->booking_status, ['Partially Completed', 'Completed'], true);
             $isChecklistCompleted = $latestCl
                 ? ($latestCl->status === 'Completed')
                 : (! $wasStartedInWorkflow && $isBookingCompleted);
-            $isPaymentTurnedOver = ! empty($otherDetails['payment_turnover'])
+            $isPaymentTurnedOver = $isOtherOcular
+                || ! empty($otherDetails['payment_turnover'])
                 || (! $wasStartedInWorkflow && $isBookingCompleted);
 
             if (! $isBookingCompleted || ! $isChecklistCompleted || ! $isPaymentTurnedOver) {

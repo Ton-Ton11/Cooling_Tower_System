@@ -19,6 +19,7 @@ import {
     Package,
 } from "lucide-react";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency } from "../../utils/superAdmin";
+import ReceiptActionButton from "../../Components/ReceiptActionButton";
 
 const DEFAULT_CONTACT_INFO = {
     company_name: "Cooling Tower Airconditioning Service Company",
@@ -535,16 +536,19 @@ export default function WarrantyTracking({ addToast, onNavigate, onSelectService
                                             </div>
                                         </div>
 
-                                        {unit.unit_price > 0 && (
-                                            <div className="sm:text-right shrink-0">
-                                                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                                    Unit Price ({unit.payment_method || "Paid"})
-                                                </span>
-                                                <span className="text-base font-extrabold text-slate-900">
-                                                    {formatCurrency(unit.unit_price)}
-                                                </span>
-                                            </div>
-                                        )}
+                                        <div className="flex items-center gap-3 sm:justify-end shrink-0 flex-wrap">
+                                            {unit.unit_price > 0 && (
+                                                <div className="sm:text-right">
+                                                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                                        Unit Price ({unit.payment_method || "Paid"})
+                                                    </span>
+                                                    <span className="text-base font-extrabold text-slate-900">
+                                                        {formatCurrency(unit.unit_price)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            <ReceiptActionButton receipts={unit.receipts} />
+                                        </div>
                                     </div>
 
                                     {/* Minimal Unit Specs Grid */}

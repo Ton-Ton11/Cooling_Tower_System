@@ -394,7 +394,7 @@ class CustomerBookingController extends Controller
                 ->groupBy('booking_id')
             : collect();
 
-        $customerOrders = DB::getSchemaBuilder()->hasTable('ac_unit_orders')
+        $rawCustomerOrders = DB::getSchemaBuilder()->hasTable('ac_unit_orders')
             ? DB::table('ac_unit_orders as o')
                 ->leftJoin('ac_units_inventory as u', 'u.ac_unit_id', '=', 'o.ac_unit_id')
                 ->where('o.client_id', $userId)
@@ -413,64 +413,82 @@ class CustomerBookingController extends Controller
                 ])
                 ->orderByDesc('o.order_id')
                 ->get()
-                ->map(function ($o) {
-                    $isOrderBase = ($o->unit_inventory_status === 'Order Base')
-                        || str_contains(strtolower($o->notes ?? ''), 'order-base')
-                        || str_contains(strtolower($o->notes ?? ''), 'estimated arrival');
-                    $expectedArrival = ! empty($o->unit_expected_arrival)
-                        ? \Carbon\Carbon::parse($o->unit_expected_arrival)->format('M d, Y')
-                        : null;
-                    if (! $expectedArrival && preg_match('/Estimated Arrival:\s*([^|]+)/i', $o->notes ?? '', $m)) {
-                        $expectedArrival = trim($m[1]);
-                    }
-
-                    return [
-                        'order_id' => (int) $o->order_id,
-                        'ocular_booking_id' => $o->ocular_booking_id ? (int) $o->ocular_booking_id : null,
-                        'installation_booking_id' => $o->installation_booking_id ? (int) $o->installation_booking_id : null,
-                        'recommendation_id' => $o->recommendation_id ? (int) $o->recommendation_id : null,
-                        'ac_unit_id' => (int) $o->ac_unit_id,
-                        'quantity' => (int) ($o->quantity ?? 1),
-                        'unit_price' => (float) ($o->unit_price ?? 0),
-                        'total_unit_price' => (float) ($o->total_unit_price ?? 0),
-                        'down_payment_amount' => (float) ($o->down_payment_amount ?? 0),
-                        'remaining_unit_balance' => (float) ($o->remaining_unit_balance ?? 0),
-                        'delivery_fee' => (float) ($o->delivery_fee ?? 0),
-                        'installation_fee' => (float) ($o->installation_fee ?? 0),
-                        'payment_method' => $o->payment_method,
-                        'fulfillment_type' => $o->fulfillment_type,
-                        'reference_number' => $o->reference_number,
-                        'sender_name' => $o->sender_name ?? null,
-                        'sender_number' => $o->sender_number ?? null,
-                        'down_payment_receipt_url' => $o->down_payment_receipt_path ? asset('storage/' . $o->down_payment_receipt_path) : null,
-                        'manager_receipt_url' => $o->manager_receipt_path ? asset('storage/' . $o->manager_receipt_path) : null,
-                        'delivery_address' => $o->delivery_address,
-                        'contact_number' => $o->contact_number,
-                        'installation_fee_forfeited' => (bool) ($o->installation_fee_forfeited ?? false),
-                        'order_status' => $o->order_status,
-                        'is_order_base' => $isOrderBase,
-                        'estimated_arrival' => $expectedArrival,
-                        'confirmed_at' => $o->confirmed_at,
-                        'notes' => $o->notes,
-                        'brand' => $o->unit_brand,
-                        'model' => $o->unit_model,
-                        'serial_number' => $o->unit_serial_number,
-                        'horsepower' => (float) ($o->unit_horsepower ?? 0),
-                        'ac_type' => $o->unit_ac_type,
-                        'motor_type' => $o->unit_motor_type ?? 'Inverter',
-                        'unit_image_url' => $o->unit_image_path ? asset('storage/' . $o->unit_image_path) : null,
-                        'warranty_period' => (int) ($o->unit_warranty_period ?? 12),
-                        'created_at' => $o->created_at,
-                    ];
-                })
             : collect();
+
+        $receiptService = app(\App\Services\ReceiptService::class);
+        $receiptsByBookingId = ! empty($bookingIds)
+            ? $receiptService->getFormattedReceiptsBySource(\App\Models\Receipt::SOURCE_BOOKING, $bookingIds, 'customer')
+            : [];
+        $acOrderIds = $rawCustomerOrders->pluck('order_id')->map(fn ($id) => (int) $id)->all();
+        $receiptsByAcOrderId = ! empty($acOrderIds)
+            ? $receiptService->getFormattedReceiptsBySource(\App\Models\Receipt::SOURCE_AC_UNIT_ORDER, $acOrderIds, 'customer')
+            : [];
+
+        $customerOrders = $rawCustomerOrders->map(function ($o) use ($receiptsByAcOrderId, $receiptsByBookingId) {
+            $isOrderBase = ($o->unit_inventory_status === 'Order Base')
+                || str_contains(strtolower($o->notes ?? ''), 'order-base')
+                || str_contains(strtolower($o->notes ?? ''), 'estimated arrival');
+            $expectedArrival = ! empty($o->unit_expected_arrival)
+                ? \Carbon\Carbon::parse($o->unit_expected_arrival)->format('M d, Y')
+                : null;
+            if (! $expectedArrival && preg_match('/Estimated Arrival:\s*([^|]+)/i', $o->notes ?? '', $m)) {
+                $expectedArrival = trim($m[1]);
+            }
+
+            $ordReceipts = collect($receiptsByAcOrderId[(int) $o->order_id] ?? [])
+                ->concat($o->installation_booking_id ? ($receiptsByBookingId[(int) $o->installation_booking_id] ?? []) : [])
+                ->unique('receipt_id')
+                ->sortBy('receipt_id')
+                ->values()
+                ->all();
+
+            return [
+                'order_id' => (int) $o->order_id,
+                'ocular_booking_id' => $o->ocular_booking_id ? (int) $o->ocular_booking_id : null,
+                'installation_booking_id' => $o->installation_booking_id ? (int) $o->installation_booking_id : null,
+                'recommendation_id' => $o->recommendation_id ? (int) $o->recommendation_id : null,
+                'ac_unit_id' => (int) $o->ac_unit_id,
+                'quantity' => (int) ($o->quantity ?? 1),
+                'unit_price' => (float) ($o->unit_price ?? 0),
+                'total_unit_price' => (float) ($o->total_unit_price ?? 0),
+                'down_payment_amount' => (float) ($o->down_payment_amount ?? 0),
+                'remaining_unit_balance' => (float) ($o->remaining_unit_balance ?? 0),
+                'delivery_fee' => (float) ($o->delivery_fee ?? 0),
+                'installation_fee' => (float) ($o->installation_fee ?? 0),
+                'payment_method' => $o->payment_method,
+                'fulfillment_type' => $o->fulfillment_type,
+                'reference_number' => $o->reference_number,
+                'sender_name' => $o->sender_name ?? null,
+                'sender_number' => $o->sender_number ?? null,
+                'down_payment_receipt_url' => $o->down_payment_receipt_path ? asset('storage/' . $o->down_payment_receipt_path) : null,
+                'manager_receipt_url' => $o->manager_receipt_path ? asset('storage/' . $o->manager_receipt_path) : null,
+                'delivery_address' => $o->delivery_address,
+                'contact_number' => $o->contact_number,
+                'installation_fee_forfeited' => (bool) ($o->installation_fee_forfeited ?? false),
+                'order_status' => $o->order_status,
+                'is_order_base' => $isOrderBase,
+                'estimated_arrival' => $expectedArrival,
+                'confirmed_at' => $o->confirmed_at,
+                'notes' => $o->notes,
+                'brand' => $o->unit_brand,
+                'model' => $o->unit_model,
+                'serial_number' => $o->unit_serial_number,
+                'horsepower' => (float) ($o->unit_horsepower ?? 0),
+                'ac_type' => $o->unit_ac_type,
+                'motor_type' => $o->unit_motor_type ?? 'Inverter',
+                'unit_image_url' => $o->unit_image_path ? asset('storage/' . $o->unit_image_path) : null,
+                'warranty_period' => (int) ($o->unit_warranty_period ?? 12),
+                'receipts' => $ordReceipts,
+                'created_at' => $o->created_at,
+            ];
+        });
 
         $ordersByOcularBooking = $customerOrders->whereNotNull('ocular_booking_id')->groupBy('ocular_booking_id');
         $ordersByInstallBooking = $customerOrders->whereNotNull('installation_booking_id')->keyBy('installation_booking_id');
         $ordersById = $customerOrders->keyBy('order_id');
         $maintenanceRemindersByBooking = app(\App\Services\ForecastingService::class)->getBookingMaintenanceRemindersMap($bookingModels);
 
-        $bookings = $bookingModels->map(function ($b) use ($serviceReports, $ocularRoomsByBooking, $ocularRecsByBooking, $ordersByOcularBooking, $ordersByInstallBooking, $ordersById, $maintenanceRemindersByBooking) {
+        $bookings = $bookingModels->map(function ($b) use ($serviceReports, $ocularRoomsByBooking, $ocularRecsByBooking, $ordersByOcularBooking, $ordersByInstallBooking, $ordersById, $maintenanceRemindersByBooking, $receiptsByBookingId) {
             $isOcular = static::isOcularBooking($b);
             $details = is_array($b->service_details) ? $b->service_details : [];
             $ocularPersonnel = \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::normalizeOcularPersonnel($details['ocular_personnel'] ?? []);
@@ -562,8 +580,20 @@ class CustomerBookingController extends Controller
                 ?? (! empty($details['ac_unit_order_id']) ? $ordersById->get((int) $details['ac_unit_order_id']) : null);
             $ocularOrders = ($ordersByOcularBooking->get($b->booking_id) ?? collect())->values()->all();
 
+            $bookingReceipts = collect($receiptsByBookingId[(int) $b->booking_id] ?? []);
+            if ($linkedOrder && ! empty($linkedOrder['receipts'])) {
+                $bookingReceipts = $bookingReceipts->concat($linkedOrder['receipts']);
+            }
+            foreach ($ocularOrders as $oo) {
+                if (! empty($oo['receipts'])) {
+                    $bookingReceipts = $bookingReceipts->concat($oo['receipts']);
+                }
+            }
+            $mergedBookingReceipts = $bookingReceipts->unique('receipt_id')->sortBy('receipt_id')->values()->all();
+
             return [
                 'booking_id' => $b->booking_id,
+                'receipts' => $mergedBookingReceipts,
                 'client_id' => $b->client_id,
                 'service_id' => $b->service_id,
                 'service_name' => $b->service?->service_name ?? 'Aircon Service',
@@ -574,6 +604,10 @@ class CustomerBookingController extends Controller
                 'ocular_rooms' => $rooms,
                 'ocular_recommendations' => $recommendations,
                 'ocular_orders' => $ocularOrders,
+                'admin_customer_note' => $details['admin_customer_note'] ?? null,
+                'admin_customer_attachment_url' => ! empty($details['admin_customer_attachment_path'])
+                    ? \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::formatStorageUrl($details['admin_customer_attachment_path'])
+                    : null,
                 'ac_unit_order' => $linkedOrder,
                 'assigned_tech_id' => $b->lead_technician_id ?? $b->assigned_tech_id,
                 'assigned_tech_name' => $leadName ?: (! empty($ocularPersonnel) ? ($ocularPersonnel[0]['full_name'] ?? null) : null),
@@ -820,6 +854,10 @@ class CustomerBookingController extends Controller
             'repair_media' => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,mp4,mov,webm', 'max:20480'],
             'policy_acknowledged' => ['nullable'],
         ]);
+
+        if (! $isFeeExemptRequest && ! empty($validated['reference_number'])) {
+            app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($validated['reference_number'], 'GCash');
+        }
 
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
@@ -1239,6 +1277,8 @@ class CustomerBookingController extends Controller
             'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
         ]);
 
+        app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($validated['reference_number'], 'GCash');
+
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
             $receiptPath = $request->file('receipt_image')->store('receipts', 'public');
@@ -1348,6 +1388,10 @@ class CustomerBookingController extends Controller
             'receipt_image' => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             'reschedule_reason' => ['nullable', 'string', 'max:500'],
         ]);
+
+        if ($isFeeRequired && ! empty($validated['reference_number'])) {
+            app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($validated['reference_number'], 'GCash');
+        }
 
         $newDate = Carbon::parse($validated['new_scheduled_date']);
         $targetDateYmd = $newDate->format('Y-m-d');
@@ -1671,6 +1715,10 @@ class CustomerBookingController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        if ($validated['payment_method'] === 'GCash' && ! empty($validated['reference_number'])) {
+            app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($validated['reference_number'], 'GCash');
+        }
+
         $receiptPath = null;
         if ($request->hasFile('receipt_image')) {
             $receiptPath = $request->file('receipt_image')->store('receipts/down_payments', 'public');
@@ -1915,6 +1963,16 @@ class CustomerBookingController extends Controller
                 'updated_at' => now(),
             ]);
 
+            $arReceipt = null;
+            if ($downPayment > 0) {
+                $acOrderModel = \App\Models\AcUnitOrder::find($orderId);
+                if ($acOrderModel) {
+                    $receiptService = app(\App\Services\ReceiptService::class);
+                    $staffIssuer = $receiptService->resolveDefaultStaffIssuer((int) $ocularBooking->booking_id);
+                    $arReceipt = $receiptService->issueForAcUnitOrder($acOrderModel, 'down_payment', $staffIssuer);
+                }
+            }
+
             DB::table('activity_logs')->insert([
                 'user_id' => $userId,
                 'action_type' => 'AC_UNIT_ORDER_CREATED',
@@ -1937,6 +1995,9 @@ class CustomerBookingController extends Controller
             DB::commit();
 
             $imgPath = ($rec?->unit_image_path) ?: ($acUnit->image_path ?? null);
+            $formattedOrderReceipts = $arReceipt
+                ? [app(\App\Services\ReceiptService::class)->formatReceipt($arReceipt, 'customer')]
+                : [];
 
             $orderPayload = [
                 'order_id' => (int) $orderId,
@@ -1958,6 +2019,7 @@ class CustomerBookingController extends Controller
                 'order_status' => $orderStatus,
                 'is_order_base' => $isOrderBase,
                 'estimated_arrival' => $estimatedArrival,
+                'receipts' => $formattedOrderReceipts,
                 'unit_image_url' => $imgPath ? asset('storage/' . $imgPath) : null,
             ];
 

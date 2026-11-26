@@ -211,7 +211,7 @@ class CustomerItemOrderController extends Controller
 
         $orders = [];
         if (Schema::hasTable('item_orders')) {
-            $orders = DB::table('item_orders as o')
+            $rawOrders = DB::table('item_orders as o')
                 ->leftJoin('inventory_items as i', 'i.item_id', '=', 'o.item_id')
                 ->leftJoin('bookings as b', 'b.booking_id', '=', 'o.linked_booking_id')
                 ->where('o.client_id', $userId)
@@ -228,8 +228,43 @@ class CustomerItemOrderController extends Controller
                     'b.scheduled_date as linked_scheduled_date',
                 ])
                 ->orderByDesc('o.order_id')
-                ->get()
-                ->map(fn ($r) => static::formatOrderRow($r))
+                ->get();
+
+            $receiptsByOrder = app(\App\Services\ReceiptService::class)->getFormattedReceiptsBySource(
+                \App\Models\Receipt::SOURCE_ITEM_ORDER,
+                $rawOrders->pluck('order_id')->map(fn ($id) => (int) $id)->all(),
+                'customer'
+            );
+
+            $linkedBookingIds = $rawOrders->pluck('linked_booking_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+            $receiptsByBooking = ! empty($linkedBookingIds)
+                ? app(\App\Services\ReceiptService::class)->getFormattedReceiptsBySource(
+                    \App\Models\Receipt::SOURCE_BOOKING,
+                    $linkedBookingIds,
+                    'customer'
+                )
+                : [];
+
+            $orders = $rawOrders
+                ->map(function ($r) use ($receiptsByOrder, $receiptsByBooking) {
+                    $formatted = static::formatOrderRow($r);
+                    $merged = collect($receiptsByOrder[(int) $r->order_id] ?? [])
+                        ->concat(! empty($r->linked_booking_id) ? ($receiptsByBooking[(int) $r->linked_booking_id] ?? []) : [])
+                        ->unique('receipt_id')
+                        ->sortBy('receipt_id')
+                        ->values()
+                        ->all();
+                    $formatted['receipts'] = $merged;
+                    $primary = collect($merged)
+                        ->sortByDesc(fn ($rcp) => ($rcp['document_kind'] !== 'acknowledgement_receipt' ? 1000000 : 0) + (int) $rcp['receipt_id'])
+                        ->first();
+                    $formatted['receipt'] = $primary;
+                    if ($primary && ! empty($primary['receipt_number'])) {
+                        $formatted['receipt_reference_number'] = $primary['receipt_number'];
+                    }
+
+                    return $formatted;
+                })
                 ->values()
                 ->all();
         }
@@ -362,6 +397,7 @@ class CustomerItemOrderController extends Controller
                 $fulfillmentType = $category === 'spare_part' ? null : 'pickup';
                 $orderStatus = 'Pending Payment Review';
                 $refNumber = trim($gcashValidated['reference_number']);
+                app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($refNumber, 'GCash');
                 $senderName = trim((string) ($gcashValidated['sender_name'] ?? $user->name));
                 $senderNumber = trim((string) ($gcashValidated['sender_number'] ?? $user->contact_number));
             } else {
@@ -504,6 +540,8 @@ class CustomerItemOrderController extends Controller
         ], [
             'amount_paid.min' => 'Total GCash down payment must be at least ₱' . number_format($minDown, 2) . ' (50%).',
         ]);
+
+        app(\App\Services\ReceiptService::class)->assertGcashReferenceAvailable($validated['reference_number'], 'GCash');
 
         $receiptPath = $order->payment_receipt_path;
         if ($request->hasFile('receipt_image')) {

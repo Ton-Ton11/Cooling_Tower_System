@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Technician;
 
+use App\Services\OcularInspectionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 class TechnicianBookingController extends TechnicianBaseController
@@ -47,7 +49,8 @@ class TechnicianBookingController extends TechnicianBaseController
                 $q->where('bookings.lead_technician_id', $userId)
                     ->orWhere('bookings.assistant_technician_id', $userId)
                     ->orWhere('bookings.assigned_tech_id', $userId)
-                    ->orWhere('bookings.service_details', 'like', '%"user_id":' . $userId . '%');
+                    ->orWhere('bookings.service_details', 'like', '%"user_id":' . $userId . '%')
+                    ->orWhere('bookings.service_details', 'like', '%"user_id": ' . $userId . '%');
                 if (! empty($myTeamIds)) {
                     $q->orWhere(function ($teamQuery) use ($myTeamIds) {
                         $teamQuery->whereNull('bookings.lead_technician_id')
@@ -64,13 +67,27 @@ class TechnicianBookingController extends TechnicianBaseController
                 $query->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress']);
             } elseif ($status === 'Completed') {
                 $query->whereIn('bookings.booking_status', ['Partially Completed', 'Completed']);
+            } elseif ($status === 'Cancelled' || $status === 'Failed') {
+                $query->where('bookings.booking_status', 'Cancelled');
             } elseif ($status !== 'All') {
                 $query->where('bookings.booking_status', $status);
             } else {
-                $query->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Partially Completed', 'Completed']);
+                $query->where(function ($q) {
+                    $q->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Partially Completed', 'Completed'])
+                        ->orWhere(function ($sub) {
+                            $sub->where('bookings.booking_status', 'Cancelled')
+                                ->where('bookings.service_details', 'like', '%failed_booking%');
+                        });
+                });
             }
         } else {
-            $query->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Partially Completed', 'Completed']);
+            $query->where(function ($q) {
+                $q->whereIn('bookings.booking_status', ['Approved', 'Dispatched', 'In-Progress', 'Partially Completed', 'Completed'])
+                    ->orWhere(function ($sub) {
+                        $sub->where('bookings.booking_status', 'Cancelled')
+                            ->where('bookings.service_details', 'like', '%failed_booking%');
+                    });
+            });
         }
 
         $rows = $query->get();
@@ -127,6 +144,7 @@ class TechnicianBookingController extends TechnicianBaseController
                     'tool_checklist_items.item_type',
                     'tool_checklist_items.quantity_requested',
                     'tool_checklist_items.quantity_approved',
+                    'tool_checklist_items.quantity_returned',
                     'tool_checklist_items.status',
                     'tool_checklist_items.notes',
                     'inventory_items.item_name',
@@ -149,6 +167,9 @@ class TechnicianBookingController extends TechnicianBaseController
                         $itemStatus = $invStatus === 'lost/damaged' ? 'damaged' : $invStatus;
                     }
 
+                    $approvedQty = (int) ($it->quantity_approved ?: $it->quantity_requested ?: 1);
+                    $returnedQty = $isTool ? 0 : min($approvedQty, max(0, (int) ($it->quantity_returned ?? 0)));
+
                     return [
                         'id' => (int) $it->id,
                         'checklist_id' => (int) $it->checklist_id,
@@ -162,6 +183,8 @@ class TechnicianBookingController extends TechnicianBaseController
                         'unit' => $it->unit ?? 'pc',
                         'quantity_requested' => (int) $it->quantity_requested,
                         'quantity_approved' => (int) $it->quantity_approved,
+                        'quantity_returned' => $returnedQty,
+                        'quantity_used' => $isTool ? $approvedQty : max(0, $approvedQty - $returnedQty),
                         'status' => $itemStatus,
                         'inventory_status' => $it->inventory_status,
                         'notes' => $it->notes,
@@ -268,7 +291,34 @@ class TechnicianBookingController extends TechnicianBaseController
             $linkedItemOrdersById = $allItemOrders->keyBy('order_id');
         }
 
-        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking, $linkedOrdersByBooking, $linkedItemOrdersByBooking, $linkedItemOrdersById) {
+        $ocularRoomsByBooking = collect();
+        if (! empty($bookingIds) && Schema::hasTable('ocular_inspection_rooms')) {
+            $ocularRoomsByBooking = DB::table('ocular_inspection_rooms')
+                ->whereIn('booking_id', $bookingIds)
+                ->orderBy('room_id')
+                ->get()
+                ->map(fn ($r) => OcularInspectionService::formatRoom($r))
+                ->groupBy('booking_id');
+        }
+
+        $ocularRecsByBooking = collect();
+        if (! empty($bookingIds) && Schema::hasTable('ocular_inspection_recommendations')) {
+            $ocularRecsByBooking = DB::table('ocular_inspection_recommendations')
+                ->leftJoin('ac_units_inventory', 'ac_units_inventory.ac_unit_id', '=', 'ocular_inspection_recommendations.ac_unit_id')
+                ->whereIn('ocular_inspection_recommendations.booking_id', $bookingIds)
+                ->orderBy('ocular_inspection_recommendations.recommendation_id')
+                ->select([
+                    'ocular_inspection_recommendations.*',
+                    'ac_units_inventory.serial_number as inv_serial_number',
+                    'ac_units_inventory.image_path as inv_image_path',
+                    'ac_units_inventory.status as inv_current_status',
+                ])
+                ->get()
+                ->map(fn ($rec) => OcularInspectionService::formatRecommendation($rec))
+                ->groupBy('booking_id');
+        }
+
+        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking, $linkedOrdersByBooking, $linkedItemOrdersByBooking, $linkedItemOrdersById, $ocularRoomsByBooking, $ocularRecsByBooking) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id;
             $leadName = ! empty($row->lead_tech_user_id)
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -320,12 +370,23 @@ class TechnicianBookingController extends TechnicianBaseController
 
             $linkedItemOrderData = $linkedItemOrdersByBooking->get((int) $row->booking_id)
                 ?? (! empty($serviceDetails['item_order_id']) ? $linkedItemOrdersById->get((int) $serviceDetails['item_order_id']) : null);
+            $inspectionStatus = $serviceDetails['inspection_status'] ?? ($isOcularInspection ? 'Pending Inspection' : null);
+            $hasApprovedChecklist = $bookingChecklists->contains(
+                fn ($c) => in_array((string) ($c['status'] ?? ''), ['Approved', 'Completed'], true)
+            );
 
             return [
                 'booking_id' => (int) $row->booking_id,
                 'is_ocular_inspection' => $isOcularInspection,
                 'ocular_personnel' => \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::normalizeOcularPersonnel($serviceDetails['ocular_personnel'] ?? []),
-                'inspection_status' => $serviceDetails['inspection_status'] ?? null,
+                'inspection_status' => $inspectionStatus,
+                'ocular_rooms' => collect($ocularRoomsByBooking->get((int) $row->booking_id, []))->values()->all(),
+                'ocular_recommendations' => collect($ocularRecsByBooking->get((int) $row->booking_id, []))->values()->all(),
+                'technician_ocular_result' => OcularInspectionService::formatTechnicianOcularResult($serviceDetails['technician_ocular_result'] ?? null),
+                'can_submit_ocular_result' => $isOcularInspection
+                    && ! in_array($row->booking_status, ['Pending', 'Cancelled'], true)
+                    && $inspectionStatus !== 'Submitted'
+                    && $hasApprovedChecklist,
                 'ac_unit_order' => $linkedOrdersByBooking->get((int) $row->booking_id) ?? null,
                 'item_order' => $linkedItemOrderData,
                 'client_id' => (int) $row->client_id,
@@ -351,6 +412,9 @@ class TechnicianBookingController extends TechnicianBaseController
                 'is_scheduled_date_present' => $isScheduledDatePresent,
                 'blocking_booking_id' => $blockingBookingId,
                 'booking_status' => $row->booking_status,
+                'quotation_status' => $row->quotation_status ?? ($isOcularInspection ? 'Not Applicable' : 'Pending Assessment'),
+                'cancellation_reason' => $row->cancellation_reason ?? null,
+                'failed_booking' => $serviceDetails['failed_booking'] ?? null,
                 'service_payment_method' => $row->service_payment_method ?? 'Cash',
                 'service_details' => $serviceDetails,
                 'units_data' => $unitsData,
@@ -705,7 +769,23 @@ class TechnicianBookingController extends TechnicianBaseController
             'invalid_reason' => null,
         ];
 
-        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $linkedItemOrder, $sparePartRemainingBalance, $installationFee, $deliveryFee, $downPayment, $partsReplacedValue) {
+        $isOcularBooking = ((int) $booking->service_id === 4)
+            || str_contains(strtolower((string) ($booking->service_name ?? '')), 'ocular')
+            || ! empty($serviceDetails['is_ocular_inspection']);
+
+        $clientUser = DB::table('users')
+            ->where('user_id', $booking->client_id)
+            ->first(['given_name', 'middle_name', 'last_name']);
+        $clientFullName = $clientUser
+            ? $this->formatName($clientUser->given_name, $clientUser->middle_name, $clientUser->last_name)
+            : 'Customer';
+        $signedQuotationStatus = ! $isOcularBooking ? 'Signed by ' . $clientFullName : null;
+
+        if (! empty($serviceDetails['failed_booking']) && ($serviceDetails['failed_booking']['status'] ?? '') !== 'Valid') {
+            $serviceDetails['failed_booking']['resolved_by_turnover'] = true;
+        }
+
+        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $linkedItemOrder, $sparePartRemainingBalance, $installationFee, $deliveryFee, $downPayment, $partsReplacedValue, $signedQuotationStatus) {
             if ($linkedUnitOrder) {
                 DB::table('ac_unit_orders')
                     ->where('order_id', (int) $linkedUnitOrder->order_id)
@@ -717,7 +797,7 @@ class TechnicianBookingController extends TechnicianBaseController
                     ]);
             }
             // Keep booking in In-Progress until Manager verifies payment turnover and declares Complete
-            DB::table('bookings')->where('booking_id', $bookingId)->update([
+            $bookingUpdate = [
                 'service_payment_method' => $validated['payment_method'],
                 'service_details' => json_encode($serviceDetails),
                 'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
@@ -730,7 +810,11 @@ class TechnicianBookingController extends TechnicianBaseController
                     ! empty($validated['reference_number']) ? " (Ref: {$validated['reference_number']})" : ''
                 )),
                 'updated_at' => now(),
-            ]);
+            ];
+            if ($signedQuotationStatus !== null) {
+                $bookingUpdate['quotation_status'] = $signedQuotationStatus;
+            }
+            DB::table('bookings')->where('booking_id', $bookingId)->update($bookingUpdate);
 
             $existingBalancePay = DB::table('payment')
                 ->where('booking_id', $bookingId)
@@ -813,7 +897,397 @@ class TechnicianBookingController extends TechnicianBaseController
         return response()->json([
             'message' => 'Service report submitted and customer payment turned over to Manager! Once the Manager verifies the payment turnover, the booking will be declared Completed.',
             'booking_status' => $booking->booking_status,
+            'quotation_status' => $signedQuotationStatus ?? ($booking->quotation_status ?? null),
             'payment_turnover' => $serviceDetails['payment_turnover'],
+        ]);
+    }
+
+    /**
+     * Technician reports a Failed Booking when the customer refuses/fails to sign the quotation in person.
+     * Requires tools & materials to be returned and the checklist to be marked Completed first.
+     */
+    public function reportFailedBooking(Request $request, int $bookingId): JsonResponse
+    {
+        $this->authorizeRole($request);
+
+        $userId = (int) $request->user()->user_id;
+
+        $booking = DB::table('bookings')
+            ->join('services', 'services.service_id', '=', 'bookings.service_id')
+            ->where('bookings.booking_id', $bookingId)
+            ->first();
+
+        if (! $booking) {
+            abort(404, 'Booking not found.');
+        }
+
+        $myTeamIds = DB::table('technician_team_members')
+            ->where('technician_id', $userId)
+            ->pluck('team_id')
+            ->all();
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : [])
+            : [];
+
+        $isAssigned = ((int) $booking->assigned_tech_id === $userId)
+            || ((int) $booking->lead_technician_id === $userId)
+            || ((int) $booking->assistant_technician_id === $userId)
+            || (empty($booking->lead_technician_id) && empty($booking->assistant_technician_id) && empty($booking->assigned_tech_id) && $booking->assigned_team_id && in_array((int) $booking->assigned_team_id, $myTeamIds, true));
+
+        if (in_array((int) $request->user()->role_id, [5, 7], true) && ! $isAssigned && ! $request->user()->isHeadTechnician()) {
+            abort(403, 'You are not assigned to this booking or team.');
+        }
+
+        $isOcularBooking = ((int) $booking->service_id === 4)
+            || str_contains(strtolower((string) ($booking->service_name ?? '')), 'ocular')
+            || ! empty($serviceDetails['is_ocular_inspection']);
+
+        if ($isOcularBooking) {
+            throw ValidationException::withMessages([
+                'booking' => ['Failed booking quotation reports apply only to Installation, Repair, and Cleaning bookings.'],
+            ]);
+        }
+
+        if ($booking->booking_status !== 'In-Progress') {
+            throw ValidationException::withMessages([
+                'booking_status' => ['Failed booking can only be reported while the booking is In-Progress.'],
+            ]);
+        }
+
+        $latestChecklist = DB::table('tool_checklists')
+            ->where('booking_id', $bookingId)
+            ->orderByDesc('checklist_id')
+            ->first();
+
+        if (! $latestChecklist || $latestChecklist->status !== 'Completed') {
+            throw ValidationException::withMessages([
+                'checklist' => ['Please return all tools and unused materials and have the Tools Man complete the checklist before reporting a failed booking.'],
+            ]);
+        }
+
+        if (! empty($serviceDetails['payment_turnover']) && empty($serviceDetails['payment_turnover']['is_invalid'])) {
+            throw ValidationException::withMessages([
+                'payment_turnover' => ['Payment turnover has already been submitted for this booking.'],
+            ]);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:5', 'max:1000'],
+        ], [
+            'reason.required' => 'Please enter the reason for the failed booking.',
+            'reason.min' => 'Please provide a more detailed reason (at least 5 characters).',
+        ]);
+
+        $reason = trim($validated['reason']);
+        $techName = $request->user()->name ?: $this->formatName(
+            $request->user()->given_name,
+            $request->user()->middle_name ?? null,
+            $request->user()->last_name
+        );
+
+        $serviceDetails['failed_booking'] = [
+            'status' => 'Pending Manager Review',
+            'reason' => $reason,
+            'submitted_by_user_id' => $userId,
+            'submitted_by_name' => $techName,
+            'submitted_at' => now()->toISOString(),
+            'decision' => null,
+            'reviewed_by_user_id' => null,
+            'reviewed_by_name' => null,
+            'reviewed_at' => null,
+            'review_notes' => null,
+            'invalid_reason' => null,
+        ];
+
+        DB::transaction(function () use ($bookingId, $booking, $userId, $techName, $reason, $serviceDetails) {
+            DB::table('bookings')->where('booking_id', $bookingId)->update([
+                'service_details' => json_encode($serviceDetails),
+                'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
+                    '[Technician Failed Booking Report by %s]: %s',
+                    $techName,
+                    $reason
+                )),
+                'updated_at' => now(),
+            ]);
+
+            $this->logActivity(
+                $userId,
+                'FAILED_BOOKING_REPORTED',
+                sprintf('Reported Failed Booking #%d (%s) for Manager review. Reason: %s', $bookingId, $booking->service_name ?? 'Service', $reason)
+            );
+        });
+
+        return response()->json([
+            'message' => 'Failed booking report submitted to Manager for review.',
+            'booking_status' => $booking->booking_status,
+            'failed_booking' => $serviceDetails['failed_booking'],
+        ]);
+    }
+
+    /**
+     * Technician submits or updates an Ocular Inspection Result (before or after the inspection task)
+     * so Admin Assistant receives the room capacity measurements cleanly and can select matching AC units.
+     */
+    public function submitOcularResult(Request $request, int $bookingId): JsonResponse
+    {
+        $this->authorizeRole($request);
+
+        $userId = (int) $request->user()->user_id;
+
+        $booking = DB::table('bookings')
+            ->leftJoin('services', 'services.service_id', '=', 'bookings.service_id')
+            ->where('bookings.booking_id', $bookingId)
+            ->select(['bookings.*', 'services.service_name'])
+            ->first();
+
+        if (! $booking) {
+            abort(404, 'Booking not found.');
+        }
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : (array) $booking->service_details)
+            : [];
+
+        $myTeamIds = DB::table('technician_team_members')
+            ->where('technician_id', $userId)
+            ->pluck('team_id')
+            ->all();
+
+        $inOcularPersonnel = collect($serviceDetails['ocular_personnel'] ?? [])
+            ->contains(fn ($p) => (int) ($p['user_id'] ?? 0) === $userId);
+
+        $isAssigned = ((int) $booking->assigned_tech_id === $userId)
+            || ((int) $booking->lead_technician_id === $userId)
+            || ((int) $booking->assistant_technician_id === $userId)
+            || $inOcularPersonnel
+            || (empty($booking->lead_technician_id) && empty($booking->assistant_technician_id) && empty($booking->assigned_tech_id) && $booking->assigned_team_id && in_array((int) $booking->assigned_team_id, $myTeamIds, true));
+
+        if (in_array((int) $request->user()->role_id, [5, 7], true) && ! $isAssigned && ! $request->user()->isHeadTechnician()) {
+            abort(403, 'You are not assigned to this booking.');
+        }
+
+        $isOcularBooking = ((int) $booking->service_id === 4)
+            || str_contains(strtolower((string) ($booking->service_name ?? '')), 'ocular')
+            || ! empty($serviceDetails['is_ocular_inspection']);
+
+        if (! $isOcularBooking) {
+            throw ValidationException::withMessages([
+                'booking' => ['Ocular inspection results can only be submitted for Ocular Inspection bookings.'],
+            ]);
+        }
+
+        if (strtolower((string) ($booking->booking_status ?? '')) === 'pending') {
+            throw ValidationException::withMessages([
+                'booking_status' => ['Ocular inspection results cannot be submitted while booking is pending approval.'],
+            ]);
+        }
+
+        if ($booking->booking_status === 'Cancelled') {
+            throw ValidationException::withMessages([
+                'booking_status' => ['Cannot submit results for a cancelled booking.'],
+            ]);
+        }
+
+        if (($serviceDetails['inspection_status'] ?? '') === 'Submitted') {
+            throw ValidationException::withMessages([
+                'inspection_status' => ['This ocular inspection has already been submitted to the customer by the Admin Assistant.'],
+            ]);
+        }
+
+        $hasApprovedChecklist = DB::table('tool_checklists')
+            ->where('booking_id', $bookingId)
+            ->whereIn('status', ['Approved', 'Completed'])
+            ->exists();
+
+        if (! $hasApprovedChecklist) {
+            throw ValidationException::withMessages([
+                'checklist' => ['Your tools and materials checklist must be approved before submitting the ocular inspection result.'],
+            ]);
+        }
+
+        $rawRooms = $request->input('rooms');
+        if (is_string($rawRooms)) {
+            $decodedRooms = json_decode($rawRooms, true);
+            if (is_array($decodedRooms)) {
+                $request->merge(['rooms' => $decodedRooms]);
+            }
+        }
+
+        $roomRules = OcularInspectionService::roomValidationRules('rooms.*.');
+        $validated = $request->validate(array_merge([
+            'submission_stage' => ['nullable', 'string', 'in:before,after'],
+            'rooms'            => ['required', 'array', 'min:1', 'max:20'],
+            'rooms.*.room_id'  => ['nullable', 'integer'],
+            'technician_notes' => ['nullable', 'string', 'max:1500'],
+            'before_notes'     => ['nullable', 'string', 'max:1000'],
+            'after_notes'      => ['nullable', 'string', 'max:1000'],
+            'before_photo'     => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,pdf,doc,docx', 'max:10240'],
+            'after_photo'      => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,pdf,doc,docx', 'max:10240'],
+        ], $roomRules), [
+            'rooms.required' => 'Please add at least one inspected room with dimensions.',
+            'rooms.min'      => 'Please add at least one inspected room with dimensions.',
+        ]);
+
+        $latestChecklist = Schema::hasTable('tool_checklists')
+            ? DB::table('tool_checklists')
+                ->where('booking_id', $bookingId)
+                ->orderByDesc('checklist_id')
+                ->first()
+            : null;
+
+        $stage = $validated['submission_stage']
+            ?? (($booking->booking_status === 'In-Progress' || ($latestChecklist && $latestChecklist->status === 'Completed')) ? 'after' : 'before');
+
+        $existingResult = is_array($serviceDetails['technician_ocular_result'] ?? null)
+            ? $serviceDetails['technician_ocular_result']
+            : [];
+
+        $beforePhotoPath = $existingResult['before_photo_path'] ?? null;
+        if ($request->hasFile('before_photo')) {
+            $beforePhotoPath = $request->file('before_photo')->store('ocular-inspections', 'public');
+        }
+
+        $afterPhotoPath = $existingResult['after_photo_path'] ?? null;
+        if ($request->hasFile('after_photo')) {
+            $afterPhotoPath = $request->file('after_photo')->store('ocular-inspections', 'public');
+        }
+
+        $techName = $request->user()->name ?: $this->formatName(
+            $request->user()->given_name ?? '',
+            $request->user()->middle_name ?? null,
+            $request->user()->last_name ?? ''
+        );
+
+        $stagesSubmitted = array_values(array_unique(array_merge(
+            is_array($existingResult['stages_submitted'] ?? null) ? $existingResult['stages_submitted'] : [],
+            [$stage]
+        )));
+
+        $totalRecommendedHp = 0.0;
+
+        DB::transaction(function () use (
+            $bookingId,
+            $userId,
+            $techName,
+            $stage,
+            $stagesSubmitted,
+            $validated,
+            $existingResult,
+            $beforePhotoPath,
+            $afterPhotoPath,
+            &$serviceDetails,
+            &$totalRecommendedHp
+        ) {
+            $existingRoomIds = DB::table('ocular_inspection_rooms')
+                ->where('booking_id', $bookingId)
+                ->pluck('room_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            $retainedRoomIds = [];
+            foreach ($validated['rooms'] as $idx => $roomInput) {
+                $capacity = OcularInspectionService::calculateCoolingCapacity($roomInput);
+                $totalRecommendedHp += (float) $capacity['estimated_hp'];
+                $roomName = trim((string) ($roomInput['room_name'] ?? '')) ?: ('Room ' . ($idx + 1));
+
+                $payload = [
+                    'room_name'                 => $roomName,
+                    'unit_of_measurement'       => $roomInput['unit_of_measurement'],
+                    'room_length'               => $roomInput['room_length'],
+                    'room_width'                => $roomInput['room_width'],
+                    'ceiling_height'            => $roomInput['ceiling_height'],
+                    'room_category'             => $roomInput['room_category'],
+                    'sun_exposure_level'        => $roomInput['sun_exposure_level'],
+                    'maximum_occupancy'         => (int) $roomInput['maximum_occupancy'],
+                    'window_size_glazing'       => $roomInput['window_size_glazing'],
+                    'heat_generating_equipment' => (int) $roomInput['heat_generating_equipment'],
+                    'estimated_btu'             => $capacity['estimated_btu'],
+                    'estimated_hp'              => $capacity['estimated_hp'],
+                    'updated_at'                => now(),
+                ];
+
+                $incomingRoomId = ! empty($roomInput['room_id']) ? (int) $roomInput['room_id'] : 0;
+                if ($incomingRoomId > 0 && in_array($incomingRoomId, $existingRoomIds, true)) {
+                    DB::table('ocular_inspection_rooms')
+                        ->where('room_id', $incomingRoomId)
+                        ->update($payload);
+                    $retainedRoomIds[] = $incomingRoomId;
+                } else {
+                    $newId = DB::table('ocular_inspection_rooms')->insertGetId(array_merge($payload, [
+                        'booking_id' => $bookingId,
+                        'created_by' => $userId,
+                        'created_at' => now(),
+                    ]), 'room_id');
+                    $retainedRoomIds[] = (int) $newId;
+                }
+            }
+
+            $toDeleteIds = array_diff($existingRoomIds, $retainedRoomIds);
+            if (! empty($toDeleteIds)) {
+                DB::table('ocular_inspection_rooms')
+                    ->where('booking_id', $bookingId)
+                    ->whereIn('room_id', $toDeleteIds)
+                    ->delete();
+            }
+
+            $nowIso = now()->toISOString();
+            $serviceDetails['is_ocular_inspection'] = true;
+            $serviceDetails['inspection_status'] = 'Technician Submitted';
+            $serviceDetails['technician_ocular_result'] = [
+                'submitted_by_user_id' => $userId,
+                'submitted_by_name'    => $techName ?: 'Technician',
+                'last_submitted_stage' => $stage,
+                'stages_submitted'     => $stagesSubmitted,
+                'technician_notes'     => trim((string) ($validated['technician_notes'] ?? ($existingResult['technician_notes'] ?? ''))) ?: null,
+                'before_notes'         => array_key_exists('before_notes', $validated)
+                    ? (trim((string) $validated['before_notes']) ?: null)
+                    : ($existingResult['before_notes'] ?? null),
+                'after_notes'          => array_key_exists('after_notes', $validated)
+                    ? (trim((string) $validated['after_notes']) ?: null)
+                    : ($existingResult['after_notes'] ?? null),
+                'before_photo_path'    => $beforePhotoPath,
+                'after_photo_path'     => $afterPhotoPath,
+                'before_submitted_at'  => $stage === 'before' ? $nowIso : ($existingResult['before_submitted_at'] ?? null),
+                'after_submitted_at'   => $stage === 'after' ? $nowIso : ($existingResult['after_submitted_at'] ?? null),
+                'submitted_at'         => $existingResult['submitted_at'] ?? $nowIso,
+                'updated_at'           => $nowIso,
+                'rooms_count'          => count($validated['rooms']),
+                'recommended_total_hp' => round($totalRecommendedHp, 2),
+            ];
+
+            DB::table('bookings')->where('booking_id', $bookingId)->update([
+                'service_details' => json_encode($serviceDetails),
+                'updated_at'      => now(),
+            ]);
+
+            $this->logActivity(
+                $userId,
+                'OCULAR_TECH_RESULT_SUBMITTED',
+                sprintf(
+                    'Submitted Ocular Inspection result (%s task, %d room(s)) to Admin Assistant for Booking #%d.',
+                    $stage === 'before' ? 'Before' : 'After',
+                    count($validated['rooms']),
+                    $bookingId
+                )
+            );
+        });
+
+        $freshRooms = DB::table('ocular_inspection_rooms')
+            ->where('booking_id', $bookingId)
+            ->orderBy('room_id')
+            ->get()
+            ->map(fn ($r) => OcularInspectionService::formatRoom($r))
+            ->values()
+            ->all();
+
+        $formattedResult = OcularInspectionService::formatTechnicianOcularResult($serviceDetails['technician_ocular_result']);
+
+        return response()->json([
+            'message'                  => 'Ocular inspection result submitted to Admin Assistant.',
+            'inspection_status'        => 'Technician Submitted',
+            'ocular_rooms'             => $freshRooms,
+            'technician_ocular_result' => $formattedResult,
         ]);
     }
 

@@ -59,6 +59,13 @@ class SuperAdminBookingController extends SuperAdminBaseController
         return response()->json($this->handleInvalidateTurnoverAction($request, $bookingId));
     }
 
+    public function reviewFailedBooking(Request $request, int $bookingId): JsonResponse
+    {
+        $this->authorizeSuperAdmin($request);
+
+        return response()->json($this->handleReviewFailedBookingAction($request, $bookingId));
+    }
+
     public function reportBooking(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeSuperAdmin($request);

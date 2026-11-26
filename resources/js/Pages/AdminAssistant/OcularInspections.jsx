@@ -129,6 +129,60 @@ const AC_TYPE_OPTIONS = [
 ];
 const MOTOR_TYPE_OPTIONS = ["Inverter", "Non-Inverter", "Both"];
 
+const computeOcularRoomEstimate = (room) => {
+    const length = parseFloat(room?.room_length);
+    const width = parseFloat(room?.room_width);
+    const height = parseFloat(room?.ceiling_height || "2.7");
+    if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(width) || width <= 0) {
+        return null;
+    }
+    const isFeet = (room?.unit_of_measurement || "Meters") === "Feet";
+    const lengthM = isFeet ? length * 0.3048 : length;
+    const widthM = isFeet ? width * 0.3048 : width;
+    const heightM = isFeet
+        ? (Number.isFinite(height) && height > 0 ? height : 8.86) * 0.3048
+        : Number.isFinite(height) && height > 0
+        ? height
+        : 2.7;
+
+    let btu = Math.max(1, lengthM * widthM) * 600 * Math.max(1, heightM / 2.7);
+    const cat = String(
+        room?.room_category_choice === "Others"
+            ? room?.room_category_custom || ""
+            : room?.room_category_choice || room?.room_category || ""
+    ).toLowerCase();
+    if (cat.includes("server")) btu *= 1.35;
+    else if (cat.includes("kitchen")) btu += 4000;
+    else if (cat.includes("office") || cat.includes("commercial")) btu *= 1.12;
+
+    if (room?.sun_exposure_level === "Heavy/West") btu *= 1.12;
+    else if (room?.sun_exposure_level === "Shaded") btu *= 0.92;
+
+    if (room?.window_size_glazing === "Large Glass Facade") btu *= 1.15;
+    else if (room?.window_size_glazing === "Small") btu *= 0.96;
+
+    const occ = Math.max(1, parseInt(room?.maximum_occupancy, 10) || 1);
+    if (occ > 2) btu += (occ - 2) * 600;
+
+    const eq = Math.max(0, parseInt(room?.heat_generating_equipment, 10) || 0);
+    if (eq > 0) btu += eq <= 30 ? eq * 350 : eq * 3.412;
+
+    const rawHp = Math.max(0.5, btu / 9000);
+    const standards = [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+    let hp = Math.round(rawHp * 2) / 2;
+    for (const s of standards) {
+        if (rawHp <= s + 0.05) {
+            hp = s;
+            break;
+        }
+    }
+
+    return {
+        btu: Math.round(btu),
+        hp,
+    };
+};
+
 export default function OcularInspections({
     addToast,
     onDataChanged,
@@ -160,7 +214,11 @@ export default function OcularInspections({
         maximum_occupancy: "2",
         window_size_glazing: "Medium",
         heat_generating_equipment: "0",
+        customer_note: "",
+        customer_attachment: null,
+        customer_attachment_preview: "",
     });
+    const [roomFormError, setRoomFormError] = useState("");
     const [deleteRoomTarget, setDeleteRoomTarget] = useState(null);
 
     // Recommendation Modal State
@@ -187,6 +245,12 @@ export default function OcularInspections({
 
     // Submit to Customer State
     const [submittingToCustomer, setSubmittingToCustomer] = useState(false);
+
+    // Direct AC Unit Picker State (based on Technician's ocular result)
+    const [pickerRoomId, setPickerRoomId] = useState("");
+    const [pickerFilter, setPickerFilter] = useState("all"); // "all" | "matched" | "on_hand" | "order_base"
+    const [pickerSearch, setPickerSearch] = useState("");
+    const [quickChoosingUnitId, setQuickChoosingUnitId] = useState(null);
 
     // Tools-Only Checklist Builder State
     const [checklistModalOpen, setChecklistModalOpen] = useState(false);
@@ -232,6 +296,20 @@ export default function OcularInspections({
     const isSelectedPending =
         String(selectedInspection?.booking_status || "").trim().toLowerCase() ===
         "pending";
+
+    useEffect(() => {
+        if (!selectedInspection) {
+            setPickerRoomId("");
+            return;
+        }
+        const firstRoomId = selectedInspection.rooms?.[0]?.room_id;
+        setPickerRoomId((prev) => {
+            if (prev && selectedInspection.rooms?.some((r) => String(r.room_id) === String(prev))) {
+                return prev;
+            }
+            return firstRoomId ? String(firstRoomId) : "";
+        });
+    }, [selectedInspection?.booking_id, selectedInspection?.rooms?.length]);
 
     // ── Checklist (Tools Only) Handlers ─────────────────────────────
     const openChecklistBuilder = async (booking) => {
@@ -450,7 +528,13 @@ export default function OcularInspections({
             maximum_occupancy: "2",
             window_size_glazing: "Medium",
             heat_generating_equipment: "0",
+            customer_note: selectedInspection?.admin_customer_note || "",
+            customer_attachment: null,
+            customer_attachment_preview: formatStorageUrl(
+                selectedInspection?.admin_customer_attachment_url || ""
+            ),
         });
+        setRoomFormError("");
         setRoomModalOpen(true);
     };
 
@@ -473,51 +557,73 @@ export default function OcularInspections({
             heat_generating_equipment: String(
                 room.heat_generating_equipment ?? "0"
             ),
+            customer_note: selectedInspection?.admin_customer_note || "",
+            customer_attachment: null,
+            customer_attachment_preview: formatStorageUrl(
+                selectedInspection?.admin_customer_attachment_url || ""
+            ),
         });
+        setRoomFormError("");
         setRoomModalOpen(true);
     };
 
     const handleSaveRoom = async (e) => {
         e.preventDefault();
         if (!selectedInspection) return;
+        const formEl = e.currentTarget;
+        if (formEl && !formEl.checkValidity()) {
+            formEl.reportValidity();
+            setRoomFormError(
+                "Please fill in valid dimensions and occupancy fields."
+            );
+            return;
+        }
         const finalCategory =
             roomForm.room_category_choice === "Others"
                 ? roomForm.room_category_custom.trim()
                 : roomForm.room_category_choice;
 
         if (!finalCategory) {
+            setRoomFormError("Please specify the Room Type.");
             addToast?.("Please specify the Room Category.", "error");
             return;
         }
+        setRoomFormError("");
         setRoomSubmitting(true);
         try {
-            const payload = {
-                room_name: roomForm.room_name.trim() || finalCategory,
-                unit_of_measurement: roomForm.unit_of_measurement,
-                room_length: parseFloat(roomForm.room_length),
-                room_width: parseFloat(roomForm.room_width),
-                ceiling_height: parseFloat(roomForm.ceiling_height),
-                room_category: finalCategory,
-                sun_exposure_level: roomForm.sun_exposure_level,
-                maximum_occupancy: parseInt(roomForm.maximum_occupancy, 10) || 1,
-                window_size_glazing: roomForm.window_size_glazing,
-                heat_generating_equipment:
-                    parseInt(roomForm.heat_generating_equipment, 10) || 0,
-            };
+            const fd = new FormData();
+            fd.append("room_name", roomForm.room_name.trim() || finalCategory);
+            fd.append("unit_of_measurement", roomForm.unit_of_measurement);
+            fd.append("room_length", String(parseFloat(roomForm.room_length)));
+            fd.append("room_width", String(parseFloat(roomForm.room_width)));
+            fd.append("ceiling_height", String(parseFloat(roomForm.ceiling_height)));
+            fd.append("room_category", finalCategory);
+            fd.append("sun_exposure_level", roomForm.sun_exposure_level);
+            fd.append("maximum_occupancy", String(parseInt(roomForm.maximum_occupancy, 10) || 1));
+            fd.append("window_size_glazing", roomForm.window_size_glazing);
+            fd.append(
+                "heat_generating_equipment",
+                String(parseInt(roomForm.heat_generating_equipment, 10) || 0)
+            );
+            fd.append("customer_note", (roomForm.customer_note || "").trim());
+            if (roomForm.customer_attachment) {
+                fd.append("customer_attachment", roomForm.customer_attachment);
+            }
 
             if (editingRoom) {
-                await window.axios.patch(
+                fd.append("_method", "PATCH");
+                await window.axios.post(
                     ep.updateOcularRoom(
                         selectedInspection.booking_id,
                         editingRoom.room_id
                     ),
-                    payload
+                    fd
                 );
                 addToast?.("Room dimensions & thermal load updated.", "success");
             } else {
                 await window.axios.post(
                     ep.storeOcularRoom(selectedInspection.booking_id),
-                    payload
+                    fd
                 );
                 addToast?.("Inspected room added.", "success");
             }
@@ -525,10 +631,9 @@ export default function OcularInspections({
             await fetchOcularInspections();
             onDataChanged?.();
         } catch (err) {
-            addToast?.(
-                extractErrorMessage(err, "Failed to save room capacity data."),
-                "error"
-            );
+            const msg = extractErrorMessage(err, "Failed to save room capacity data.");
+            setRoomFormError(msg);
+            addToast?.(msg, "error");
         } finally {
             setRoomSubmitting(false);
         }
@@ -707,6 +812,7 @@ export default function OcularInspections({
                 recForm.brand_recommendation.trim()
             );
             if (recForm.model_recommendation.trim()) {
+                fd.append("model", recForm.model_recommendation.trim());
                 fd.append(
                     "model_recommendation",
                     recForm.model_recommendation.trim()
@@ -796,13 +902,53 @@ export default function OcularInspections({
         }
     };
 
+    const handleQuickChooseAcUnit = async (unit) => {
+        if (!selectedInspection || isSelectedPending || quickChoosingUnitId) return;
+        const resolvedRoomId = pickerRoomId
+            ? Number(pickerRoomId)
+            : selectedInspection.rooms?.[0]?.room_id || null;
+
+        setQuickChoosingUnitId(unit.ac_unit_id);
+        try {
+            const payload = {
+                ac_unit_id: unit.ac_unit_id,
+                room_id: resolvedRoomId,
+                recommended_capacity: unit.horsepower || 1.5,
+                recommended_ac_type: unit.ac_type || "Wall-Mounted Split",
+                motor_type_recommendation: unit.motor_type || "Inverter",
+                brand_recommendation: unit.brand,
+                model: unit.model || "",
+                unit_price: unit.selling_price || 0,
+            };
+            await window.axios.post(
+                ep.storeOcularRecommendation(selectedInspection.booking_id),
+                payload
+            );
+            addToast?.(
+                `Selected ${unit.brand} ${unit.model || ""} (${unit.horsepower} HP) for customer.`,
+                "success"
+            );
+            await fetchOcularInspections();
+            onDataChanged?.();
+        } catch (err) {
+            addToast?.(
+                extractErrorMessage(err, "Failed to select AC unit."),
+                "error"
+            );
+        } finally {
+            setQuickChoosingUnitId(null);
+        }
+    };
+
     // ── Filtered Inspections ────────────────────────────────────────
     const normalizedSearch = normalizeSearchQuery(search);
     const filteredInspections = inspections.filter((b) => {
         if (filterTab === "assigned" && !b.is_assigned_to_me) return false;
+        if (filterTab === "tech_submitted" && b.inspection_status !== "Technician Submitted")
+            return false;
         if (
             filterTab === "pending" &&
-            !["Pending", "In-Progress"].includes(b.inspection_status)
+            !["Pending Inspection", "Pending", "In-Progress"].includes(b.inspection_status)
         )
             return false;
         if (filterTab === "submitted" && b.inspection_status !== "Submitted")
@@ -876,9 +1022,18 @@ export default function OcularInspections({
                                             selectedInspection.booking_status
                                         }
                                     />
-                                    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-50 text-sky-700 border border-sky-200">
-                                        Report:{" "}
-                                        {selectedInspection.inspection_status}
+                                    <span
+                                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                                            selectedInspection.inspection_status === "Submitted"
+                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                : selectedInspection.inspection_status === "Technician Submitted"
+                                                ? "bg-blue-50 text-blue-700 border-blue-200"
+                                                : "bg-sky-50 text-sky-700 border-sky-200"
+                                        }`}
+                                    >
+                                        {selectedInspection.inspection_status === "Technician Submitted"
+                                            ? "Tech Result Ready"
+                                            : `Status: ${selectedInspection.inspection_status}`}
                                     </span>
                                 </div>
                                 <h2 className="text-base font-bold text-gray-900">
@@ -987,12 +1142,115 @@ export default function OcularInspections({
                                         ? "Submitting..."
                                         : selectedInspection.inspection_status ===
                                           "Submitted"
-                                        ? "Re-Submit Updated Report to Customer"
-                                        : "Submit Results & Recommendations to Customer"}
+                                        ? "Re-Submit to Customer"
+                                        : "Submit to Customer"}
                                 </button>
                             </div>
                         </div>
                     </div>
+
+                    {/* Technician Ocular Inspection Result Banner */}
+                    {selectedInspection.technician_ocular_result && (() => {
+                        const techRes = selectedInspection.technician_ocular_result;
+                        const stages = Array.isArray(techRes.stages_submitted) ? techRes.stages_submitted : [];
+                        return (
+                            <div className="card p-5 border-l-4 border-l-blue-600 bg-blue-50/30 space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-sm font-bold text-gray-900">
+                                            Technician Inspection Result
+                                        </h3>
+                                        {stages.map((st) => (
+                                            <span
+                                                key={st}
+                                                className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                                    st === "after"
+                                                        ? "bg-emerald-100 text-emerald-800"
+                                                        : "bg-blue-100 text-blue-800"
+                                                }`}
+                                            >
+                                                {st === "before" ? "Before Task" : "After Task"}
+                                            </span>
+                                        ))}
+                                    </div>
+                                    <span className="text-xs text-gray-500">
+                                        Submitted by{" "}
+                                        <strong className="text-gray-800">
+                                            {techRes.submitted_by_name || "Technician"}
+                                        </strong>
+                                    </span>
+                                </div>
+
+                                {(techRes.technician_notes || techRes.before_notes || techRes.after_notes) && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                                        {techRes.before_notes && (
+                                            <div className="bg-white rounded-lg p-2.5 border border-gray-200">
+                                                <span className="block text-[10px] font-bold uppercase text-gray-400">
+                                                    Before Task Note
+                                                </span>
+                                                <p className="text-gray-700 mt-0.5">{techRes.before_notes}</p>
+                                            </div>
+                                        )}
+                                        {techRes.after_notes && (
+                                            <div className="bg-white rounded-lg p-2.5 border border-gray-200">
+                                                <span className="block text-[10px] font-bold uppercase text-gray-400">
+                                                    After Task Note
+                                                </span>
+                                                <p className="text-gray-700 mt-0.5">{techRes.after_notes}</p>
+                                            </div>
+                                        )}
+                                        {techRes.technician_notes && (
+                                            <div className="bg-white rounded-lg p-2.5 border border-blue-200">
+                                                <span className="block text-[10px] font-bold uppercase text-blue-600">
+                                                    Tech Remarks
+                                                </span>
+                                                <p className="text-gray-800 mt-0.5">{techRes.technician_notes}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {(techRes.before_photo_url || techRes.after_photo_url) && (
+                                    <div className="flex flex-wrap gap-3 pt-1">
+                                        {techRes.before_photo_url && (
+                                            <a
+                                                href={formatStorageUrl(techRes.before_photo_url)}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 hover:border-blue-400 transition"
+                                            >
+                                                <img
+                                                    src={formatStorageUrl(techRes.before_photo_url)}
+                                                    alt="Before ocular inspection"
+                                                    className="w-12 h-12 rounded object-cover"
+                                                />
+                                                <span className="text-[11px] font-semibold text-gray-700 pr-2">
+                                                    Before Photo
+                                                </span>
+                                            </a>
+                                        )}
+                                        {techRes.after_photo_url && (
+                                            <a
+                                                href={formatStorageUrl(techRes.after_photo_url)}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 hover:border-blue-400 transition"
+                                            >
+                                                <img
+                                                    src={formatStorageUrl(techRes.after_photo_url)}
+                                                    alt="After ocular inspection"
+                                                    className="w-12 h-12 rounded object-cover"
+                                                />
+                                                <span className="text-[11px] font-semibold text-gray-700 pr-2">
+                                                    After Photo
+                                                </span>
+                                            </a>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     {/* Section 1: Tools-Only Checklist Summary */}
                     {selectedInspection.checklist && (
@@ -1286,45 +1544,81 @@ export default function OcularInspections({
                                 ))}
                             </div>
                         )}
+                        {(selectedInspection.admin_customer_note ||
+                            selectedInspection.admin_customer_attachment_url) && (
+                            <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/60 text-xs space-y-1.5">
+                                <span className="block text-[10px] font-bold uppercase tracking-wider text-blue-700">
+                                    Note for Customer
+                                </span>
+                                {selectedInspection.admin_customer_note && (
+                                    <p className="text-gray-800 whitespace-pre-line">
+                                        {selectedInspection.admin_customer_note}
+                                    </p>
+                                )}
+                                {selectedInspection.admin_customer_attachment_url && (
+                                    /\.(pdf|docx?)($|\?)/i.test(
+                                        selectedInspection.admin_customer_attachment_url
+                                    ) ? (
+                                        <a
+                                            href={formatStorageUrl(
+                                                selectedInspection.admin_customer_attachment_url
+                                            )}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1.5 text-blue-700 font-semibold underline"
+                                        >
+                                            View Attached File
+                                        </a>
+                                    ) : (
+                                        <a
+                                            href={formatStorageUrl(
+                                                selectedInspection.admin_customer_attachment_url
+                                            )}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-block"
+                                        >
+                                            <img
+                                                src={formatStorageUrl(
+                                                    selectedInspection.admin_customer_attachment_url
+                                                )}
+                                                alt="Customer note attachment"
+                                                className="max-h-24 rounded-lg border border-blue-200 object-cover"
+                                            />
+                                        </a>
+                                    )
+                                )}
+                            </div>
+                        )}
                     </div>
 
-                    {/* Section 3: Specification Recommendations (On-Hand & Order-Base Units) */}
-                    <div className="card p-5 space-y-4">
+                    {/* Section 3: Choose AC Unit for Customer (Direct Selection + Summary) */}
+                    <div className="card p-5 space-y-5">
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                             <div>
                                 <h3 className="text-sm font-bold text-gray-900">
-                                    Specification Recommendations (On-Hand &
-                                    Order-Base Units)
+                                    Choose AC Unit for Customer ({selectedInspection.recommendations?.length || 0} Selected)
                                 </h3>
                                 <p className="text-xs text-gray-500">
-                                    Recommend suitable AC capacity, AC type,
-                                    motor type, brand with price range, and unit
-                                    pictures.
+                                    Pick matching On-Hand or Order-Base AC units based on the room capacity result, then submit to the customer.
                                 </p>
                             </div>
                             <button
                                 type="button"
                                 disabled={isSelectedPending}
                                 onClick={() => openAddRecommendationModal(null)}
-                                className="btn-primary btn-sm self-start disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="btn-secondary btn-sm self-start disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                + Add Unit Recommendation
+                                + Custom Unit / Upload Photo
                             </button>
                         </div>
 
-                        {selectedInspection.recommendations?.length === 0 ? (
-                            <div className="p-6 text-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50">
-                                <p className="text-sm font-medium text-gray-700">
-                                    No AC unit recommendations added yet.
-                                </p>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Click "+ Add Unit Recommendation" to select
-                                    from On-Hand or Order-Base inventory units
-                                    and attach unit pictures.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {selectedInspection.recommendations?.length > 0 && (
+                            <div className="space-y-2.5">
+                                <div className="text-[11px] font-bold uppercase tracking-wider text-blue-700">
+                                    Selected for Customer ({selectedInspection.recommendations.length})
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {selectedInspection.recommendations.map(
                                     (rec) => {
                                         const linkedRoom =
@@ -1332,20 +1626,23 @@ export default function OcularInspections({
                                                 (r) =>
                                                     r.room_id === rec.room_id
                                             );
+                                        const recInvStatus = rec.inventory_status || (rec.unit_status === "Available" ? "On-Hand" : "Order-Base");
+                                        const isOnHand = recInvStatus === "On-Hand" || rec.unit_status === "Available";
+                                        const recModel = rec.model || rec.model_recommendation || "";
                                         return (
                                             <div
                                                 key={rec.recommendation_id}
-                                                className="rounded-xl border border-gray-200 bg-white overflow-hidden flex flex-col justify-between shadow-2xs"
+                                                className="rounded-xl border border-blue-200 bg-white overflow-hidden flex flex-col justify-between shadow-2xs"
                                             >
                                                 <div>
                                                     {/* Unit Picture */}
-                                                    <div className="h-40 bg-gray-100 border-b border-gray-200 flex items-center justify-center overflow-hidden relative">
+                                                    <div className="h-36 bg-gray-100 border-b border-gray-200 flex items-center justify-center overflow-hidden relative">
                                                         {rec.unit_image_url ? (
                                                             <img
                                                                 src={formatStorageUrl(
                                                                     rec.unit_image_url
                                                                 )}
-                                                                alt={`${rec.brand_recommendation} ${rec.model_recommendation || "AC Unit"}`}
+                                                                alt={`${rec.brand_recommendation} ${recModel || "AC Unit"}`}
                                                                 className="w-full h-full object-cover"
                                                                 onError={(e) => {
                                                                     e.currentTarget.style.display = "none";
@@ -1355,27 +1652,21 @@ export default function OcularInspections({
                                                             <div className="text-center p-4 text-gray-400">
                                                                 <Ic
                                                                     name="image"
-                                                                    className="w-8 h-8 mx-auto mb-1 opacity-50"
+                                                                    className="w-7 h-7 mx-auto mb-1 opacity-50"
                                                                 />
                                                                 <span className="text-xs">
-                                                                    No unit
-                                                                    picture
-                                                                    uploaded
+                                                                    No unit image
                                                                 </span>
                                                             </div>
                                                         )}
                                                         <span
                                                             className={`absolute top-2.5 right-2.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-                                                                rec.unit_status ===
-                                                                "Available"
+                                                                isOnHand
                                                                     ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                                                     : "bg-amber-50 text-amber-700 border-amber-200"
                                                             }`}
                                                         >
-                                                            {rec.unit_status ===
-                                                            "Available"
-                                                                ? "On-Hand"
-                                                                : "Order-Base"}
+                                                            {isOnHand ? "On-Hand" : "Order-Base"}
                                                         </span>
                                                         {rec.status ===
                                                             "Selected" && (
@@ -1386,36 +1677,25 @@ export default function OcularInspections({
                                                         )}
                                                     </div>
 
-                                                    <div className="p-4 space-y-2">
+                                                    <div className="p-3.5 space-y-2">
                                                         {linkedRoom && (
                                                             <span className="inline-block px-2 py-0.5 rounded bg-sky-50 text-sky-700 text-[11px] font-semibold">
                                                                 For:{" "}
                                                                 {linkedRoom.room_name ||
-                                                                    linkedRoom.room_category}
+                                                                    linkedRoom.room_category} (Est. {linkedRoom.estimated_hp} HP)
                                                             </span>
                                                         )}
                                                         <div>
                                                             <h4 className="text-sm font-bold text-gray-900">
-                                                                {
-                                                                    rec.brand_recommendation
-                                                                }{" "}
-                                                                {rec.model_recommendation
-                                                                    ? `— ${rec.model_recommendation}`
-                                                                    : ""}
+                                                                {rec.brand_recommendation}
+                                                                {recModel ? ` — ${recModel}` : ""}
                                                             </h4>
                                                             <p className="text-xs font-semibold text-blue-600 mt-0.5">
                                                                 {rec.unit_price
                                                                     ? `₱${Number(
                                                                           rec.unit_price
                                                                       ).toLocaleString()}`
-                                                                    : rec.price_min &&
-                                                                      rec.price_max
-                                                                    ? `₱${Number(
-                                                                          rec.price_min
-                                                                      ).toLocaleString()} – ₱${Number(
-                                                                          rec.price_max
-                                                                      ).toLocaleString()}`
-                                                                    : "Price on request"}
+                                                                    : rec.price_range_label || "Price on request"}
                                                             </p>
                                                         </div>
 
@@ -1425,10 +1705,7 @@ export default function OcularInspections({
                                                                     Capacity
                                                                 </span>
                                                                 <span className="font-bold text-gray-800">
-                                                                    {
-                                                                        rec.recommended_capacity
-                                                                    }{" "}
-                                                                    HP
+                                                                    {rec.recommended_capacity} HP
                                                                 </span>
                                                             </div>
                                                             <div className="bg-gray-50 p-1.5 rounded">
@@ -1436,9 +1713,7 @@ export default function OcularInspections({
                                                                     AC Type
                                                                 </span>
                                                                 <span className="font-bold text-gray-800 truncate block">
-                                                                    {
-                                                                        rec.recommended_ac_type
-                                                                    }
+                                                                    {rec.recommended_ac_type}
                                                                 </span>
                                                             </div>
                                                             <div className="bg-gray-50 p-1.5 rounded">
@@ -1446,9 +1721,7 @@ export default function OcularInspections({
                                                                     Motor
                                                                 </span>
                                                                 <span className="font-bold text-gray-800">
-                                                                    {
-                                                                        rec.motor_type_recommendation
-                                                                    }
+                                                                    {rec.motor_type_recommendation}
                                                                 </span>
                                                             </div>
                                                         </div>
@@ -1461,7 +1734,7 @@ export default function OcularInspections({
                                                     </div>
                                                 </div>
 
-                                                <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-3">
+                                                <div className="px-3.5 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-3">
                                                     <button
                                                         type="button"
                                                         onClick={() =>
@@ -1471,7 +1744,7 @@ export default function OcularInspections({
                                                         }
                                                         className="text-xs font-medium text-gray-700 hover:text-gray-900"
                                                     >
-                                                        Edit / Picture
+                                                        Edit / Note
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1489,6 +1762,203 @@ export default function OcularInspections({
                                         );
                                     }
                                 )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Direct AC Unit Catalog Picker */}
+                        {!isSelectedPending && (() => {
+                            const rooms = selectedInspection.rooms || [];
+                            const targetRoom = rooms.find((r) => String(r.room_id) === String(pickerRoomId)) || rooms[0] || null;
+                            const targetHp = targetRoom?.estimated_hp ? Number(targetRoom.estimated_hp) : null;
+                            const pSearch = normalizeSearchQuery(pickerSearch);
+
+                            const filteredUnits = inventoryUnits
+                                .filter((u) => {
+                                    if (pickerFilter === "on_hand" && u.status === "Order Base") return false;
+                                    if (pickerFilter === "order_base" && u.status !== "Order Base") return false;
+                                    if (pickerFilter === "matched" && targetHp !== null && Math.abs(Number(u.horsepower) - targetHp) > 0.5) {
+                                        return false;
+                                    }
+                                    if (!pSearch) return true;
+                                    return matchesSearchQuery(pSearch, u.brand, u.model, `${u.horsepower} hp`, u.ac_type, u.motor_type);
+                                })
+                                .sort((a, b) => {
+                                    if (targetHp !== null) {
+                                        const diffA = Math.abs(Number(a.horsepower) - targetHp);
+                                        const diffB = Math.abs(Number(b.horsepower) - targetHp);
+                                        if (Math.abs(diffA - diffB) > 0.01) return diffA - diffB;
+                                    }
+                                    return Number(b.status !== "Order Base") - Number(a.status !== "Order Base");
+                                });
+
+                            return (
+                                <div className="pt-4 border-t border-gray-100 space-y-3.5">
+                                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {rooms.length > 0 && (
+                                                <select
+                                                    aria-label="Target room for AC unit selection"
+                                                    value={pickerRoomId}
+                                                    onChange={(e) => setPickerRoomId(e.target.value)}
+                                                    className="input-field py-1.5 px-2.5 text-xs w-auto bg-white font-semibold"
+                                                >
+                                                    <option value="">All Rooms</option>
+                                                    {rooms.map((r, i) => (
+                                                        <option key={r.room_id} value={String(r.room_id)}>
+                                                            {r.room_name || `Room ${i + 1}`} (Est. {r.estimated_hp} HP)
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            )}
+
+                                            <div className="flex flex-wrap items-center gap-1">
+                                                {[
+                                                    { id: "all", label: "All Units" },
+                                                    ...(targetHp !== null ? [{ id: "matched", label: `Best Match (${targetHp} HP)` }] : []),
+                                                    { id: "on_hand", label: "On-Hand" },
+                                                    { id: "order_base", label: "Order-Base" },
+                                                ].map((f) => (
+                                                    <button
+                                                        key={f.id}
+                                                        type="button"
+                                                        onClick={() => setPickerFilter(f.id)}
+                                                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                                                            pickerFilter === f.id
+                                                                ? "bg-blue-600 text-white"
+                                                                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-100"
+                                                        }`}
+                                                    >
+                                                        {f.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="w-full lg:w-56">
+                                            <SearchInput
+                                                value={pickerSearch}
+                                                onChange={setPickerSearch}
+                                                placeholder="Search brand, model, HP..."
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {filteredUnits.length === 0 ? (
+                                        <div className="p-6 text-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50 text-xs text-gray-500">
+                                            No AC units match your filter.
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[420px] overflow-y-auto pr-1">
+                                            {filteredUnits.map((unit) => {
+                                                const isBestMatch = targetHp !== null && Math.abs(Number(unit.horsepower) - targetHp) <= 0.5;
+                                                const alreadyChosen = (selectedInspection.recommendations || []).find(
+                                                    (rec) =>
+                                                        Number(rec.ac_unit_id) === Number(unit.ac_unit_id) &&
+                                                        (!pickerRoomId || !rec.room_id || String(rec.room_id) === String(pickerRoomId))
+                                                );
+                                                const isOrderBase = unit.status === "Order Base";
+                                                const isPicking = quickChoosingUnitId === unit.ac_unit_id;
+
+                                                return (
+                                                    <div
+                                                        key={unit.ac_unit_id}
+                                                        className={`rounded-xl border p-3 flex flex-col justify-between gap-2.5 transition ${
+                                                            alreadyChosen
+                                                                ? "border-blue-500 bg-blue-50/40"
+                                                                : isBestMatch
+                                                                ? "border-emerald-200 bg-white hover:border-blue-400"
+                                                                : "border-gray-200 bg-white hover:border-blue-300"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-start gap-2.5">
+                                                            <div className="w-14 h-14 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
+                                                                {unit.image_url ? (
+                                                                    <img
+                                                                        src={formatStorageUrl(unit.image_url)}
+                                                                        alt={`${unit.brand} ${unit.model || ""}`}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                ) : (
+                                                                    <Ic name="image" className="w-5 h-5 text-gray-400" />
+                                                                )}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex items-center gap-1 flex-wrap mb-0.5">
+                                                                    <span
+                                                                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                                                            isOrderBase
+                                                                                ? "bg-amber-100 text-amber-800"
+                                                                                : "bg-emerald-100 text-emerald-800"
+                                                                        }`}
+                                                                    >
+                                                                        {isOrderBase ? "Order-Base" : "On-Hand"}
+                                                                    </span>
+                                                                    {isBestMatch && (
+                                                                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-100 text-blue-700">
+                                                                            Best Match
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs font-bold text-gray-900 truncate">
+                                                                    {unit.brand} {unit.model || ""}
+                                                                </p>
+                                                                <p className="text-[11px] text-gray-600">
+                                                                    {unit.horsepower} HP · {unit.ac_type} · {unit.motor_type}
+                                                                </p>
+                                                                <p className="text-xs font-extrabold text-blue-700 mt-0.5">
+                                                                    ₱{Number(unit.selling_price || 0).toLocaleString()}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                                                            {alreadyChosen ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setDeleteRecTarget(alreadyChosen)}
+                                                                    className="w-full py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-xs font-bold transition cursor-pointer"
+                                                                >
+                                                                    Chosen ✓ (Remove)
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={isPicking}
+                                                                    onClick={() => handleQuickChooseAcUnit(unit)}
+                                                                    className="w-full py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+                                                                >
+                                                                    {isPicking ? "Selecting..." : "Choose Unit"}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+
+                        {!isSelectedPending && selectedInspection.rooms?.length > 0 && selectedInspection.recommendations?.length > 0 && (
+                            <div className="pt-4 border-t border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <span className="text-xs text-gray-600">
+                                    <strong>{selectedInspection.rooms.length}</strong> room(s) ·{" "}
+                                    <strong>{selectedInspection.recommendations.length}</strong> AC unit(s) ready
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={submittingToCustomer}
+                                    onClick={handleSubmitToCustomer}
+                                    className="btn-primary btn-sm self-start sm:self-auto"
+                                >
+                                    {submittingToCustomer
+                                        ? "Submitting..."
+                                        : selectedInspection.inspection_status === "Submitted"
+                                        ? "Re-Submit to Customer"
+                                        : "Submit to Customer"}
+                                </button>
                             </div>
                         )}
                     </div>
@@ -1607,8 +2077,9 @@ export default function OcularInspections({
                         <div className="flex flex-wrap items-center gap-1.5">
                             {[
                                 { id: "all", label: "All Inspections" },
+                                { id: "tech_submitted", label: `Tech Result Ready (${inspections.filter((i) => i.inspection_status === "Technician Submitted").length})` },
                                 { id: "assigned", label: "Assigned to Me" },
-                                { id: "pending", label: "Pending Report" },
+                                { id: "pending", label: "Pending" },
                                 { id: "submitted", label: "Submitted" },
                                 { id: "orders", label: "With Unit Orders" },
                             ].map((t) => (
@@ -1768,11 +2239,18 @@ export default function OcularInspections({
                                                                 b.booking_status
                                                             }
                                                         />
-                                                        <span className="text-[10px] font-medium text-gray-500">
-                                                            Report:{" "}
-                                                            {
-                                                                b.inspection_status
-                                                            }
+                                                        <span
+                                                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                b.inspection_status === "Technician Submitted"
+                                                                    ? "bg-blue-100 text-blue-800"
+                                                                    : b.inspection_status === "Submitted"
+                                                                    ? "bg-emerald-100 text-emerald-800"
+                                                                    : "bg-gray-100 text-gray-600"
+                                                            }`}
+                                                        >
+                                                            {b.inspection_status === "Technician Submitted"
+                                                                ? "Tech Result Ready"
+                                                                : b.inspection_status}
                                                         </span>
                                                         {soldOrder && (
                                                             <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
@@ -1801,7 +2279,9 @@ export default function OcularInspections({
                                                             }
                                                             className="btn-primary btn-sm text-xs"
                                                         >
-                                                            Manage Inspection
+                                                            {b.inspection_status === "Technician Submitted"
+                                                                ? "Choose Unit & Submit"
+                                                                : "Manage Inspection"}
                                                         </button>
                                                     )}
                                                 </td>
@@ -1818,314 +2298,459 @@ export default function OcularInspections({
             {/* ── Modal: Add / Edit Room Dimensions & Thermal Load ──────── */}
             <Modal
                 open={roomModalOpen}
-                onClose={() => setRoomModalOpen(false)}
+                onClose={() => !roomSubmitting && setRoomModalOpen(false)}
                 title={
                     editingRoom
-                        ? "Edit Room Dimensions & Thermal Load"
-                        : "Add Inspected Room (Capacity Data)"
+                        ? "Edit Ocular Inspection Result"
+                        : "Input Ocular Inspection Result"
+                }
+                subtitle={
+                    selectedInspection
+                        ? `Booking #${selectedInspection.booking_id} · ${selectedInspection.client_name || "Customer"}`
+                        : undefined
                 }
                 maxWidth="xl"
             >
-                <form onSubmit={handleSaveRoom} className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        <Field label="Room Label (Optional)">
-                            <input
-                                id="ocular-room-name"
-                                type="text"
-                                value={roomForm.room_name}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        room_name: e.target.value,
-                                    }))
-                                }
-                                placeholder="e.g. Master Bedroom, 2F Office"
-                                className="input-field"
-                            />
-                        </Field>
+                {(() => {
+                    const est = computeOcularRoomEstimate(roomForm);
+                    return (
+                        <form
+                            className="ct-user-form"
+                            onSubmit={handleSaveRoom}
+                            noValidate
+                            style={{ display: "flex", flexDirection: "column", gap: 14 }}
+                        >
+                            {roomFormError && (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        padding: "10px 12px",
+                                        borderRadius: 10,
+                                        background: "#FEF2F2",
+                                        border: "1px solid #FECACA",
+                                        color: "#991B1B",
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                    }}
+                                >
+                                    {roomFormError}
+                                </div>
+                            )}
 
-                        <Field label="Unit of Measurement" required>
                             <div
-                                role="radiogroup"
-                                aria-label="Unit of Measurement"
-                                className="grid grid-cols-2 gap-2"
+                                style={{
+                                    border: "1px solid #E2E8F0",
+                                    borderRadius: 12,
+                                    padding: 12,
+                                    background: "#F8FAFC",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 10,
+                                }}
                             >
-                                {["Meters", "Feet"].map((unit) => (
-                                    <label
-                                        key={unit}
-                                        className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
-                                            roomForm.unit_of_measurement ===
-                                            unit
-                                                ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
-                                                : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
-                                        }`}
-                                    >
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        gap: 8,
+                                    }}
+                                >
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: "#1E2F5F" }}>
+                                        {editingRoom
+                                            ? roomForm.room_name || "Inspected Room"
+                                            : `Room #${(selectedInspection?.rooms?.length || 0) + 1}`}
+                                    </span>
+                                    {est && (
+                                        <span
+                                            style={{
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                                padding: "2px 8px",
+                                                borderRadius: 6,
+                                                background: "#ECFDF5",
+                                                border: "1px solid #A7F3D0",
+                                                color: "#065F46",
+                                            }}
+                                        >
+                                            Est. {est.hp} HP · {est.btu.toLocaleString()} BTU/hr
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 110px", gap: 8 }}>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-name"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Room Name
+                                        </label>
                                         <input
-                                            type="radio"
-                                            name="unit_of_measurement"
-                                            value={unit}
-                                            checked={
-                                                roomForm.unit_of_measurement ===
-                                                unit
-                                            }
-                                            onChange={() =>
+                                            id="ocular-room-name"
+                                            type="text"
+                                            value={roomForm.room_name}
+                                            onChange={(e) =>
                                                 setRoomForm((p) => ({
                                                     ...p,
-                                                    unit_of_measurement: unit,
+                                                    room_name: e.target.value,
                                                 }))
                                             }
-                                            className="sr-only"
+                                            placeholder="e.g. Living Area"
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
                                         />
-                                        {unit}
-                                    </label>
-                                ))}
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-category"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Type <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                        </label>
+                                        <select
+                                            id="ocular-room-category"
+                                            required
+                                            value={roomForm.room_category_choice}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    room_category_choice: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        >
+                                            {ROOM_CATEGORIES.map((cat) => (
+                                                <option key={cat} value={cat}>
+                                                    {cat}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-unit"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Unit
+                                        </label>
+                                        <select
+                                            id="ocular-room-unit"
+                                            value={roomForm.unit_of_measurement}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    unit_of_measurement: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        >
+                                            <option value="Meters">Meters</option>
+                                            <option value="Feet">Feet</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {roomForm.room_category_choice === "Others" && (
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-category-custom"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Custom Room Type <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                        </label>
+                                        <input
+                                            id="ocular-room-category-custom"
+                                            type="text"
+                                            required
+                                            value={roomForm.room_category_custom}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    room_category_custom: e.target.value,
+                                                }))
+                                            }
+                                            placeholder="Enter custom room type..."
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                )}
+
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-length"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Length ({roomForm.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                        </label>
+                                        <input
+                                            id="ocular-room-length"
+                                            type="number"
+                                            step="0.01"
+                                            min="0.5"
+                                            required
+                                            value={roomForm.room_length}
+                                            onChange={(e) => {
+                                                setRoomFormError("");
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    room_length: e.target.value,
+                                                }));
+                                            }}
+                                            placeholder="e.g. 4.5"
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-room-width"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Width ({roomForm.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                        </label>
+                                        <input
+                                            id="ocular-room-width"
+                                            type="number"
+                                            step="0.01"
+                                            min="0.5"
+                                            required
+                                            value={roomForm.room_width}
+                                            onChange={(e) => {
+                                                setRoomFormError("");
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    room_width: e.target.value,
+                                                }));
+                                            }}
+                                            placeholder="e.g. 3.5"
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-ceiling-height"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Height ({roomForm.unit_of_measurement}) <span aria-hidden="true" style={{ color: "#DC2626" }}>*</span>
+                                        </label>
+                                        <input
+                                            id="ocular-ceiling-height"
+                                            type="number"
+                                            step="0.01"
+                                            min="1"
+                                            required
+                                            value={roomForm.ceiling_height}
+                                            onChange={(e) => {
+                                                setRoomFormError("");
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    ceiling_height: e.target.value,
+                                                }));
+                                            }}
+                                            placeholder="2.7"
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px 90px", gap: 8 }}>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-sun-exposure"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Sun Exposure
+                                        </label>
+                                        <select
+                                            id="ocular-sun-exposure"
+                                            value={roomForm.sun_exposure_level}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    sun_exposure_level: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        >
+                                            {SUN_EXPOSURE_OPTIONS.map((opt) => (
+                                                <option key={opt} value={opt}>
+                                                    {opt}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-window-size"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Window Size
+                                        </label>
+                                        <select
+                                            id="ocular-window-size"
+                                            value={roomForm.window_size_glazing}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    window_size_glazing: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        >
+                                            {WINDOW_GLAZING_OPTIONS.map((opt) => (
+                                                <option key={opt} value={opt}>
+                                                    {opt}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-max-occupancy"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Pax
+                                        </label>
+                                        <input
+                                            id="ocular-max-occupancy"
+                                            type="number"
+                                            min="1"
+                                            max="500"
+                                            required
+                                            value={roomForm.maximum_occupancy}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    maximum_occupancy: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="ocular-heat-equipment"
+                                            style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                        >
+                                            Appliances
+                                        </label>
+                                        <input
+                                            id="ocular-heat-equipment"
+                                            type="number"
+                                            min="0"
+                                            required
+                                            value={roomForm.heat_generating_equipment}
+                                            onChange={(e) =>
+                                                setRoomForm((p) => ({
+                                                    ...p,
+                                                    heat_generating_equipment: e.target.value,
+                                                }))
+                                            }
+                                            className="input-field"
+                                            style={{ fontSize: 12, padding: "6px 8px" }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                        </Field>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                        <Field
-                            label={`Room Length (${roomForm.unit_of_measurement})`}
-                            required
-                        >
-                            <input
-                                id="ocular-room-length"
-                                type="number"
-                                step="0.01"
-                                min="0.5"
-                                required
-                                value={roomForm.room_length}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        room_length: e.target.value,
-                                    }))
-                                }
-                                placeholder="e.g. 4.5"
-                                className="input-field"
-                            />
-                        </Field>
-                        <Field
-                            label={`Room Width (${roomForm.unit_of_measurement})`}
-                            required
-                        >
-                            <input
-                                id="ocular-room-width"
-                                type="number"
-                                step="0.01"
-                                min="0.5"
-                                required
-                                value={roomForm.room_width}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        room_width: e.target.value,
-                                    }))
-                                }
-                                placeholder="e.g. 3.5"
-                                className="input-field"
-                            />
-                        </Field>
-                        <Field
-                            label={`Ceiling Height (${roomForm.unit_of_measurement})`}
-                            required
-                        >
-                            <input
-                                id="ocular-ceiling-height"
-                                type="number"
-                                step="0.01"
-                                min="1.0"
-                                required
-                                value={roomForm.ceiling_height}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        ceiling_height: e.target.value,
-                                    }))
-                                }
-                                placeholder="e.g. 2.7"
-                                className="input-field"
-                            />
-                        </Field>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        <Field label="Room Category" required>
-                            <select
-                                id="ocular-room-category"
-                                value={roomForm.room_category_choice}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        room_category_choice: e.target.value,
-                                    }))
-                                }
-                                className="input-field"
-                            >
-                                {ROOM_CATEGORIES.map((cat) => (
-                                    <option key={cat} value={cat}>
-                                        {cat}
-                                    </option>
-                                ))}
-                            </select>
-                        </Field>
-
-                        {roomForm.room_category_choice === "Others" && (
-                            <Field label="Specify Room Category" required>
+                            {/* Single "Note" field for customer (similar to Technician modal's "Task Note") */}
+                            <div>
+                                <label
+                                    htmlFor="ocular-admin-customer-note"
+                                    style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#475569", marginBottom: 3 }}
+                                >
+                                    Note
+                                </label>
                                 <input
-                                    id="ocular-room-category-custom"
+                                    id="ocular-admin-customer-note"
                                     type="text"
-                                    required
-                                    value={roomForm.room_category_custom}
+                                    value={roomForm.customer_note}
                                     onChange={(e) =>
                                         setRoomForm((p) => ({
                                             ...p,
-                                            room_category_custom:
-                                                e.target.value,
+                                            customer_note: e.target.value,
                                         }))
                                     }
-                                    placeholder="Enter custom room type..."
+                                    placeholder="Leave a note for the customer..."
                                     className="input-field"
+                                    style={{ fontSize: 12, padding: "7px 10px" }}
                                 />
-                            </Field>
-                        )}
+                                <input
+                                    type="file"
+                                    aria-label="Customer note attachment"
+                                    accept="image/jpeg,image/png,image/jpg,image/webp,.pdf,.doc,.docx"
+                                    style={{ marginTop: 6, fontSize: 11, width: "100%" }}
+                                    onChange={(e) => {
+                                        const f = e.target.files?.[0] || null;
+                                        setRoomForm((p) => ({
+                                            ...p,
+                                            customer_attachment: f,
+                                            customer_attachment_preview: !f
+                                                ? ""
+                                                : f.type?.startsWith("image/")
+                                                ? URL.createObjectURL(f)
+                                                : `file:${f.name}`,
+                                        }));
+                                    }}
+                                />
+                                {roomForm.customer_attachment_preview && (
+                                    roomForm.customer_attachment_preview.startsWith("file:") ? (
+                                        <div style={{ marginTop: 6, fontSize: 11, color: "#334155", fontWeight: 600 }}>
+                                            Attached file: {roomForm.customer_attachment_preview.slice(5)}
+                                        </div>
+                                    ) : /\.(pdf|docx?)($|\?)/i.test(roomForm.customer_attachment_preview) ? (
+                                        <a
+                                            href={roomForm.customer_attachment_preview}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: "#1D4ED8", fontWeight: 600, textDecoration: "underline" }}
+                                        >
+                                            View Attached File
+                                        </a>
+                                    ) : (
+                                        <img
+                                            src={roomForm.customer_attachment_preview}
+                                            alt="Note attachment preview"
+                                            style={{ marginTop: 6, maxHeight: 90, borderRadius: 8, border: "1px solid #E2E8F0", objectFit: "cover" }}
+                                        />
+                                    )
+                                )}
+                            </div>
 
-                        <Field
-                            label="Maximum Occupancy (Peak People)"
-                            required
-                        >
-                            <input
-                                id="ocular-max-occupancy"
-                                type="number"
-                                min="1"
-                                max="500"
-                                required
-                                value={roomForm.maximum_occupancy}
-                                onChange={(e) =>
-                                    setRoomForm((p) => ({
-                                        ...p,
-                                        maximum_occupancy: e.target.value,
-                                    }))
-                                }
-                                className="input-field"
-                            />
-                        </Field>
-                    </div>
-
-                    <Field label="Sun Exposure Level" required>
-                        <div
-                            role="radiogroup"
-                            aria-label="Sun Exposure Level"
-                            className="grid grid-cols-3 gap-2"
-                        >
-                            {SUN_EXPOSURE_OPTIONS.map((opt) => (
-                                <label
-                                    key={opt}
-                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
-                                        roomForm.sun_exposure_level === opt
-                                            ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
-                                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
-                                    }`}
+                            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    disabled={roomSubmitting}
+                                    onClick={() => setRoomModalOpen(false)}
+                                    className="btn-secondary btn-sm"
                                 >
-                                    <input
-                                        type="radio"
-                                        name="sun_exposure_level"
-                                        value={opt}
-                                        checked={
-                                            roomForm.sun_exposure_level === opt
-                                        }
-                                        onChange={() =>
-                                            setRoomForm((p) => ({
-                                                ...p,
-                                                sun_exposure_level: opt,
-                                            }))
-                                        }
-                                        className="sr-only"
-                                    />
-                                    {opt}
-                                </label>
-                            ))}
-                        </div>
-                    </Field>
-
-                    <Field label="Window Size / Glazing" required>
-                        <div
-                            role="radiogroup"
-                            aria-label="Window Size / Glazing"
-                            className="grid grid-cols-3 gap-2"
-                        >
-                            {WINDOW_GLAZING_OPTIONS.map((opt) => (
-                                <label
-                                    key={opt}
-                                    className={`flex items-center justify-center py-2 px-3 rounded-lg border text-xs cursor-pointer transition ${
-                                        roomForm.window_size_glazing === opt
-                                            ? "bg-blue-600 border-blue-600 text-white font-bold shadow-xs"
-                                            : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 font-medium"
-                                    }`}
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={roomSubmitting}
+                                    className="btn-primary btn-sm"
                                 >
-                                    <input
-                                        type="radio"
-                                        name="window_size_glazing"
-                                        value={opt}
-                                        checked={
-                                            roomForm.window_size_glazing === opt
-                                        }
-                                        onChange={() =>
-                                            setRoomForm((p) => ({
-                                                ...p,
-                                                window_size_glazing: opt,
-                                            }))
-                                        }
-                                        className="sr-only"
-                                    />
-                                    {opt}
-                                </label>
-                            ))}
-                        </div>
-                    </Field>
-
-                    <Field
-                        label="Heat-Generating Equipment (Total Wattage or Appliance Count)"
-                        required
-                    >
-                        <input
-                            id="ocular-heat-equipment"
-                            type="number"
-                            min="0"
-                            required
-                            value={roomForm.heat_generating_equipment}
-                            onChange={(e) =>
-                                setRoomForm((p) => ({
-                                    ...p,
-                                    heat_generating_equipment: e.target.value,
-                                }))
-                            }
-                            placeholder="e.g. 500 (Watts) or 3 (computers/ovens)"
-                            className="input-field"
-                        />
-                    </Field>
-
-                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
-                        <button
-                            type="button"
-                            onClick={() => setRoomModalOpen(false)}
-                            className="btn-secondary btn-sm"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={roomSubmitting}
-                            className="btn-primary btn-sm"
-                        >
-                            {roomSubmitting
-                                ? "Saving..."
-                                : editingRoom
-                                ? "Update Room Data"
-                                : "Save Inspected Room"}
-                        </button>
-                    </div>
-                </form>
+                                    {roomSubmitting
+                                        ? "Saving..."
+                                        : editingRoom
+                                        ? "Update Room Data"
+                                        : "Save Inspected Room"}
+                                </button>
+                            </div>
+                        </form>
+                    );
+                })()}
             </Modal>
 
             {/* ── Modal: Add / Edit Specification Recommendation ────────── */}

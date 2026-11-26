@@ -749,14 +749,24 @@ class ToolChecklistController extends Controller
                     $serviceDetails['job_started_by_tech'] = true;
                     $serviceDetails['job_started_at'] = $serviceDetails['job_started_at'] ?? now()->toISOString();
 
+                    $serviceRow = DB::table('services')->where('service_id', $bookingRow->service_id)->first(['service_name']);
+                    $isOcularBooking = ((int) $bookingRow->service_id === 4)
+                        || ($serviceRow && stripos((string) $serviceRow->service_name, 'ocular') !== false)
+                        || ! empty($serviceDetails['is_ocular_inspection']);
+
+                    $bookingUpdate = [
+                        'booking_status' => 'In-Progress',
+                        'service_details' => json_encode($serviceDetails),
+                        'updated_at' => now(),
+                    ];
+                    if (! $isOcularBooking) {
+                        $bookingUpdate['quotation_status'] = 'waiting for customer to sign';
+                    }
+
                     DB::table('bookings')
                         ->where('booking_id', $checklist->booking_id)
-                        ->whereIn('booking_status', ['Approved', 'Dispatched', 'Pending'])
-                        ->update([
-                            'booking_status' => 'In-Progress',
-                            'service_details' => json_encode($serviceDetails),
-                            'updated_at' => now(),
-                        ]);
+                        ->whereIn('booking_status', ['Approved', 'Dispatched', 'Pending', 'In-Progress'])
+                        ->update($bookingUpdate);
 
                     $existingReport = DB::table('service_reports')->where('booking_id', $checklist->booking_id)->first();
                     if (! $existingReport) {
@@ -1013,48 +1023,37 @@ class ToolChecklistController extends Controller
                 if ($existing) {
                     $prevApproved = (int) ($existing->quantity_approved ?: $existing->quantity_requested ?: 1);
                     $newApproved = (int) $itemData['quantity_approved'];
-                    $delta = $newApproved - $prevApproved;
+                    $prevReturned = $isTool ? 0 : min($prevApproved, max(0, (int) ($existing->quantity_returned ?? 0)));
+                    $newReturned = $isTool ? 0 : min($newApproved, $prevReturned);
+                    $deltaUsed = ($newApproved - $newReturned) - ($prevApproved - $prevReturned);
+                    $matStatus = $newReturned <= 0 ? 'consumed' : ($newReturned < $newApproved ? 'partially_returned' : 'returned');
 
                     $existing->update([
                         'quantity_approved' => $newApproved,
-                        'status' => $isTool ? ($itemData['status'] ?? $existing->status) : 'consumed',
+                        'quantity_returned' => $newReturned,
+                        'status' => $isTool ? ($itemData['status'] ?? $existing->status) : $matStatus,
                         'notes' => $itemData['notes'] ?? $existing->notes,
                     ]);
 
-                    if ($checklist->status === 'Approved' && $invItem && $delta !== 0) {
+                    if ($checklist->status === 'Approved' && $invItem && $deltaUsed !== 0) {
                         // Only adjust active inventory for materials or still-assigned tools
                         if (! $isTool || $existing->status === 'assigned') {
-                            if ($delta > 0) {
-                                if ((int) $invItem->quantity_on_hand < $delta) {
+                            if ($deltaUsed > 0) {
+                                if ((int) $invItem->quantity_on_hand < $deltaUsed) {
                                     throw ValidationException::withMessages([
                                         'items' => [
                                             sprintf("Insufficient stock for '%s' (Only %d %s remaining).", $invItem->item_name, $invItem->quantity_on_hand, $invItem->unit ?: 'pcs'),
                                         ],
                                     ]);
                                 }
-                                $this->deductStockForApprovedItem($invItem, $delta);
+                                $this->deductStockForApprovedItem($invItem, $deltaUsed);
                             } else {
-                                $this->restoreStockForItem($invItem, abs($delta), $existing->id);
+                                $this->restoreStockForItem($invItem, abs($deltaUsed), $existing->id);
                             }
                         }
 
                         if (! $isTool && $checklist->booking_id) {
-                            $existingMat = DB::table('booking_materials')
-                                ->where('booking_id', $checklist->booking_id)
-                                ->where('item_id', $invItem->item_id)
-                                ->first();
-                            if ($existingMat) {
-                                DB::table('booking_materials')
-                                    ->where('usage_id', $existingMat->usage_id)
-                                    ->update(['quantity_used' => $newApproved, 'logged_at' => now()]);
-                            } else {
-                                DB::table('booking_materials')->insert([
-                                    'booking_id' => $checklist->booking_id,
-                                    'item_id' => $invItem->item_id,
-                                    'quantity_used' => $newApproved,
-                                    'logged_at' => now(),
-                                ]);
-                            }
+                            $this->syncBookingMaterialUsage((int) $checklist->booking_id, (int) $invItem->item_id);
                         }
                     }
                 } else {
@@ -1200,7 +1199,7 @@ class ToolChecklistController extends Controller
     }
 
     /**
-     * Batch update tool statuses for a checklist.
+     * Batch update tool statuses (and optional consumable material return quantities) for a checklist.
      */
     public function batchUpdateToolStatus(Request $request, $checklistId): JsonResponse
     {
@@ -1220,7 +1219,8 @@ class ToolChecklistController extends Controller
         $validated = $request->validate([
             'items' => ['required', 'array', 'min:1'],
             'items.*.item_id' => ['required', 'integer'],
-            'items.*.status' => ['required', 'string', Rule::in(['assigned', 'returned', 'damaged', 'lost', 'borrowed'])],
+            'items.*.status' => ['nullable', 'string', Rule::in(['assigned', 'returned', 'damaged', 'lost', 'borrowed', 'consumed', 'partially_returned'])],
+            'items.*.quantity_returned' => ['nullable', 'integer', 'min:0'],
             'items.*.notes' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -1233,10 +1233,9 @@ class ToolChecklistController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($checklist, $validated) {
+        DB::transaction(function () use ($checklist, $validated, $user) {
             foreach ($validated['items'] as $itData) {
                 $itemId = (int) $itData['item_id'];
-                $newStatus = strtolower($itData['status']) === 'borrowed' ? 'assigned' : $itData['status'];
                 $notes = $itData['notes'] ?? null;
 
                 $item = ToolChecklistItem::with(['checklist.booking.client', 'checklist.booking.service', 'checklist.team', 'checklist.technician', 'inventoryItem'])
@@ -1244,19 +1243,214 @@ class ToolChecklistController extends Controller
                     ->where('id', $itemId)
                     ->first();
 
-                if (! $item || strtolower($item->item_type ?? '') !== 'tool') {
+                if (! $item) {
                     continue;
                 }
 
-                $this->applyToolStatusChange($item, $newStatus, $notes);
+                if (strtolower($item->item_type ?? '') === 'tool') {
+                    if (empty($itData['status'])) {
+                        continue;
+                    }
+                    $rawStatus = strtolower($itData['status']);
+                    $newStatus = $rawStatus === 'borrowed' ? 'assigned' : $rawStatus;
+                    if (! in_array($newStatus, ['assigned', 'returned', 'damaged', 'lost'], true)) {
+                        continue;
+                    }
+                    $this->applyToolStatusChange($item, $newStatus, $notes);
+                } elseif (array_key_exists('quantity_returned', $itData) && $itData['quantity_returned'] !== null) {
+                    $this->applyMaterialReturnQuantity($item, (int) $itData['quantity_returned'], $notes, (int) $user->user_id);
+                }
             }
         });
 
         return response()->json([
             'success' => true,
-            'message' => 'Checklist tools updated successfully.',
+            'message' => 'Checklist items updated successfully.',
             'data' => $this->formatChecklist($checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy', 'completedBy'])),
         ]);
+    }
+
+    /**
+     * Return unused consumable materials from an Approved checklist back to inventory by selected quantity.
+     * Usable by both Technician / Head Technician and Tools Man / Super Admin / Manager.
+     */
+    public function returnMaterial(Request $request, int $checklistId, int $itemId): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user || ! in_array((int) $user->role_id, [1, 2, 3, 4, 5, 7], true)) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $validated = $request->validate([
+            'quantity_returned' => ['required', 'integer', 'min:0'],
+            'notes' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $item = ToolChecklistItem::with(['checklist.booking.client', 'checklist.booking.service', 'checklist.team', 'checklist.technician', 'inventoryItem'])
+            ->where('checklist_id', $checklistId)
+            ->where('id', $itemId)
+            ->firstOrFail();
+
+        if (strtolower($item->item_type ?? '') === 'tool') {
+            throw ValidationException::withMessages([
+                'quantity_returned' => ['Only consumable materials support quantity returns on this endpoint.'],
+            ]);
+        }
+
+        if (! $item->checklist || $item->checklist->status !== 'Approved') {
+            throw ValidationException::withMessages([
+                'checklist' => ['Consumable materials can only be returned while the checklist is in Approved status.'],
+            ]);
+        }
+
+        if ($item->checklist->booking && in_array($item->checklist->booking->booking_status, ['Completed', 'Cancelled'], true)) {
+            throw ValidationException::withMessages([
+                'booking' => ['Materials cannot be returned after the booking has been Completed or Cancelled.'],
+            ]);
+        }
+
+        $updatedItem = DB::transaction(function () use ($item, $validated, $user) {
+            return $this->applyMaterialReturnQuantity(
+                $item,
+                (int) $validated['quantity_returned'],
+                array_key_exists('notes', $validated) && $validated['notes'] !== null ? $validated['notes'] : $item->notes,
+                (int) $user->user_id
+            );
+        });
+
+        $freshChecklist = $item->checklist->fresh(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem', 'approvedBy', 'completedBy']);
+
+        return response()->json([
+            'success' => true,
+            'message' => sprintf(
+                'Recorded %d returned (%d consumed) for %s.',
+                (int) $updatedItem->quantity_returned,
+                max(0, (int) ($updatedItem->quantity_approved ?: $updatedItem->quantity_requested ?: 1) - (int) $updatedItem->quantity_returned),
+                $item->inventoryItem?->item_name ?? 'Material'
+            ),
+            'data' => $this->formatChecklist($freshChecklist),
+        ]);
+    }
+
+    /**
+     * Apply material return quantity change atomically against inventory, booking_materials, and tool_checkouts.
+     */
+    protected function applyMaterialReturnQuantity(ToolChecklistItem $item, int $newReturnedQty, ?string $notes = null, ?int $actorUserId = null): ToolChecklistItem
+    {
+        if (strtolower($item->item_type ?? '') === 'tool') {
+            return $item;
+        }
+
+        $approvedQty = max(1, (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1));
+        if ($newReturnedQty < 0 || $newReturnedQty > $approvedQty) {
+            throw ValidationException::withMessages([
+                'quantity_returned' => [sprintf('Returned quantity must be between 0 and %d.', $approvedQty)],
+            ]);
+        }
+
+        $prevReturned = min($approvedQty, max(0, (int) ($item->quantity_returned ?? 0)));
+        $deltaReturned = $newReturnedQty - $prevReturned;
+
+        $newStatus = $newReturnedQty <= 0
+            ? 'consumed'
+            : ($newReturnedQty < $approvedQty ? 'partially_returned' : 'returned');
+
+        $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
+        if ($invItem && $deltaReturned !== 0) {
+            if ($deltaReturned > 0) {
+                $this->restoreStockForItem($invItem, $deltaReturned, $item->id);
+            } else {
+                $needed = abs($deltaReturned);
+                if ((int) $invItem->quantity_on_hand < $needed) {
+                    throw ValidationException::withMessages([
+                        'quantity_returned' => [
+                            sprintf("Insufficient stock in inventory to reduce returned quantity for '%s' (Needed: %d, Available: %d %s).", $invItem->item_name, $needed, $invItem->quantity_on_hand, $invItem->unit ?: 'pcs'),
+                        ],
+                    ]);
+                }
+                $this->deductStockForApprovedItem($invItem, $needed);
+            }
+        }
+
+        $item->update([
+            'quantity_returned' => $newReturnedQty,
+            'status' => $newStatus,
+            'notes' => $notes !== null ? $notes : $item->notes,
+        ]);
+
+        $remainingUsed = max(0, $approvedQty - $newReturnedQty);
+
+        if ($item->checklist?->booking_id) {
+            $this->syncBookingMaterialUsage((int) $item->checklist->booking_id, (int) $item->item_id);
+
+            $checkoutStatus = $newReturnedQty >= $approvedQty
+                ? 'Returned'
+                : ($newReturnedQty > 0 ? 'Partially Returned' : 'Used / Consumed');
+
+            DB::table('tool_checkouts')
+                ->where('booking_id', $item->checklist->booking_id)
+                ->where('item_id', $item->item_id)
+                ->update([
+                    'quantity' => $remainingUsed,
+                    'status' => $checkoutStatus,
+                    'return_date' => $newReturnedQty > 0 ? now() : null,
+                    'notes' => $this->buildChecklistLogDescription($item->checklist, $item->fresh()),
+                    'updated_at' => now(),
+                ]);
+        }
+
+        if ($actorUserId && $deltaReturned !== 0) {
+            DB::table('activity_logs')->insert([
+                'user_id' => $actorUserId,
+                'action_type' => 'RETURN_CHECKLIST_MATERIAL',
+                'description' => sprintf(
+                    'Updated returned material "%s" on Checklist #%d (Booking #%d): returned %d of %d (%d used).',
+                    $item->inventoryItem?->item_name ?? 'Material',
+                    $item->checklist_id,
+                    (int) ($item->checklist?->booking_id ?? 0),
+                    $newReturnedQty,
+                    $approvedQty,
+                    $remainingUsed
+                ),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return $item->fresh(['inventoryItem']);
+    }
+
+    /**
+     * Recompute and sync booking_materials quantity_used across Approved/Completed checklists.
+     */
+    protected function syncBookingMaterialUsage(int $bookingId, int $itemId): void
+    {
+        $items = DB::table('tool_checklist_items as tci')
+            ->join('tool_checklists as tc', 'tc.checklist_id', '=', 'tci.checklist_id')
+            ->where('tc.booking_id', $bookingId)
+            ->where('tci.item_id', $itemId)
+            ->whereIn('tc.status', ['Approved', 'Completed'])
+            ->whereRaw('LOWER(tci.item_type) != ?', ['tool'])
+            ->get(['tci.quantity_approved', 'tci.quantity_requested', 'tci.quantity_returned']);
+
+        $totalUsed = 0;
+        foreach ($items as $row) {
+            $approved = max(1, (int) ($row->quantity_approved ?: $row->quantity_requested ?: 1));
+            $returned = min($approved, max(0, (int) ($row->quantity_returned ?? 0)));
+            $totalUsed += max(0, $approved - $returned);
+        }
+
+        if ($totalUsed <= 0) {
+            DB::table('booking_materials')
+                ->where('booking_id', $bookingId)
+                ->where('item_id', $itemId)
+                ->delete();
+        } else {
+            DB::table('booking_materials')->updateOrInsert(
+                ['booking_id' => $bookingId, 'item_id' => $itemId],
+                ['quantity_used' => $totalUsed, 'logged_at' => now()]
+            );
+        }
     }
 
     /**
@@ -1442,9 +1636,10 @@ class ToolChecklistController extends Controller
                     $inv = DB::table('inventory_items')->where('item_id', $it->item_id)->lockForUpdate()->first();
                     if ($inv) {
                         $isTool = strtolower((string) ($inv->item_type ?? $it->item_type ?? '')) === 'tool';
-                        // Restore stock for materials or still-assigned tools (avoid double-restoring returned/damaged/lost tools)
-                        if (! $isTool || $it->status === 'assigned') {
-                            $this->restoreStockForItem($inv, $qty, $it->id);
+                        // Restore stock for unreturned materials or still-assigned tools (avoid double-restoring returned items)
+                        $qtyToRestore = $isTool ? $qty : max(0, $qty - (int) ($it->quantity_returned ?? 0));
+                        if (($isTool && $it->status === 'assigned') || (! $isTool && $qtyToRestore > 0)) {
+                            $this->restoreStockForItem($inv, $qtyToRestore, $it->id);
                         }
 
                         if (! $isTool && $checklist->booking_id) {
@@ -1592,6 +1787,8 @@ class ToolChecklistController extends Controller
         $itemStatus = strtolower($item->status ?? ($isTool ? 'assigned' : 'consumed'));
 
         $disposition = match (true) {
+            ! $isTool && $itemStatus === 'returned' => sprintf('Material fully returned to inventory (%d/%d returned)', (int) ($item->quantity_returned ?? 0), (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1)),
+            ! $isTool && $itemStatus === 'partially_returned' => sprintf('Material partially returned (%d returned, %d consumed)', (int) ($item->quantity_returned ?? 0), max(0, (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1) - (int) ($item->quantity_returned ?? 0))),
             ! $isTool || $itemStatus === 'consumed' => 'Material consumed during service work',
             $itemStatus === 'returned' => 'Tool returned & verified in good condition',
             $itemStatus === 'damaged' => 'Tool reported damaged during return inspection',
@@ -1688,6 +1885,9 @@ class ToolChecklistController extends Controller
                     $itemStatus = $invStatus === 'lost/damaged' ? 'damaged' : $invStatus;
                 }
 
+                $approvedQty = (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1);
+                $returnedQty = $isTool ? 0 : min($approvedQty, max(0, (int) ($item->quantity_returned ?? 0)));
+
                 return [
                     'id' => (int) $item->id,
                     'item_id' => (int) $item->item_id,
@@ -1700,6 +1900,8 @@ class ToolChecklistController extends Controller
                     'unit' => $item->inventoryItem?->unit ?? 'pc',
                     'quantity_requested' => (int) $item->quantity_requested,
                     'quantity_approved' => (int) $item->quantity_approved,
+                    'quantity_returned' => $returnedQty,
+                    'quantity_used' => $isTool ? $approvedQty : max(0, $approvedQty - $returnedQty),
                     'status' => $itemStatus,
                     'inventory_status' => $item->inventoryItem?->status,
                     'notes' => $item->notes,

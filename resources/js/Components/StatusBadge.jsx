@@ -24,6 +24,11 @@ const cfg = {
     "Partially Completed": AMBER,
     "Low Stock": AMBER,
     "Expiring Soon": AMBER,
+    "waiting for customer to sign": AMBER,
+    "Waiting for Customer to Sign": AMBER,
+    "Partially Returned": AMBER,
+    "Pending Manager Review": AMBER,
+    "Void Requested": AMBER,
 
     Approved: BLUE,
     Dispatched: BLUE,
@@ -49,10 +54,15 @@ const cfg = {
     Paid: GREEN,
     Sold: GREEN,
     Exported: GREEN,
+    Valid: GREEN,
+    Issued: GREEN,
+    Returned: GREEN,
+    returned: GREEN,
 
     Rejected: RED,
     rejected: RED,
     Invalid: RED,
+    Voided: RED,
     Cancelled: RED,
     Incomplete: RED,
     Defect: RED,
@@ -63,6 +73,8 @@ const cfg = {
     "Out of Stock": RED,
     Expired: RED,
     Critical: RED,
+    "Customer Refused to Sign": RED,
+    "Failed Booking": RED,
 
     Archived: SLATE,
     Deactivated: SLATE,
@@ -70,7 +82,8 @@ const cfg = {
 };
 
 function StatusBadge({ status }) {
-    const c = cfg[status] ?? SLATE;
+    const isSigned = typeof status === "string" && status.startsWith("Signed by ");
+    const c = isSigned ? GREEN : (cfg[status] ?? SLATE);
     return (
         <span
             style={{

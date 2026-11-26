@@ -2,3 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 @plugin "daisyui";
+
+.ct-user-form :is(input, select, textarea):is(:user-invalid, .user-invalid-fallback) {
+    border-color: #DC2626;
+    background-color: #FEF2F2;
+}
+

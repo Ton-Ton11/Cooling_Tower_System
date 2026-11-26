@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
+import ReceiptActionButton from "../../Components/ReceiptActionButton";
 import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
@@ -79,6 +80,7 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
                                 </div>
 
                                 <div className="flex items-center gap-2.5 flex-wrap">
+                                    <ReceiptActionButton receipts={b.receipts} />
                                     {(Boolean(b.is_ocular_inspection) || Number(b.service_id) === 4) &&
                                         (b.inspection_status === "Submitted" ||
                                             (Array.isArray(b.ocular_recommendations) &&

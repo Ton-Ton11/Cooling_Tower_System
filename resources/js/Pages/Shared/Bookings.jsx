@@ -136,6 +136,10 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
     const [invalidReason, setInvalidReason] = useState("");
     const [invalidating, setInvalidating] = useState(false);
 
+    const [failedReviewModal, setFailedReviewModal] = useState(null);
+    const [failedInvalidReason, setFailedInvalidReason] = useState("");
+    const [reviewingFailed, setReviewingFailed] = useState(false);
+
     const [reportModal, setReportModal] = useState(null);
     const [reportForm, setReportForm] = useState({ subject: "", elaboration: "" });
     const [reportConfirmModal, setReportConfirmModal] = useState(false);
@@ -339,6 +343,43 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
             addToast(extractErrorMessage(error, "Unable to mark turnover as invalid."), "error");
         } finally {
             setInvalidating(false);
+        }
+    };
+
+    const openFailedReviewModal = (booking) => {
+        setFailedReviewModal(booking);
+        setFailedInvalidReason("");
+    };
+
+    const handleReviewFailedBooking = async (decision) => {
+        if (reviewingFailed || !failedReviewModal) return;
+        if (decision === "invalid" && failedInvalidReason.trim().length < 3) {
+            addToast("Please enter a reason why the failed booking report is invalid.", "error");
+            return;
+        }
+        setReviewingFailed(true);
+        try {
+            const endpoint = ep.reviewFailedBooking
+                ? ep.reviewFailedBooking(failedReviewModal.booking_id)
+                : `/manager/bookings/${failedReviewModal.booking_id}/failed-booking/review`;
+            const { data } = await window.axios.post(endpoint, {
+                decision,
+                invalid_reason: decision === "invalid" ? failedInvalidReason.trim() : undefined,
+            });
+            addToast(
+                data?.message ||
+                    (decision === "valid"
+                        ? "Failed booking marked Valid and booking cancelled."
+                        : "Failed booking marked Invalid and technician notified.")
+            );
+            setFailedReviewModal(null);
+            setFailedInvalidReason("");
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to process failed booking review."), "error");
+        } finally {
+            setReviewingFailed(false);
         }
     };
 
@@ -825,6 +866,10 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                     const turnover = booking.payment_turnover || booking.service_details?.payment_turnover || null;
                                     const isTurnoverInvalid = Boolean(turnover && (turnover.status === "Invalid" || turnover.is_invalid));
                                     const isTurnoverSubmitted = Boolean(turnover && !isTurnoverInvalid);
+                                    const failedBooking = booking.failed_booking || booking.service_details?.failed_booking || null;
+                                    const isFailedPending = failedBooking?.status === "Pending Manager Review";
+                                    const isFailedInvalid = failedBooking?.status === "Invalid";
+                                    const isFailedValid = failedBooking?.status === "Valid";
                                     const managerReports = Array.isArray(booking.manager_reports) ? booking.manager_reports : [];
                                     const unreviewedManagerReportsCount = managerReports.filter((r) => !r?.reviewed_at).length;
 
@@ -970,6 +1015,49 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                                     <StatusBadge
                                                         status={booking.booking_status}
                                                     />
+                                                    {!booking.is_ocular_inspection && booking.quotation_status && (
+                                                        <span
+                                                            style={{
+                                                                fontSize: 10,
+                                                                fontWeight: 700,
+                                                                padding: "1px 6px",
+                                                                borderRadius: 6,
+                                                                border: "1px solid",
+                                                                background: String(booking.quotation_status).startsWith("Signed by ") || booking.quotation_status === "Accepted"
+                                                                    ? "#ECFDF5"
+                                                                    : ["Declined", "Customer Refused to Sign"].includes(booking.quotation_status)
+                                                                    ? "#FEF2F2"
+                                                                    : "#FFFBEB",
+                                                                color: String(booking.quotation_status).startsWith("Signed by ") || booking.quotation_status === "Accepted"
+                                                                    ? "#065F46"
+                                                                    : ["Declined", "Customer Refused to Sign"].includes(booking.quotation_status)
+                                                                    ? "#DC2626"
+                                                                    : "#B45309",
+                                                                borderColor: String(booking.quotation_status).startsWith("Signed by ") || booking.quotation_status === "Accepted"
+                                                                    ? "#A7F3D0"
+                                                                    : ["Declined", "Customer Refused to Sign"].includes(booking.quotation_status)
+                                                                    ? "#FECACA"
+                                                                    : "#FDE68A",
+                                                            }}
+                                                        >
+                                                            Quotation: {booking.quotation_status}
+                                                        </span>
+                                                    )}
+                                                    {isFailedPending && (
+                                                        <span style={{ fontSize: 10, fontWeight: 700, background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", padding: "1px 6px", borderRadius: 6 }}>
+                                                            Failed Booking Report Pending
+                                                        </span>
+                                                    )}
+                                                    {isFailedInvalid && (
+                                                        <span style={{ fontSize: 10, fontWeight: 700, background: "#FFFBEB", color: "#B45309", border: "1px solid #FDE68A", padding: "1px 6px", borderRadius: 6 }}>
+                                                            Failed Report Invalidated
+                                                        </span>
+                                                    )}
+                                                    {booking.booking_status === "Cancelled" && (isFailedValid || booking.service_details?.booking_fee_forfeited) && (
+                                                        <span style={{ fontSize: 10, fontWeight: 700, background: "#F8FAFC", color: "#475569", border: "1px solid #CBD5E1", padding: "1px 6px", borderRadius: 6 }}>
+                                                            Booking Fee Forfeited
+                                                        </span>
+                                                    )}
                                                     {canComplete && isTurnoverSubmitted && (
                                                         <span style={{ fontSize: 10, fontWeight: 700, background: "#ECFDF5", color: "#065F46", border: "1px solid #A7F3D0", padding: "1px 6px", borderRadius: 6 }}>
                                                             Turnover Ready
@@ -1034,6 +1122,25 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                                             }
                                                         >
                                                             Manage
+                                                        </button>
+                                                    )}
+                                                    {canComplete && !readOnly && (isFailedPending || isFailedInvalid) && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openFailedReviewModal(booking)}
+                                                            style={{
+                                                                padding: "5px 10px",
+                                                                fontSize: 11,
+                                                                borderRadius: 8,
+                                                                border: isFailedPending ? "1px solid #FECACA" : "1px solid #FDE68A",
+                                                                background: isFailedPending ? "#FEF2F2" : "#FFFBEB",
+                                                                color: isFailedPending ? "#DC2626" : "#B45309",
+                                                                fontWeight: 700,
+                                                                cursor: "pointer",
+                                                                whiteSpace: "nowrap",
+                                                            }}
+                                                        >
+                                                            {isFailedPending ? "Review Failed" : "Failed Status"}
                                                         </button>
                                                     )}
                                                     {canComplete && !readOnly && (
@@ -2091,6 +2198,111 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                         </div>
                     </div>
                 )}
+            </Modal>
+
+            {/* Review Failed Booking Modal (Manager / Super Admin) */}
+            <Modal
+                show={!!failedReviewModal}
+                onClose={() => !reviewingFailed && setFailedReviewModal(null)}
+                maxWidth="md"
+                padding={0}
+            >
+                {failedReviewModal && (() => {
+                    const fb = failedReviewModal.failed_booking || failedReviewModal.service_details?.failed_booking || {};
+                    return (
+                        <div style={{ padding: 24 }}>
+                            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#1E2F5F", margin: "0 0 4px" }}>
+                                Review Failed Booking Report
+                            </h3>
+                            <p style={{ fontSize: 12, color: "#64748B", margin: "0 0 14px" }}>
+                                Booking #{failedReviewModal.booking_id} · {failedReviewModal.client_name} ({failedReviewModal.service})
+                            </p>
+
+                            <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "12px 14px", marginBottom: 14, fontSize: 12 }}>
+                                <div style={{ fontWeight: 700, color: "#991B1B", marginBottom: 4 }}>
+                                    Technician&apos;s Failed Booking Reason
+                                </div>
+                                <div style={{ color: "#1E293B", whiteSpace: "pre-line" }}>
+                                    {fb.reason || "No reason provided."}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#64748B", marginTop: 6 }}>
+                                    Submitted by: <strong>{fb.submitted_by_name || "Technician"}</strong> · Checklist: <strong>{failedReviewModal.checklist_status || "Completed"}</strong>
+                                </div>
+                            </div>
+
+                            {fb.status === "Invalid" && fb.invalid_reason && (
+                                <div style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 12px", marginBottom: 14, fontSize: 12, color: "#92400E" }}>
+                                    <strong>Previous Invalid Notice:</strong> {fb.invalid_reason}
+                                </div>
+                            )}
+
+                            <div style={{ marginBottom: 14 }}>
+                                <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
+                                    Invalidity Notice Reason (required if selecting Invalid)
+                                </label>
+                                <textarea
+                                    className="input-field"
+                                    rows={3}
+                                    value={failedInvalidReason}
+                                    onChange={(e) => setFailedInvalidReason(e.target.value)}
+                                    placeholder="Explain why the failed booking report is invalid (e.g. customer agreed earlier, follow up required)..."
+                                    style={{ width: "100%", fontSize: 12 }}
+                                />
+                            </div>
+
+                            <div style={{ fontSize: 11, color: "#64748B", marginBottom: 16 }}>
+                                Choosing <strong>Valid</strong> will mark the booking as <strong>Cancelled</strong> and record the reservation booking fee in Sales &amp; Records. Choosing <strong>Invalid</strong> will notify the technician.
+                            </div>
+
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid #F1F5F9" }}>
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    disabled={reviewingFailed}
+                                    onClick={() => setFailedReviewModal(null)}
+                                >
+                                    Close
+                                </button>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                    <button
+                                        type="button"
+                                        disabled={reviewingFailed || failedInvalidReason.trim().length < 3}
+                                        onClick={() => handleReviewFailedBooking("invalid")}
+                                        style={{
+                                            padding: "8px 14px",
+                                            borderRadius: 10,
+                                            border: "1px solid #FDE68A",
+                                            background: failedInvalidReason.trim().length < 3 ? "#F3F4F6" : "#FFFBEB",
+                                            color: failedInvalidReason.trim().length < 3 ? "#9CA3AF" : "#B45309",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: reviewingFailed || failedInvalidReason.trim().length < 3 ? "not-allowed" : "pointer",
+                                        }}
+                                    >
+                                        {reviewingFailed ? "Saving..." : "Invalid (Notify Tech)"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={reviewingFailed}
+                                        onClick={() => handleReviewFailedBooking("valid")}
+                                        style={{
+                                            padding: "8px 16px",
+                                            borderRadius: 10,
+                                            border: "none",
+                                            background: "#DC2626",
+                                            color: "#FFFFFF",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: reviewingFailed ? "not-allowed" : "pointer",
+                                        }}
+                                    >
+                                        {reviewingFailed ? "Saving..." : "Valid (Cancel Booking)"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
             </Modal>
 
             {/* Report Booking to Super Admin Modal */}

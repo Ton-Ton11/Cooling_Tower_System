@@ -680,6 +680,41 @@ export default function OcularInspectionPage({
                                 ))}
                             </div>
                         )}
+                        {(booking.admin_customer_note || booking.admin_customer_attachment_url) && (
+                            <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 text-xs space-y-2">
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-800 block">
+                                    Note
+                                </span>
+                                {booking.admin_customer_note && (
+                                    <p className="text-gray-800 whitespace-pre-line">{booking.admin_customer_note}</p>
+                                )}
+                                {booking.admin_customer_attachment_url && (
+                                    /\.(pdf|docx?)($|\?)/i.test(booking.admin_customer_attachment_url) ? (
+                                        <a
+                                            href={formatStorageUrl(booking.admin_customer_attachment_url)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1.5 text-blue-700 font-semibold underline"
+                                        >
+                                            View Attached File
+                                        </a>
+                                    ) : (
+                                        <a
+                                            href={formatStorageUrl(booking.admin_customer_attachment_url)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-block"
+                                        >
+                                            <img
+                                                src={formatStorageUrl(booking.admin_customer_attachment_url)}
+                                                alt="Inspection attachment"
+                                                className="max-h-36 rounded-lg border border-blue-200 object-cover"
+                                            />
+                                        </a>
+                                    )
+                                )}
+                            </div>
+                        )}
                     </section>
 
                     {/* Section 2: Recommended AC Specifications & Brands */}

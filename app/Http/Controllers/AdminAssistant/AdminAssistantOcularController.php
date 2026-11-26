@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\AdminAssistant;
 
+use App\Services\OcularInspectionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,24 +12,15 @@ use Illuminate\Validation\ValidationException;
 
 class AdminAssistantOcularController extends AdminAssistantBaseController
 {
-    protected const UNITS_OF_MEASUREMENT = ['Meters', 'Feet'];
+    protected const UNITS_OF_MEASUREMENT = OcularInspectionService::UNITS_OF_MEASUREMENT;
 
-    protected const SUN_EXPOSURE_LEVELS = ['Heavy/West', 'Moderate', 'Shaded'];
+    protected const SUN_EXPOSURE_LEVELS = OcularInspectionService::SUN_EXPOSURE_LEVELS;
 
-    protected const WINDOW_GLAZING_SIZES = ['Small', 'Medium', 'Large Glass Facade'];
+    protected const WINDOW_GLAZING_SIZES = OcularInspectionService::WINDOW_GLAZING_SIZES;
 
-    protected const RECOMMENDED_AC_TYPES = [
-        'Wall-Mounted Split',
-        'Window',
-        'Floor Standing',
-        'Cassette',
-    ];
+    protected const RECOMMENDED_AC_TYPES = OcularInspectionService::RECOMMENDED_AC_TYPES;
 
-    protected const RECOMMENDED_MOTOR_TYPES = [
-        'Inverter',
-        'Non-Inverter',
-        'Both',
-    ];
+    protected const RECOMMENDED_MOTOR_TYPES = OcularInspectionService::RECOMMENDED_MOTOR_TYPES;
 
     public function index(Request $request): JsonResponse
     {
@@ -198,13 +190,20 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
             $b['rooms'] = collect($roomsByBooking->get($b['booking_id'], []))->values()->all();
             $b['recommendations'] = collect($recsByBooking->get($b['booking_id'], []))->values()->all();
             $b['orders'] = collect($ordersByOcular->get($b['booking_id'], []))->values()->all();
+            $b['technician_ocular_result'] = OcularInspectionService::formatTechnicianOcularResult(
+                $b['service_details']['technician_ocular_result'] ?? null
+            );
+            $b['admin_customer_note'] = $b['service_details']['admin_customer_note'] ?? null;
+            $b['admin_customer_attachment_url'] = ! empty($b['service_details']['admin_customer_attachment_path'])
+                ? self::formatStorageUrl($b['service_details']['admin_customer_attachment_path'])
+                : null;
 
             return $b;
         })->values();
 
-        // On-hand (Available) & Order-Base AC units in inventory for recommendation selection
+        // On-hand (Available) & Order-Base AC units in inventory for direct unit selection
         $inventoryUnits = DB::table('ac_units_inventory')
-            ->whereIn('status', ['Available', 'Order Base', 'Reserved'])
+            ->whereIn('status', ['Available', 'Order Base'])
             ->orderBy('brand')
             ->orderBy('horsepower')
             ->orderBy('model')
@@ -222,7 +221,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
                     'horsepower'       => (float) $u->horsepower,
                     'ac_type'          => $this->normalizeRecommendedAcType((string) $u->ac_type),
                     'raw_ac_type'      => $u->ac_type,
-                    'motor_type'       => $u->motor_type ?: 'Inverter',
+                    'motor_type'       => OcularInspectionService::normalizeMotorType($u->motor_type),
                     'status'           => $u->status,
                     'inventory_badge'  => $u->status === 'Order Base' ? 'Order-Base' : 'On-Hand',
                     'selling_price'    => $price,
@@ -264,7 +263,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function storeRoom(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId, true);
+        $booking = $this->ensureOcularBookingExists($bookingId, true);
 
         $validated = $this->validateRoomPayload($request);
         $capacity = $this->calculateCoolingCapacity($validated);
@@ -288,6 +287,8 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
             'updated_at'                => now(),
         ], 'room_id');
 
+        $this->persistCustomerNoteFromRequest($request, $bookingId, $booking);
+
         $this->logActivity(
             (int) $request->user()->user_id,
             'OCULAR_INSPECTION',
@@ -305,7 +306,7 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
     public function updateRoom(Request $request, int $bookingId, int $roomId): JsonResponse
     {
         $this->authorizeRole($request);
-        $this->ensureOcularBookingExists($bookingId, true);
+        $booking = $this->ensureOcularBookingExists($bookingId, true);
 
         $existing = DB::table('ocular_inspection_rooms')
             ->where('room_id', $roomId)
@@ -337,12 +338,48 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
                 'updated_at'                => now(),
             ]);
 
+        $this->persistCustomerNoteFromRequest($request, $bookingId, $booking);
+
         $room = DB::table('ocular_inspection_rooms')->where('room_id', $roomId)->first();
 
         return response()->json([
             'message' => 'Room capacity data updated.',
             'data'    => $this->formatRoom($room),
         ]);
+    }
+
+    protected function persistCustomerNoteFromRequest(Request $request, int $bookingId, object $booking): void
+    {
+        if (! $request->has('customer_note') && ! $request->hasFile('customer_attachment')) {
+            return;
+        }
+
+        $noteValidated = $request->validate([
+            'customer_note'       => ['nullable', 'string', 'max:1500'],
+            'customer_attachment' => ['nullable', 'file', 'mimes:jpeg,png,jpg,webp,pdf,doc,docx', 'max:10240'],
+        ]);
+
+        $serviceDetails = ! empty($booking->service_details)
+            ? (is_string($booking->service_details) ? (json_decode($booking->service_details, true) ?: []) : (array) $booking->service_details)
+            : [];
+
+        if ($request->has('customer_note')) {
+            $trimmed = trim((string) ($noteValidated['customer_note'] ?? ''));
+            $serviceDetails['admin_customer_note'] = $trimmed !== '' ? $trimmed : null;
+        }
+
+        if ($request->hasFile('customer_attachment')) {
+            $serviceDetails['admin_customer_attachment_path'] = $request
+                ->file('customer_attachment')
+                ->store('ocular-inspections/notes', 'public');
+        }
+
+        DB::table('bookings')
+            ->where('booking_id', $bookingId)
+            ->update([
+                'service_details' => json_encode($serviceDetails),
+                'updated_at'      => now(),
+            ]);
     }
 
     public function destroyRoom(Request $request, int $bookingId, int $roomId): JsonResponse
@@ -559,31 +596,24 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
 
     protected function validateRoomPayload(Request $request): array
     {
-        return $request->validate([
-            'room_name'                 => ['nullable', 'string', 'max:120'],
-            'unit_of_measurement'       => ['required', 'string', Rule::in(self::UNITS_OF_MEASUREMENT)],
-            'room_length'               => ['required', 'numeric', 'min:0.5', 'max:5000'],
-            'room_width'                => ['required', 'numeric', 'min:0.5', 'max:5000'],
-            'ceiling_height'            => ['required', 'numeric', 'min:1', 'max:500'],
-            'room_category'             => ['required', 'string', 'max:120'],
-            'sun_exposure_level'        => ['required', 'string', Rule::in(self::SUN_EXPOSURE_LEVELS)],
-            'maximum_occupancy'         => ['required', 'integer', 'min:1', 'max:1000'],
-            'window_size_glazing'       => ['required', 'string', Rule::in(self::WINDOW_GLAZING_SIZES)],
-            'heat_generating_equipment' => ['required', 'integer', 'min:0', 'max:500000'],
-        ]);
+        return $request->validate(OcularInspectionService::roomValidationRules());
     }
 
     protected function validateRecommendationPayload(Request $request): array
     {
         return $request->validate([
             'room_id'                   => ['nullable', 'integer'],
-            'ac_unit_id'                => ['nullable', 'integer'],
-            'recommended_capacity'      => ['required', 'numeric', 'min:0.5', 'max:20'],
-            'recommended_ac_type'       => ['required', 'string', Rule::in(self::RECOMMENDED_AC_TYPES)],
-            'motor_type_recommendation' => ['required', 'string', Rule::in(self::RECOMMENDED_MOTOR_TYPES)],
-            'brand_recommendation'      => ['required', 'string', 'max:120'],
+            'ac_unit_id'                => ['nullable', 'integer', 'exists:ac_units_inventory,ac_unit_id'],
+            'recommended_capacity'      => ['required_without:ac_unit_id', 'nullable', 'numeric', 'min:0.5', 'max:20'],
+            'recommended_ac_type'       => ['required_without:ac_unit_id', 'nullable', 'string', Rule::in(self::RECOMMENDED_AC_TYPES)],
+            'motor_type_recommendation' => ['required_without:ac_unit_id', 'nullable', 'string', Rule::in(self::RECOMMENDED_MOTOR_TYPES)],
+            'brand_recommendation'      => ['required_without:ac_unit_id', 'nullable', 'string', 'max:120'],
             'price_range_label'         => ['nullable', 'string', 'max:160'],
+            'price_min'                 => ['nullable', 'numeric', 'min:0'],
+            'price_max'                 => ['nullable', 'numeric', 'min:0'],
             'model'                     => ['nullable', 'string', 'max:150'],
+            'model_recommendation'      => ['nullable', 'string', 'max:150'],
+            'unit_status'               => ['nullable', 'string', 'max:40'],
             'unit_price'                => ['nullable', 'numeric', 'min:0'],
             'notes'                     => ['nullable', 'string', 'max:1000'],
             'unit_image'                => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
@@ -618,17 +648,46 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
 
         $inventoryStatus = $acUnit
             ? ($acUnit->status === 'Order Base' ? 'Order-Base' : 'On-Hand')
-            : ($existing?->inventory_status ?? 'On-Hand');
+            : (! empty($validated['unit_status'])
+                ? (stripos($validated['unit_status'], 'order') !== false ? 'Order-Base' : 'On-Hand')
+                : ($existing?->inventory_status ?? 'On-Hand'));
+
+        $resolvedModel = $validated['model']
+            ?? $validated['model_recommendation']
+            ?? ($acUnit?->model ?? ($existing?->model ?? null));
+
+        $resolvedCapacity = isset($validated['recommended_capacity']) && $validated['recommended_capacity'] !== null && $validated['recommended_capacity'] !== ''
+            ? (float) $validated['recommended_capacity']
+            : (float) ($acUnit?->horsepower ?? 1.5);
+
+        $resolvedAcType = ! empty($validated['recommended_ac_type'])
+            ? $validated['recommended_ac_type']
+            : $this->normalizeRecommendedAcType((string) ($acUnit?->ac_type ?? 'Wall-Mounted Split'));
+
+        $resolvedMotor = ! empty($validated['motor_type_recommendation'])
+            ? $validated['motor_type_recommendation']
+            : OcularInspectionService::normalizeMotorType($acUnit?->motor_type ?? 'Inverter');
+
+        $resolvedBrand = trim((string) ($validated['brand_recommendation'] ?? ($acUnit?->brand ?? '')));
+
+        $priceRangeLabel = $validated['price_range_label'] ?? null;
+        if (empty($priceRangeLabel) && isset($validated['price_min'], $validated['price_max']) && $validated['price_min'] !== '' && $validated['price_max'] !== '') {
+            $minP = (float) $validated['price_min'];
+            $maxP = (float) $validated['price_max'];
+            $priceRangeLabel = abs($maxP - $minP) < 0.01
+                ? '₱' . number_format($minP, 0)
+                : '₱' . number_format($minP, 0) . ' – ₱' . number_format($maxP, 0);
+        }
 
         return [
             'room_id'                   => ! empty($validated['room_id']) ? (int) $validated['room_id'] : null,
             'ac_unit_id'                => $acUnit ? (int) $acUnit->ac_unit_id : null,
-            'recommended_capacity'      => (float) $validated['recommended_capacity'],
-            'recommended_ac_type'       => $validated['recommended_ac_type'],
-            'motor_type_recommendation' => $validated['motor_type_recommendation'],
-            'brand_recommendation'      => $validated['brand_recommendation'],
-            'price_range_label'         => $validated['price_range_label'] ?? null,
-            'model'                     => $validated['model'] ?? ($acUnit?->model ?? null),
+            'recommended_capacity'      => $resolvedCapacity,
+            'recommended_ac_type'       => $resolvedAcType,
+            'motor_type_recommendation' => $resolvedMotor,
+            'brand_recommendation'      => $resolvedBrand,
+            'price_range_label'         => $priceRangeLabel,
+            'model'                     => $resolvedModel,
             'inventory_status'          => $inventoryStatus,
             'unit_price'                => $unitPrice,
             'unit_image_path'           => $unitImagePath,
@@ -638,129 +697,22 @@ class AdminAssistantOcularController extends AdminAssistantBaseController
 
     protected function calculateCoolingCapacity(array $room): array
     {
-        $isFeet = ($room['unit_of_measurement'] ?? 'Meters') === 'Feet';
-        $lengthM = $isFeet ? ((float) $room['room_length'] * 0.3048) : (float) $room['room_length'];
-        $widthM = $isFeet ? ((float) $room['room_width'] * 0.3048) : (float) $room['room_width'];
-        $heightM = $isFeet ? ((float) $room['ceiling_height'] * 0.3048) : (float) $room['ceiling_height'];
-
-        $areaSqm = max(1.0, $lengthM * $widthM);
-        $heightFactor = max(1.0, $heightM / 2.7);
-
-        // Base tropical cooling load ~600 BTU/h per sqm
-        $btu = $areaSqm * 600.0 * $heightFactor;
-
-        $category = strtolower((string) ($room['room_category'] ?? ''));
-        if (str_contains($category, 'server')) {
-            $btu *= 1.35;
-        } elseif (str_contains($category, 'kitchen')) {
-            $btu += 4000.0;
-        } elseif (str_contains($category, 'office') || str_contains($category, 'commercial')) {
-            $btu *= 1.12;
-        }
-
-        $sun = $room['sun_exposure_level'] ?? 'Moderate';
-        if ($sun === 'Heavy/West') {
-            $btu *= 1.12;
-        } elseif ($sun === 'Shaded') {
-            $btu *= 0.92;
-        }
-
-        $window = $room['window_size_glazing'] ?? 'Medium';
-        if ($window === 'Large Glass Facade') {
-            $btu *= 1.15;
-        } elseif ($window === 'Small') {
-            $btu *= 0.96;
-        }
-
-        $occupancy = max(1, (int) ($room['maximum_occupancy'] ?? 1));
-        if ($occupancy > 2) {
-            $btu += ($occupancy - 2) * 600.0;
-        }
-
-        $equipment = max(0, (int) ($room['heat_generating_equipment'] ?? 0));
-        if ($equipment > 0) {
-            // Treat values <= 30 as appliance count (~350 BTU each), larger values as wattage (* 3.412 BTU/W)
-            $btu += $equipment <= 30 ? ($equipment * 350.0) : ($equipment * 3.412);
-        }
-
-        $rawHp = max(0.5, $btu / 9000.0);
-        $standardHps = [0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
-        $recommendedHp = round($rawHp * 2) / 2;
-        foreach ($standardHps as $hp) {
-            if ($rawHp <= $hp + 0.05) {
-                $recommendedHp = $hp;
-                break;
-            }
-        }
-
-        return [
-            'estimated_btu' => round($btu, 2),
-            'estimated_hp'  => $recommendedHp,
-        ];
+        return OcularInspectionService::calculateCoolingCapacity($room);
     }
 
     protected function normalizeRecommendedAcType(string $rawType): string
     {
-        $lower = strtolower(trim($rawType));
-        if (str_contains($lower, 'window')) {
-            return 'Window';
-        }
-        if (str_contains($lower, 'floor')) {
-            return 'Floor Standing';
-        }
-        if (str_contains($lower, 'cassette')) {
-            return 'Cassette';
-        }
-
-        return 'Wall-Mounted Split';
+        return OcularInspectionService::normalizeRecommendedAcType($rawType);
     }
 
     protected function formatRoom(object $r): array
     {
-        return [
-            'room_id'                   => (int) $r->room_id,
-            'booking_id'                => (int) $r->booking_id,
-            'room_name'                 => $r->room_name,
-            'unit_of_measurement'       => $r->unit_of_measurement,
-            'room_length'               => (float) $r->room_length,
-            'room_width'                => (float) $r->room_width,
-            'ceiling_height'            => (float) $r->ceiling_height,
-            'room_category'             => $r->room_category,
-            'sun_exposure_level'        => $r->sun_exposure_level,
-            'maximum_occupancy'         => (int) $r->maximum_occupancy,
-            'window_size_glazing'       => $r->window_size_glazing,
-            'heat_generating_equipment' => (int) $r->heat_generating_equipment,
-            'estimated_btu'             => $r->estimated_btu !== null ? (float) $r->estimated_btu : null,
-            'estimated_hp'              => $r->estimated_hp !== null ? (float) $r->estimated_hp : null,
-            'created_at'                => $r->created_at,
-        ];
+        return OcularInspectionService::formatRoom($r);
     }
 
     protected function formatRecommendation(object $rec): array
     {
-        $imgPath = $rec->unit_image_path ?: ($rec->inv_image_path ?? null);
-
-        return [
-            'recommendation_id'         => (int) $rec->recommendation_id,
-            'booking_id'                => (int) $rec->booking_id,
-            'room_id'                   => $rec->room_id ? (int) $rec->room_id : null,
-            'ac_unit_id'                => $rec->ac_unit_id ? (int) $rec->ac_unit_id : null,
-            'recommended_capacity'      => (float) $rec->recommended_capacity,
-            'recommended_ac_type'       => $rec->recommended_ac_type,
-            'motor_type_recommendation' => $rec->motor_type_recommendation,
-            'brand_recommendation'      => $rec->brand_recommendation,
-            'price_range_label'         => $rec->price_range_label,
-            'model'                     => $rec->model,
-            'serial_number'             => $rec->inv_serial_number ?? null,
-            'inventory_status'          => $rec->inventory_status ?: (($rec->inv_current_status ?? '') === 'Order Base' ? 'Order-Base' : 'On-Hand'),
-            'unit_current_status'       => $rec->inv_current_status ?? null,
-            'unit_price'                => $rec->unit_price !== null ? (float) $rec->unit_price : null,
-            'unit_image_path'           => $imgPath,
-            'unit_image_url'            => self::formatStorageUrl($imgPath),
-            'notes'                     => $rec->notes,
-            'status'                    => $rec->status,
-            'created_at'                => $rec->created_at,
-        ];
+        return OcularInspectionService::formatRecommendation($rec);
     }
 }
 

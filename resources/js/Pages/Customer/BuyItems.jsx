@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
+import ReceiptActionButton from "../../Components/ReceiptActionButton";
 import Modal from "../../Components/Modal";
 import {
     CUSTOMER_ENDPOINTS,
@@ -717,14 +718,19 @@ export default function BuyItems({
                                                 </button>
                                             )}
 
-                                            {isCompleted && order.receipt_reference_number && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setReceiptModalOrder(order)}
-                                                    className="px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition cursor-pointer"
-                                                >
-                                                    Receipt
-                                                </button>
+                                            {Array.isArray(order.receipts) && order.receipts.length > 0 ? (
+                                                <ReceiptActionButton receipts={order.receipts} />
+                                            ) : (
+                                                isCompleted &&
+                                                order.receipt_reference_number && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setReceiptModalOrder(order)}
+                                                        className="px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition cursor-pointer"
+                                                    >
+                                                        Receipt
+                                                    </button>
+                                                )
                                             )}
                                         </div>
                                     </div>

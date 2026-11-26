@@ -311,6 +311,7 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
 
                 $soldByUser = $request->user();
                 $soldByName = $soldByUser ? trim(($soldByUser->given_name ?? '') . ' ' . ($soldByUser->last_name ?? '')) : 'Super Admin';
+                $directAcReceipt = null;
 
                 if (Schema::hasTable('inventory_sales')) {
                     $salePayload = [
@@ -360,6 +361,20 @@ class SuperAdminAcUnitController extends SuperAdminBaseController
                         $salePayload['created_at'] = now();
                         $saleId = DB::table('inventory_sales')->insertGetId($salePayload, 'sale_id');
                         $soldRecord = DB::table('inventory_sales')->where('sale_id', $saleId)->first();
+                    }
+                }
+
+                if ($bookingId && $paymentId && $soldByUser) {
+                    $bModel = \App\Models\Booking::find($bookingId);
+                    $pModel = \App\Models\Payment::find($paymentId);
+                    if ($bModel && $pModel) {
+                        $directAcReceipt = app(\App\Services\ReceiptService::class)->issueForBookingPayment($bModel, $pModel, $soldByUser);
+                        if ($directAcReceipt && $soldRecord && Schema::hasColumn('inventory_sales', 'receipt_reference_number')) {
+                            DB::table('inventory_sales')->where('sale_id', $soldRecord->sale_id)->update([
+                                'receipt_reference_number' => $directAcReceipt->receipt_number,
+                            ]);
+                            $soldRecord = DB::table('inventory_sales')->where('sale_id', $soldRecord->sale_id)->first();
+                        }
                     }
                 }
 

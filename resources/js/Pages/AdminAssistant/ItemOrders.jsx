@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePage } from "@inertiajs/react";
 import StatusBadge from "../../Components/StatusBadge";
 import Modal from "../../Components/Modal";
 import {
@@ -27,6 +28,9 @@ const CATEGORY_LABELS = {
 
 export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
     const ep = endpoints ?? ADMIN_ASSISTANT_ENDPOINTS;
+    const { auth } = usePage().props;
+    const currentUser = auth?.user;
+    const canApproveVoid = [1, 2].includes(Number(currentUser?.role_id));
 
     const [orders, setOrders] = useState([]);
     const [counts, setCounts] = useState({});
@@ -47,8 +51,12 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
     const [pickupNotes, setPickupNotes] = useState("");
     const [submittingPickup, setSubmittingPickup] = useState(false);
 
-    // Generated / Printable Receipt Modal
+    // Generated / Printable Receipt Modal & Compact Void Modal
     const [receiptModal, setReceiptModal] = useState(null);
+    const [voidModalReceipt, setVoidModalReceipt] = useState(null);
+    const [voidReason, setVoidReason] = useState("");
+    const [voidSubmitting, setVoidSubmitting] = useState(false);
+    const [approvingReceiptId, setApprovingReceiptId] = useState(null);
 
     const fetchOrders = useCallback(
         async (showLoader = true) => {
@@ -180,40 +188,55 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
     };
 
     const handlePrintReceipt = (order) => {
-        const win = window.open("", "_blank", "width=520,height=680");
-        if (!win) return;
-        win.document.write(`
-            <html>
-                <head>
-                    <title>Receipt ${order.receipt_reference_number || `#${order.order_id}`}</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; }
-                        .box { border: 1px solid #cbd5e1; border-radius: 12px; padding: 24px; max-width: 440px; margin: 0 auto; }
-                        h2 { margin: 0 0 4px; font-size: 18px; }
-                        .sub { color: #64748b; font-size: 12px; margin-bottom: 18px; }
-                        .row { display: flex; justify-content: space-between; font-size: 13px; padding: 7px 0; border-bottom: 1px dashed #e2e8f0; }
-                        .row strong { color: #0f172a; }
-                        .total { font-size: 16px; font-weight: 800; color: #15803d; border-bottom: none; padding-top: 12px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="box">
-                        <h2>Cooling Tower Airconditioning Services</h2>
-                        <div class="sub">Official Item Sale & Pickup Receipt</div>
-                        <div class="row"><span>Reference No.</span><strong>${order.receipt_reference_number || "—"}</strong></div>
-                        <div class="row"><span>Transaction Date</span><strong>${order.transaction_date_formatted || formatDateTime(order.transaction_date)}</strong></div>
-                        <div class="row"><span>Admin Assistant</span><strong>${order.confirmed_by_name || "Admin Assistant"}</strong></div>
-                        <div class="row"><span>Customer</span><strong>${order.client_name || "Customer"}</strong></div>
-                        <div class="row"><span>Item</span><strong>${order.item_name}</strong></div>
-                        <div class="row"><span>Quantity</span><strong>${order.quantity} ${order.unit || "pc"}</strong></div>
-                        <div class="row"><span>Unit Price</span><strong>${formatCurrency(order.unit_price)}</strong></div>
-                        <div class="row total"><span>Total Paid</span><span>${formatCurrency(order.total_amount)}</span></div>
-                    </div>
-                    <script>window.onload = () => window.print();</script>
-                </body>
-            </html>
-        `);
-        win.document.close();
+        const receiptId = order?.receipt?.receipt_id;
+        if (receiptId && ep.receiptPrint) {
+            window.open(ep.receiptPrint(receiptId), "_blank", "noopener,noreferrer");
+            return;
+        }
+        if (receiptId) {
+            window.open(`/admin-assistant/receipts/${receiptId}/print`, "_blank", "noopener,noreferrer");
+        }
+    };
+
+    const handleSubmitRequestVoid = async (e) => {
+        e?.preventDefault?.();
+        if (!voidModalReceipt || voidSubmitting) return;
+        const trimmed = voidReason.trim();
+        if (trimmed.length < 3) {
+            addToast("Please enter a brief reason (at least 3 characters).", "error");
+            return;
+        }
+        setVoidSubmitting(true);
+        try {
+            const url = ep.requestReceiptVoid
+                ? ep.requestReceiptVoid(voidModalReceipt.receipt_id)
+                : `/admin-assistant/receipts/${voidModalReceipt.receipt_id}/request-void`;
+            const { data } = await window.axios.post(url, { reason: trimmed });
+            addToast(data?.message || "Void request submitted.", "success");
+            setVoidModalReceipt(null);
+            setVoidReason("");
+            await fetchOrders(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to request void."), "error");
+        } finally {
+            setVoidSubmitting(false);
+        }
+    };
+
+    const handleApproveVoid = async (receipt) => {
+        if (!receipt || approvingReceiptId || !ep.approveReceiptVoid) return;
+        setApprovingReceiptId(receipt.receipt_id);
+        try {
+            const { data } = await window.axios.post(ep.approveReceiptVoid(receipt.receipt_id));
+            addToast(data?.message || "Receipt voided.", "success");
+            await fetchOrders(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to approve void."), "error");
+        } finally {
+            setApprovingReceiptId(null);
+        }
     };
 
     return (
@@ -434,11 +457,21 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
                                                             Booking #{order.linked_booking_id}
                                                         </span>
                                                     )}
+                                                    {order.receipt?.receipt_number && (
+                                                        <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                                            <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-[10.5px] font-mono font-bold text-slate-700">
+                                                                {order.receipt.receipt_number}
+                                                            </span>
+                                                            {order.receipt.status !== "Issued" && (
+                                                                <StatusBadge status={order.receipt.status} />
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
 
                                             <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                                                <div style={{ display: "inline-flex", gap: 6 }}>
+                                                <div style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                                                     {canReviewPayment && (
                                                         <button
                                                             type="button"
@@ -469,15 +502,56 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
                                                         </button>
                                                     )}
 
-                                                    {isCompleted && order.receipt_reference_number && (
-                                                        <button
-                                                            type="button"
-                                                            className="btn-secondary"
-                                                            style={{ padding: "6px 12px", fontSize: 11.5 }}
-                                                            onClick={() => setReceiptModal(order)}
-                                                        >
-                                                            Receipt
-                                                        </button>
+                                                    {order.receipt && (
+                                                        <>
+                                                            <a
+                                                                href={
+                                                                    ep.receiptPdf
+                                                                        ? ep.receiptPdf(order.receipt.receipt_id)
+                                                                        : `/admin-assistant/receipts/${order.receipt.receipt_id}/pdf`
+                                                                }
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-semibold transition"
+                                                            >
+                                                                View PDF
+                                                            </a>
+
+                                                            {order.receipt.status === "Issued" && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setVoidModalReceipt(order.receipt);
+                                                                        setVoidReason("");
+                                                                    }}
+                                                                    className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold transition cursor-pointer"
+                                                                >
+                                                                    Void
+                                                                </button>
+                                                            )}
+
+                                                            {order.receipt.status === "Void Requested" &&
+                                                                canApproveVoid &&
+                                                                Number(currentUser?.user_id) !==
+                                                                    Number(order.receipt.issued_by_user_id) && (
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={
+                                                                            approvingReceiptId ===
+                                                                            order.receipt.receipt_id
+                                                                        }
+                                                                        onClick={() =>
+                                                                            handleApproveVoid(order.receipt)
+                                                                        }
+                                                                        className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold transition cursor-pointer disabled:opacity-50"
+                                                                    >
+                                                                        {approvingReceiptId ===
+                                                                        order.receipt.receipt_id
+                                                                            ? "Approving..."
+                                                                            : "Approve Void"}
+                                                                    </button>
+                                                                )}
+                                                        </>
                                                     )}
                                                 </div>
                                             </td>
@@ -921,10 +995,71 @@ export default function ItemOrders({ addToast, onDataChanged, endpoints }) {
                                 className="btn-primary"
                                 onClick={() => handlePrintReceipt(receiptModal)}
                             >
-                                Print Receipt
+                                View PDF
                             </button>
                         </div>
                     </div>
+                )}
+            </Modal>
+
+            {/* ══════════════════════════════════════════════════════════════════
+                MODAL 4: COMPACT 1-FIELD REQUEST VOID MODAL
+            ══════════════════════════════════════════════════════════════════ */}
+            <Modal show={Boolean(voidModalReceipt)} onClose={() => !voidSubmitting && setVoidModalReceipt(null)} maxWidth="sm">
+                {voidModalReceipt && (
+                    <form onSubmit={handleSubmitRequestVoid} className="p-6 space-y-4">
+                        <div className="flex items-start justify-between gap-2">
+                            <div>
+                                <h3 className="text-base font-extrabold text-slate-900">
+                                    Request Void
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                                    {voidModalReceipt.receipt_number}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setVoidModalReceipt(null)}
+                                className="text-slate-400 hover:text-slate-600 text-sm cursor-pointer"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                Reason <span className="text-rose-600">*</span>
+                            </label>
+                            <input
+                                type="text"
+                                required
+                                minLength={3}
+                                maxLength={500}
+                                value={voidReason}
+                                onChange={(e) => setVoidReason(e.target.value)}
+                                placeholder="Enter reason for voiding this receipt"
+                                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500"
+                            />
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-1">
+                            <button
+                                type="button"
+                                disabled={voidSubmitting}
+                                onClick={() => setVoidModalReceipt(null)}
+                                className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 cursor-pointer"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={voidSubmitting || voidReason.trim().length < 3}
+                                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold cursor-pointer"
+                            >
+                                {voidSubmitting ? "Submitting..." : "Request Void"}
+                            </button>
+                        </div>
+                    </form>
                 )}
             </Modal>
         </div>
