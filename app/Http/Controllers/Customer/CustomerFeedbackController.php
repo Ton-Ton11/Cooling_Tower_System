@@ -45,6 +45,8 @@ class CustomerFeedbackController extends Controller
                 'service_details' => $details,
                 'updated_at' => now(),
             ]);
+
+            app(\App\Services\ForecastingService::class)->generateCustomerForecastForBooking((int) $booking->booking_id);
         }
 
         // Check if feedback already exists

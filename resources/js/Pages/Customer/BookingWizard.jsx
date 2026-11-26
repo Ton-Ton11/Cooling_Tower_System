@@ -310,12 +310,12 @@ export default function BookingWizard({
     });
 
     // Repair Specifics
-    const [repairDetails, setRepairDetails] = useState({
-        problems: ["Not Cooling"],
-        description: "",
+    const [repairDetails, setRepairDetails] = useState(() => ({
+        problems: initialServiceDetails?.item_order_id ? ["Other"] : ["Not Cooling"],
+        description: initialServiceDetails?.description || "",
         media_file: null,
         media_preview: null,
-    });
+    }));
 
     // Cleaning Specifics
     const [cleaningDetails, setCleaningDetails] = useState(() => ({
@@ -493,11 +493,12 @@ export default function BookingWizard({
     }, [currentService]);
 
     const isOcularInspection = serviceCategory === "ocular";
+    const isLinkedSparePartOrder = Boolean(initialServiceDetails?.item_order_id);
     const serviceFeeNumber = currentService?.booking_fee !== undefined && currentService?.booking_fee !== null
         ? Number(currentService.booking_fee)
         : (policyData?.amount ? Number(policyData.amount) : 50.0);
-    const effectiveBookingFee = isOcularInspection ? 0.0 : serviceFeeNumber;
-    const isFeeExempt = isOcularInspection || effectiveBookingFee === 0;
+    const effectiveBookingFee = isOcularInspection || isLinkedSparePartOrder ? 0.0 : serviceFeeNumber;
+    const isFeeExempt = isOcularInspection || isLinkedSparePartOrder || effectiveBookingFee === 0;
 
     const handleCopyGCash = () => {
         navigator.clipboard.writeText((gcashAccount || "0917 877 7670").replace(/\s+/g, ''));
@@ -738,6 +739,13 @@ export default function BookingWizard({
         } else if (serviceCategory === "repair") {
             const { media_file, media_preview, ...restRepair } = repairDetails;
             serviceQuestions = { ...restRepair, category: "Repair / Check-up" };
+            if (initialServiceDetails?.item_order_id) {
+                serviceQuestions.item_order_id = initialServiceDetails.item_order_id;
+                serviceQuestions.spare_part_item_id = initialServiceDetails.spare_part_item_id || null;
+                serviceQuestions.spare_part_name = initialServiceDetails.spare_part_name || null;
+                serviceQuestions.spare_part_quantity = initialServiceDetails.spare_part_quantity || 1;
+                serviceQuestions.booking_fee_waived = true;
+            }
         } else {
             serviceQuestions = { ...cleaningDetails, category: "Cleaning / Preventive Maintenance" };
         }
@@ -801,6 +809,9 @@ export default function BookingWizard({
         }
         if (initialServiceDetails?.ac_unit_order_id) {
             formData.append("ac_unit_order_id", initialServiceDetails.ac_unit_order_id);
+        }
+        if (initialServiceDetails?.item_order_id) {
+            formData.append("item_order_id", initialServiceDetails.item_order_id);
         }
         formData.append("service_address", serviceAddress.trim());
         if (addressGeoCheck?.lat) formData.append("service_latitude", addressGeoCheck.lat);
@@ -2016,6 +2027,8 @@ export default function BookingWizard({
                                 <p className="text-xs text-emerald-900 leading-relaxed">
                                     {isOcularInspection
                                         ? "Our assigned personnel will inspect your room dimensions and thermal load, then provide tailored AC unit brand and capacity recommendations from our inventory."
+                                        : isLinkedSparePartOrder
+                                        ? `Booking fee is waived (₱0.00) because your spare part down payment for Order #${initialServiceDetails.item_order_id} (${initialServiceDetails.spare_part_name || "Spare Part"}) has already been confirmed.`
                                         : "This service package requires no advance deposit. Your schedule reservation will be processed directly upon submission."}
                                 </p>
                             </div>

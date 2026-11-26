@@ -27,6 +27,7 @@ use App\Http\Controllers\AdminAssistant\AdminAssistantSparePartController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantSalesController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantAnnouncementController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantInventoryController;
+use App\Http\Controllers\AdminAssistant\AdminAssistantItemOrderController;
 use App\Http\Controllers\AdminAssistant\AdminAssistantOcularController;
 
 use App\Http\Controllers\ToolsMan\ToolsManDashboardController;
@@ -41,6 +42,7 @@ use App\Http\Controllers\Technician\TechnicianPerformanceController;
 
 use App\Http\Controllers\Customer\CustomerDashboardController;
 use App\Http\Controllers\Customer\CustomerBookingController;
+use App\Http\Controllers\Customer\CustomerItemOrderController;
 use App\Http\Controllers\Customer\CustomerFeedbackController;
 use App\Http\Controllers\Customer\CustomerComplaintController;
 use App\Http\Controllers\Shared\CustomerSupportController;
@@ -106,6 +108,7 @@ Route::prefix('super-admin')
             Route::match(['post', 'patch'], '/bookings/{bookingId}/complete', 'completeBooking')->name('bookings.complete');
             Route::patch('/bookings/{bookingId}/invalidate-turnover', 'invalidateTurnover')->name('bookings.invalidate-turnover');
             Route::post('/bookings/{bookingId}/report', 'reportBooking')->name('bookings.report');
+            Route::post('/bookings/{bookingId}/report/confirm', 'confirmReportReview')->name('bookings.report.confirm');
             Route::post('/unit-orders/{orderId}/confirm', 'confirmUnitOrder')->name('unit-orders.confirm');
         });
 
@@ -549,6 +552,13 @@ Route::prefix('admin-assistant')
             Route::delete('/spare-parts/{itemId}', 'destroySparePart')->name('spare-parts.destroy');
         });
 
+        // ─── Customer Item Orders & Reservations ───
+        Route::controller(AdminAssistantItemOrderController::class)->group(function () {
+            Route::get('/item-orders', 'index')->name('item-orders.index');
+            Route::post('/item-orders/{orderId}/review-payment', 'reviewPayment')->name('item-orders.review-payment');
+            Route::post('/item-orders/{orderId}/confirm-pickup', 'confirmPickup')->name('item-orders.confirm-pickup');
+        });
+
         Route::controller(AdminAssistantSalesController::class)->group(function () {
             Route::get('/sales-records', 'salesRecordsIndex')->name('sales-records.index');
         });
@@ -759,6 +769,13 @@ Route::prefix('customer')
             Route::patch('/bookings/{bookingId}/cancel', 'cancel')->name('bookings.cancel');
             Route::post('/bookings/{bookingId}/quotation-response', 'respondQuotation')->name('bookings.quotation-response');
             Route::post('/bookings/{bookingId}/ac-unit-order', 'storeAcUnitOrder')->name('bookings.ac-unit-order');
+        });
+
+        Route::controller(CustomerItemOrderController::class)->group(function () {
+            Route::get('/item-orders', 'index')->name('item-orders.index');
+            Route::post('/item-orders', 'store')->name('item-orders.store');
+            Route::post('/item-orders/{orderId}/complete-payment', 'completePayment')->name('item-orders.complete-payment');
+            Route::post('/item-orders/{orderId}/fulfillment', 'selectFulfillment')->name('item-orders.fulfillment');
         });
 
         Route::controller(CustomerFeedbackController::class)->group(function () {

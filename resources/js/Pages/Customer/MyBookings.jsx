@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
+import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
 import CancelModal from "./CancelModal";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
@@ -704,6 +705,21 @@ export default function MyBookings({
                                     </div>
                                 )}
 
+                                {isCompleted && b.maintenance_reminder && (
+                                    <MaintenanceReminderCountdown
+                                        reminder={b.maintenance_reminder}
+                                        variant="card"
+                                        onBookService={(serviceId) => {
+                                            if (onSelectServiceToBook) {
+                                                onSelectServiceToBook(serviceId);
+                                            }
+                                            if (onNavigate) {
+                                                onNavigate("book");
+                                            }
+                                        }}
+                                    />
+                                )}
+
                                 {isCancelled && b.cancellation_reason && (
                                     <div className="mt-3 bg-rose-50/80 border border-rose-100 rounded-xl p-3 text-xs text-rose-900">
                                         <span className="font-bold">Cancellation Reason:</span> {b.cancellation_reason}
@@ -873,6 +889,22 @@ export default function MyBookings({
                                 <p className="font-bold text-gray-800 mt-1">{viewDetailsBooking.service_order_status || "Pending Quotation"}</p>
                             </div>
                         </div>
+
+                        {viewDetailsBooking.booking_status === "Completed" && viewDetailsBooking.maintenance_reminder && (
+                            <MaintenanceReminderCountdown
+                                reminder={viewDetailsBooking.maintenance_reminder}
+                                variant="card"
+                                onBookService={(serviceId) => {
+                                    setViewDetailsBooking(null);
+                                    if (onSelectServiceToBook) {
+                                        onSelectServiceToBook(serviceId);
+                                    }
+                                    if (onNavigate) {
+                                        onNavigate("book");
+                                    }
+                                }}
+                            />
+                        )}
 
                         {/* Assigned Service Team */}
                         {(viewDetailsBooking.lead_technician_name || viewDetailsBooking.assistant_technician_name) && (

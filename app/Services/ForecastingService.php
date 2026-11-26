@@ -126,6 +126,44 @@ class ForecastingService
     }
 
     /**
+     * Determine whether a booking's service is eligible for Repair/Check-up & Cleaning/Preventive Maintenance reminders
+     * (Installation, Repair / Check-up, and Cleaning / Preventive Maintenance only).
+     */
+    public function isServiceEligibleForMaintenance(object $booking, ?string $serviceName = null): bool
+    {
+        $serviceId = (int) ($booking->service_id ?? 0);
+        $resolvedName = trim((string) ($serviceName ?? ($booking->service_name ?? ($booking->service->service_name ?? ''))));
+        $details = is_array($booking->service_details ?? null)
+            ? $booking->service_details
+            : (is_string($booking->service_details ?? null) ? (json_decode($booking->service_details, true) ?: []) : []);
+
+        if ($serviceId === 4 || ! empty($details['is_ocular_inspection']) || stripos($resolvedName, 'ocular') !== false) {
+            return false;
+        }
+
+        if (
+            str_starts_with($resolvedName, 'AC Unit Sale')
+            || str_starts_with($resolvedName, 'Retail Sale:')
+            || str_starts_with($resolvedName, 'Spare Part Sale:')
+        ) {
+            return false;
+        }
+
+        if (in_array($serviceId, [1, 2, 3], true)) {
+            return true;
+        }
+
+        $lower = strtolower($resolvedName);
+
+        return str_contains($lower, 'install')
+            || str_contains($lower, 'repair')
+            || str_contains($lower, 'check')
+            || str_contains($lower, 'clean')
+            || str_contains($lower, 'preventive')
+            || str_contains($lower, 'maintenance');
+    }
+
+    /**
      * Generate or update a predictive maintenance forecast when a booking is marked Completed.
      */
     public function generateCustomerForecastForBooking(int $bookingId): ?ServiceForecast
@@ -138,6 +176,12 @@ class ForecastingService
         }
 
         $sourceServiceName = $booking->service?->service_name ?? 'Cleaning / Preventive Maintenance';
+        if (! $this->isServiceEligibleForMaintenance($booking, $sourceServiceName)) {
+            ServiceForecast::where('source_booking_id', $bookingId)->delete();
+
+            return null;
+        }
+
         $units = is_array($booking->units_data) ? $booking->units_data : [];
 
         // 1. Service Chaining Matrix: determine next recommended service & base interval
@@ -468,12 +512,13 @@ class ForecastingService
     }
 
     /**
-     * Check if a forecast\'s 1-week reminder window has passed without booking,
+     * Check if a forecast's 1-week reminder window has passed without booking,
      * and automatically restart another 3-month countdown cycle.
      */
     public function syncAndRolloverForecast(ServiceForecast $forecast): bool
     {
         $hasActiveBooking = Booking::where('client_id', $forecast->user_id)
+            ->whereIn('service_id', [2, 3])
             ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
             ->exists();
 
@@ -513,6 +558,160 @@ class ForecastingService
     }
 
     /**
+     * Build a map of automated Repair/Check-up & Cleaning/Preventive Maintenance reminder countdowns
+     * keyed by booking_id for completed eligible bookings (Installation, Repair/Check-up, Cleaning/Preventive Maintenance).
+     */
+    public function getBookingMaintenanceRemindersMap(iterable $bookings): array
+    {
+        $eligibleRows = [];
+        $clientIds = [];
+
+        foreach ($bookings as $row) {
+            if (($row->booking_status ?? '') !== 'Completed') {
+                continue;
+            }
+            if (! $this->isServiceEligibleForMaintenance($row)) {
+                continue;
+            }
+            $bid = (int) ($row->booking_id ?? 0);
+            if ($bid <= 0) {
+                continue;
+            }
+            $eligibleRows[$bid] = $row;
+            if (! empty($row->client_id)) {
+                $clientIds[] = (int) $row->client_id;
+            }
+        }
+
+        if (empty($eligibleRows)) {
+            return [];
+        }
+
+        $this->ensureTablesExist();
+
+        $eligibleBookingIds = array_keys($eligibleRows);
+        $forecastsByBooking = ServiceForecast::whereIn('source_booking_id', $eligibleBookingIds)
+            ->get()
+            ->keyBy(fn (ServiceForecast $f) => (int) $f->source_booking_id);
+
+        foreach ($eligibleBookingIds as $bid) {
+            if (! $forecastsByBooking->has($bid)) {
+                $generated = $this->generateCustomerForecastForBooking($bid);
+                if ($generated) {
+                    $forecastsByBooking->put($bid, $generated);
+                }
+            }
+        }
+
+        $uniqueClientIds = array_values(array_unique(array_filter($clientIds)));
+        $activeFollowUpClientLookup = [];
+        if (! empty($uniqueClientIds)) {
+            $activeClientIds = Booking::whereIn('client_id', $uniqueClientIds)
+                ->whereIn('service_id', [2, 3])
+                ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
+                ->pluck('client_id')
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->all();
+            $activeFollowUpClientLookup = array_fill_keys($activeClientIds, true);
+        }
+
+        $tz = config('app.timezone', 'Asia/Manila');
+        $today = Carbon::now($tz)->startOfDay();
+        $now = Carbon::now($tz);
+        $result = [];
+
+        foreach ($eligibleRows as $bid => $row) {
+            /** @var ServiceForecast|null $forecast */
+            $forecast = $forecastsByBooking->get($bid);
+            if (! $forecast) {
+                continue;
+            }
+
+            $clientId = (int) ($row->client_id ?? $forecast->user_id ?? 0);
+            $hasActiveFollowUp = isset($activeFollowUpClientLookup[$clientId]);
+
+            $cycleDays = max(1, (int) ($forecast->adjusted_interval_days ?: 90));
+            $lastDate = $forecast->last_service_date
+                ? Carbon::parse($forecast->last_service_date, $tz)->startOfDay()
+                : ($row->scheduled_date ? Carbon::parse($row->scheduled_date, $tz)->startOfDay() : (clone $today));
+            $dueDate = $forecast->predicted_due_date
+                ? Carbon::parse($forecast->predicted_due_date, $tz)->startOfDay()
+                : (clone $lastDate)->addDays($cycleDays);
+
+            if (! $hasActiveFollowUp) {
+                $rolled = false;
+                $guard = 0;
+                while ((int) $today->diffInDays($dueDate, false) < -7 && $guard < 24) {
+                    $lastDate = (clone $dueDate);
+                    $dueDate = (clone $lastDate)->addDays($cycleDays);
+                    $rolled = true;
+                    $guard++;
+                }
+
+                if ($rolled) {
+                    $forecast->update([
+                        'last_service_date'      => $lastDate->toDateString(),
+                        'predicted_due_date'     => $dueDate->toDateString(),
+                        'base_interval_days'     => 90,
+                        'adjusted_interval_days' => $cycleDays,
+                        'urgency_level'          => 'Upcoming',
+                        'reminder_sent_at'       => null,
+                    ]);
+                }
+            }
+
+            $daysRemaining = (int) $today->diffInDays($dueDate, false);
+            $elapsedDays = max(0, min($cycleDays, (int) $lastDate->diffInDays($today, false)));
+            $progressPercent = max(0, min(100, (int) round((($cycleDays - $elapsedDays) / $cycleDays) * 100)));
+
+            if ($hasActiveFollowUp) {
+                $status = 'Scheduled';
+            } elseif ($daysRemaining <= 0 && $daysRemaining >= -7) {
+                $status = 'Due Now';
+            } elseif ($daysRemaining <= 7) {
+                $status = 'Due Soon';
+            } else {
+                $status = 'Upcoming';
+            }
+
+            $dueTimeStr = '08:00:00';
+            $targetTimestamp = (clone $dueDate)->setTime(8, 0, 0);
+            if ($targetTimestamp->lessThanOrEqualTo($now) && $daysRemaining >= 0) {
+                $dueTimeStr = '23:59:59';
+                $targetTimestamp = (clone $dueDate)->endOfDay();
+            }
+
+            $result[$bid] = [
+                'forecast_id'              => (int) $forecast->forecast_id,
+                'booking_id'               => $bid,
+                'source_service_name'      => $forecast->source_service_name,
+                'recommended_service_id'   => (int) ($forecast->recommended_service_id ?: 3),
+                'recommended_service_name' => $forecast->recommended_service_name ?: 'Cleaning / Preventive Maintenance',
+                'cleaning_service_id'      => 3,
+                'repair_service_id'        => 2,
+                'unit_summary'             => $forecast->unit_summary,
+                'cycle_days'               => $cycleDays,
+                'cycle_label'              => '3 Months',
+                'last_service_date'        => $lastDate->toDateString(),
+                'last_service_formatted'   => $lastDate->format('M d, Y'),
+                'due_date'                 => $dueDate->toDateString(),
+                'due_time'                 => $dueTimeStr,
+                'due_date_formatted'       => $dueDate->format('M d, Y'),
+                'due_datetime_formatted'   => $targetTimestamp->format('M d, Y • h:i A'),
+                'target_iso'               => $targetTimestamp->toIso8601String(),
+                'time_zone'                => $tz,
+                'days_remaining'           => $daysRemaining,
+                'progress_percent'         => $progressPercent,
+                'status'                   => $status,
+                'reminder_sent'            => (bool) $forecast->reminder_sent_at,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Get and synchronize predictive maintenance forecasts for a specific customer.
      */
     public function getCustomerForecasts(int $userId): array
@@ -520,13 +719,17 @@ class ForecastingService
         $this->ensureTablesExist();
 
         // Backfill forecasts for completed bookings that don't have one yet
-        $completedBookings = Booking::where('client_id', $userId)
+        $completedBookings = Booking::with('service')
+            ->where('client_id', $userId)
             ->where('booking_status', 'Completed')
             ->orderByDesc('scheduled_date')
-            ->limit(5)
+            ->limit(10)
             ->get();
 
         foreach ($completedBookings as $cb) {
+            if (! $this->isServiceEligibleForMaintenance($cb)) {
+                continue;
+            }
             $exists = ServiceForecast::where('user_id', $userId)
                 ->where('source_booking_id', $cb->booking_id)
                 ->exists();
@@ -551,6 +754,7 @@ class ForecastingService
             ->get();
 
         $hasActiveBooking = Booking::where('client_id', $userId)
+            ->whereIn('service_id', [2, 3])
             ->whereIn('booking_status', ['Pending', 'Approved', 'Dispatched', 'In-Progress'])
             ->exists();
 

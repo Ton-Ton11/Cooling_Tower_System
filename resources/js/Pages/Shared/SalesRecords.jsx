@@ -362,6 +362,7 @@ function SalesRecords({ addToast, endpoints }) {
                     rec.sub_category,
                     rec.payment_method,
                     rec.recorded_by,
+                    rec.receipt_reference_number,
                 ]
                     .filter(Boolean)
                     .join(" ")
@@ -2146,6 +2147,33 @@ function SalesRecords({ addToast, endpoints }) {
                                     </div>
                                 </div>
                             )}
+                            {selectedRecord.receipt_reference_number && (
+                                <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed #CBD5E1", paddingTop: 10 }}>
+                                    <div
+                                        style={{
+                                            fontSize: 11,
+                                            color: "#15803D",
+                                            fontWeight: 700,
+                                        }}
+                                    >
+                                        Official Receipt Reference No.
+                                    </div>
+                                    <div
+                                        style={{
+                                            fontWeight: 800,
+                                            fontFamily: "monospace",
+                                            color: "#0F172A",
+                                            marginTop: 2,
+                                        }}
+                                    >
+                                        {selectedRecord.receipt_reference_number}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                        Confirmed by {selectedRecord.sold_by_name || selectedRecord.managed_by_name || "Admin Assistant"} ·{" "}
+                                        {formatDateTime(selectedRecord.transaction_date || selectedRecord.payment_date || selectedRecord.created_at)}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Financial Overview Cards */}
@@ -2742,8 +2770,50 @@ function SalesRecords({ addToast, endpoints }) {
                             style={{
                                 display: "flex",
                                 justifyContent: "flex-end",
+                                gap: 8,
                             }}
                         >
+                            {selectedRecord.receipt_reference_number && (
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => {
+                                        const win = window.open("", "_blank", "width=520,height=680");
+                                        if (!win) return;
+                                        win.document.write(`
+                                            <html>
+                                                <head>
+                                                    <title>Receipt ${selectedRecord.receipt_reference_number}</title>
+                                                    <style>
+                                                        body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; }
+                                                        .box { border: 1px solid #cbd5e1; border-radius: 12px; padding: 24px; max-width: 440px; margin: 0 auto; }
+                                                        h2 { margin: 0 0 4px; font-size: 18px; }
+                                                        .sub { color: #64748b; font-size: 12px; margin-bottom: 18px; }
+                                                        .row { display: flex; justify-content: space-between; font-size: 13px; padding: 7px 0; border-bottom: 1px dashed #e2e8f0; }
+                                                        .total { font-size: 16px; font-weight: 800; color: #15803d; border-bottom: none; padding-top: 12px; }
+                                                    </style>
+                                                </head>
+                                                <body>
+                                                    <div class="box">
+                                                        <h2>Cooling Tower Airconditioning Services</h2>
+                                                        <div class="sub">Official Item Sale Receipt</div>
+                                                        <div class="row"><span>Reference No.</span><strong>${selectedRecord.receipt_reference_number}</strong></div>
+                                                        <div class="row"><span>Transaction Date</span><strong>${formatDateTime(selectedRecord.transaction_date || selectedRecord.payment_date || selectedRecord.created_at)}</strong></div>
+                                                        <div class="row"><span>Admin Assistant</span><strong>${selectedRecord.sold_by_name || selectedRecord.managed_by_name || "Admin Assistant"}</strong></div>
+                                                        <div class="row"><span>Customer</span><strong>${selectedRecord.client_name || "Customer"}</strong></div>
+                                                        <div class="row"><span>Item</span><strong>${selectedRecord.quantity || 1}x ${selectedRecord.item_name || selectedRecord.service}</strong></div>
+                                                        <div class="row total"><span>Total Paid</span><span>${formatCurrency(selectedRecord.amount_paid || 0)}</span></div>
+                                                    </div>
+                                                    <script>window.onload = () => window.print();</script>
+                                                </body>
+                                            </html>
+                                        `);
+                                        win.document.close();
+                                    }}
+                                >
+                                    Print Receipt
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 className="btn-primary"

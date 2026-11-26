@@ -4,6 +4,7 @@ import RoleShell from "../../Layouts/RoleShell";
 import StatusBadge from "../../Components/StatusBadge";
 import CustomerOverview from "./Overview";
 import BookingWizard from "./BookingWizard";
+import BuyItems from "./BuyItems";
 import MyBookings from "./MyBookings";
 import ServiceHistory from "./ServiceHistory";
 import WarrantyTracking from "./WarrantyTracking";
@@ -137,6 +138,7 @@ function BusinessVerificationBanner({ user, onSuccess, addToast }) {
 const ic = {
     dashboard: "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10",
     book: "M12 4v16m8-8H4",
+    buy_items: "M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z",
     bookings: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
     history: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
     warranty: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
@@ -147,6 +149,7 @@ const ic = {
 const navItems = [
     { id: "dashboard", label: "Dashboard", icon: ic.dashboard },
     { id: "book", label: "Book a Service", icon: ic.book },
+    { id: "buy_items", label: "Buy Items", icon: ic.buy_items },
     { id: "bookings", label: "My Bookings", icon: ic.bookings },
     { id: "service_history", label: "Service History", icon: ic.history },
     { id: "warranty", label: "Purchase History", icon: ic.warranty },
@@ -250,6 +253,39 @@ export default function CustomerDashboard() {
         }
     };
 
+    const handleScheduleSparePartReplacement = (order, onNavigate) => {
+        if (!order) return;
+        const defaultBrand = order.compatible_brands?.[0] || "Carrier";
+
+        setSelectedServiceForBooking(2); // Repair / Check-up
+        setBookingInitialUnits([
+            {
+                unit_type: "Wall-Mounted Split Type",
+                motor_type: "Inverter",
+                brand: defaultBrand,
+                model_number: "",
+                capacity_type: "hp",
+                capacity: "1.5 HP",
+                quantity: 1,
+                issue: `Spare Part Replacement: ${order.quantity}x ${order.item_name} (Order #${order.order_id})`,
+                unit_notes: `Spare Part Order #${order.order_id}`,
+            },
+        ]);
+        setBookingInitialServiceDetails({
+            item_order_id: order.order_id,
+            spare_part_item_id: order.item_id,
+            spare_part_name: order.item_name,
+            spare_part_quantity: order.quantity,
+            booking_fee_waived: true,
+            description: `Deliver & replace purchased spare part: ${order.quantity}x ${order.item_name} (Order #${order.order_id}).`,
+        });
+        setBookingInitialStep(2);
+
+        if (onNavigate) {
+            onNavigate("book");
+        }
+    };
+
     const pageAuthUser = usePage()?.props?.auth?.user || null;
 
     const buildPageComponents = ({
@@ -296,7 +332,7 @@ export default function CustomerDashboard() {
         ),
         book: wrapWithBanner(
             <BookingWizard
-                key={`wizard-${selectedServiceForBooking || "default"}-${bookingInitialStep}`}
+                key={`wizard-${selectedServiceForBooking || "default"}-${bookingInitialStep}-${bookingInitialServiceDetails?.item_order_id || 0}`}
                 dashboardData={dashboardData}
                 addToast={addToast}
                 initialServiceId={selectedServiceForBooking}
@@ -311,6 +347,15 @@ export default function CustomerDashboard() {
                     setSelectedServiceForBooking(null);
                     onNavigate("bookings");
                 }}
+            />
+        ),
+        buy_items: wrapWithBanner(
+            <BuyItems
+                key={`customer-buy-items-${navNonce || 0}`}
+                addToast={addToast}
+                currentUser={effectiveUser}
+                onScheduleReplacement={(order) => handleScheduleSparePartReplacement(order, onNavigate)}
+                onDataChanged={handleDataChanged}
             />
         ),
         bookings: (

@@ -8,6 +8,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 
 abstract class SuperAdminBaseController extends Controller
 {
@@ -735,7 +736,46 @@ abstract class SuperAdminBaseController extends Controller
             $unitOrdersById = $allOrders->keyBy('order_id');
         }
 
-        return $rows->map(function ($row) use ($latestChecklistByBooking, $unitOrdersByInstall, $unitOrdersById) {
+        $itemOrdersByBooking = collect();
+        $itemOrdersById = collect();
+        if (! empty($bookingIds) && \Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+            $allItemOrders = DB::table('item_orders')
+                ->leftJoin('inventory_items', 'inventory_items.item_id', '=', 'item_orders.item_id')
+                ->whereNotIn('item_orders.order_status', ['Cancelled'])
+                ->select([
+                    'item_orders.*',
+                    'inventory_items.item_name',
+                    'inventory_items.serial_number',
+                    'inventory_items.unit',
+                    'inventory_items.sub_category',
+                ])
+                ->get()
+                ->map(fn ($o) => [
+                    'order_id' => (int) $o->order_id,
+                    'linked_booking_id' => $o->linked_booking_id ? (int) $o->linked_booking_id : null,
+                    'item_id' => (int) $o->item_id,
+                    'item_name' => $o->item_name ?? 'Spare Part',
+                    'serial_number' => $o->serial_number,
+                    'unit' => $o->unit ?? 'pc',
+                    'sub_category' => $o->sub_category,
+                    'quantity' => (int) $o->quantity,
+                    'unit_price' => (float) $o->unit_price,
+                    'total_amount' => (float) $o->total_amount,
+                    'down_payment_amount' => (float) $o->down_payment_amount,
+                    'amount_paid' => (float) $o->amount_paid,
+                    'remaining_balance' => (float) $o->remaining_balance,
+                    'payment_method' => $o->payment_method,
+                    'fulfillment_type' => $o->fulfillment_type,
+                    'order_status' => $o->order_status,
+                    'receipt_reference_number' => $o->receipt_reference_number,
+                ]);
+            $itemOrdersByBooking = $allItemOrders->whereNotNull('linked_booking_id')->keyBy('linked_booking_id');
+            $itemOrdersById = $allItemOrders->keyBy('order_id');
+        }
+
+        $maintenanceRemindersByBooking = app(\App\Services\ForecastingService::class)->getBookingMaintenanceRemindersMap($rows);
+
+        return $rows->map(function ($row) use ($latestChecklistByBooking, $unitOrdersByInstall, $unitOrdersById, $itemOrdersByBooking, $itemOrdersById, $maintenanceRemindersByBooking) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id ?? null;
             $leadName = $row->lead_tech_user_id
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -789,6 +829,8 @@ abstract class SuperAdminBaseController extends Controller
             $latestChecklist = $latestChecklistByBooking->get($row->booking_id);
             $linkedUnitOrder = $unitOrdersByInstall->get((int) $row->booking_id)
                 ?? (! empty($serviceDetails['ac_unit_order_id']) ? $unitOrdersById->get((int) $serviceDetails['ac_unit_order_id']) : null);
+            $linkedItemOrder = $itemOrdersByBooking->get((int) $row->booking_id)
+                ?? (! empty($serviceDetails['item_order_id']) ? $itemOrdersById->get((int) $serviceDetails['item_order_id']) : null);
 
             return [
                 'booking_id' => (int) $row->booking_id,
@@ -805,6 +847,7 @@ abstract class SuperAdminBaseController extends Controller
                 'ocular_personnel' => $ocularPersonnel,
                 'inspection_status' => $serviceDetails['inspection_status'] ?? ($isOcular ? 'Pending Inspection' : null),
                 'ac_unit_order' => $linkedUnitOrder,
+                'item_order' => $linkedItemOrder,
                 'assigned_tech_id' => $leadId ? (int) $leadId : null,
                 'assigned_tech_name' => $leadName ?: (! empty($ocularPersonnel) ? ($ocularPersonnel[0]['full_name'] ?? null) : null),
                 'lead_technician_id' => $leadId ? (int) $leadId : null,
@@ -865,6 +908,7 @@ abstract class SuperAdminBaseController extends Controller
                 'rating' => isset($row->rating) && $row->rating !== null ? (int) $row->rating : null,
                 'feedback' => $row->feedback_text ?? null,
                 'manager_reports' => $serviceDetails['manager_reports'] ?? [],
+                'maintenance_reminder' => $maintenanceRemindersByBooking[(int) $row->booking_id] ?? null,
             ];
         })->values();
     }
@@ -1012,7 +1056,10 @@ abstract class SuperAdminBaseController extends Controller
             }
 
             // Booking Fee
-            $bookingFee = $saleType === 'service' ? ($downPaymentCredited > 0 ? $downPaymentCredited : 50.00) : null;
+            $isBookingFeeWaived = ! empty($serviceDetails['booking_fee_waived']) || ! empty($serviceDetails['item_order_id']);
+            $bookingFee = $saleType === 'service'
+                ? ($isBookingFeeWaived ? 0.00 : ($downPaymentCredited > 0 ? $downPaymentCredited : 50.00))
+                : null;
 
             // Base Price
             $rowBookingPrice = (float) ($row->booking_price ?? 0.0);
@@ -1175,6 +1222,9 @@ abstract class SuperAdminBaseController extends Controller
                 'profit' => $profit,
                 'warranty_period' => $invSale->warranty_period ?? null,
                 'sold_by_name' => $invSale->sold_by_name ?? null,
+                'receipt_reference_number' => $invSale->receipt_reference_number ?? null,
+                'item_order_id' => $invSale->item_order_id ?? null,
+                'transaction_date' => $invSale->sold_at ?? ($row->payment_date ?? $row->created_at),
                 'notes' => $invSale->notes ?? ($row->booking_notes ?? null),
                 'scheduled_date' => $row->scheduled_date,
                 'booking_status' => $row->booking_status,
@@ -1409,6 +1459,9 @@ abstract class SuperAdminBaseController extends Controller
         $profit = $item->profit !== null ? (float) $item->profit : 0.0;
         $sellingPrice = $item->selling_price !== null ? (float) $item->selling_price : ($capital + $profit);
 
+        $isTool = strtolower($item->item_type ?? '') === 'tool';
+        $isPowerTool = $this->isPowerToolInventoryItem($item->item_type ?? null, $item->tool_subtype ?? null);
+
         return (object) [
             'item_id' => (int) $item->item_id,
             'item_name' => $item->item_name,
@@ -1418,8 +1471,8 @@ abstract class SuperAdminBaseController extends Controller
             'compatible_brands' => $brands,
             'serial_number' => $item->serial_number ?? null,
             'quantity_on_hand' => (int) $item->quantity_on_hand,
-            'initial_stock' => $item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand,
-            'reorder_level' => (int) $item->reorder_level,
+            'initial_stock' => $isPowerTool ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
+            'reorder_level' => $isPowerTool ? 0 : (int) $item->reorder_level,
             'unit' => $item->unit,
             'capital' => $capital,
             'profit' => $profit,
@@ -1433,7 +1486,7 @@ abstract class SuperAdminBaseController extends Controller
             'archived_at' => $item->archived_at ?? null,
             'added_at' => $item->created_at ?? $item->last_updated,
             'last_updated' => $item->last_updated,
-            'low_stock' => (int) $item->quantity_on_hand <= (int) $item->reorder_level,
+            'low_stock' => $isPowerTool ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
         ];
     }
 
@@ -1450,6 +1503,7 @@ abstract class SuperAdminBaseController extends Controller
         $isTool = strtolower($item->item_type ?? '') === 'tool';
         $rawSubtype = strtolower((string) ($item->tool_subtype ?? ''));
         $normalizedSubtype = $isTool ? (str_contains($rawSubtype, 'power') ? 'power' : 'hand') : ($item->tool_subtype ?? null);
+        $isPowerTool = $isTool && $normalizedSubtype === 'power';
 
         return [
             'item_id' => (int) $item->item_id,
@@ -1462,8 +1516,8 @@ abstract class SuperAdminBaseController extends Controller
             'compatible_brands' => $brands,
             'serial_number' => $item->serial_number ?? null,
             'quantity_on_hand' => (int) $item->quantity_on_hand,
-            'initial_stock' => $item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand,
-            'reorder_level' => (int) $item->reorder_level,
+            'initial_stock' => $isPowerTool ? 1 : ($item->initial_stock !== null ? (int) $item->initial_stock : (int) $item->quantity_on_hand),
+            'reorder_level' => $isPowerTool ? 0 : (int) $item->reorder_level,
             'unit' => $item->unit,
             'capital' => $capital,
             'profit' => $profit,
@@ -1475,8 +1529,59 @@ abstract class SuperAdminBaseController extends Controller
             'archived_at' => $item->archived_at ?? null,
             'added_at' => $item->created_at ?? $item->last_updated,
             'last_updated' => $item->last_updated,
-            'low_stock' => (int) $item->quantity_on_hand <= (int) $item->reorder_level,
+            'low_stock' => $isPowerTool ? false : ((int) $item->quantity_on_hand <= (int) $item->reorder_level),
         ];
+    }
+
+    protected function isPowerToolInventoryItem(?string $itemType, ?string $toolSubtype): bool
+    {
+        return strtolower((string) ($itemType ?? '')) === 'tool'
+            && str_contains(strtolower((string) ($toolSubtype ?? '')), 'power');
+    }
+
+    /**
+     * Enforce that Power Tools are individual serialized items (never stacked by quantity, no reorder threshold).
+     */
+    protected function normalizePowerToolInventoryMutation(array &$data, ?object $existingItem = null, bool $hasAddedStock = false): void
+    {
+        $effectiveType = $data['item_type'] ?? ($existingItem->item_type ?? 'Material');
+        $effectiveSubtype = array_key_exists('tool_subtype', $data)
+            ? $data['tool_subtype']
+            : ($existingItem->tool_subtype ?? null);
+
+        if (! $this->isPowerToolInventoryItem($effectiveType, $effectiveSubtype)) {
+            return;
+        }
+
+        if ($hasAddedStock) {
+            throw ValidationException::withMessages([
+                'added_stock' => ['Power tools are tracked individually by serial number and cannot be stacked by stock quantity.'],
+            ]);
+        }
+
+        if (
+            (array_key_exists('quantity_on_hand', $data) && (int) $data['quantity_on_hand'] > 1) ||
+            (array_key_exists('initial_stock', $data) && (int) $data['initial_stock'] > 1)
+        ) {
+            throw ValidationException::withMessages([
+                'quantity_on_hand' => ['Power tools cannot be stacked by quantity. Each power tool must have its own unique serial number (max quantity: 1).'],
+            ]);
+        }
+
+        $serial = array_key_exists('serial_number', $data)
+            ? $data['serial_number']
+            : ($existingItem->serial_number ?? null);
+
+        if (empty($serial)) {
+            throw ValidationException::withMessages([
+                'serial_number' => ['Serial number is required for power tools.'],
+            ]);
+        }
+
+        $targetStatus = $data['status'] ?? ($existingItem->status ?? 'Available');
+        $data['initial_stock'] = 1;
+        $data['reorder_level'] = 0;
+        $data['quantity_on_hand'] = strtolower((string) $targetStatus) === 'available' ? 1 : 0;
     }
 
     protected function formatSparePart($item): array
@@ -2063,6 +2168,20 @@ abstract class SuperAdminBaseController extends Controller
                 ->first();
         }
 
+        $linkedItemOrderForCalc = null;
+        if (\Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+            $linkedItemOrderForCalc = DB::table('item_orders')
+                ->where('linked_booking_id', $bookingId)
+                ->whereNotIn('order_status', ['Cancelled'])
+                ->first();
+            if (! $linkedItemOrderForCalc && ! empty($serviceDetails['item_order_id'])) {
+                $linkedItemOrderForCalc = DB::table('item_orders')
+                    ->where('order_id', (int) $serviceDetails['item_order_id'])
+                    ->whereNotIn('order_status', ['Cancelled'])
+                    ->first();
+            }
+        }
+
         $validated = $request->validate([
             'requested_by_name' => ['nullable', 'string', 'max:255'],
             'payment_verified' => ['nullable'],
@@ -2109,16 +2228,24 @@ abstract class SuperAdminBaseController extends Controller
             : (isset($turnover['net_collected']) ? (float) $turnover['net_collected'] : null);
 
         $totalServicePrice = (float) ($validated['installation_fee'] ?? ($turnover['total_service_price'] ?? ($booking->base_price ?? 0.0)));
-        $downPayment = (float) ($turnover['reservation_down_payment'] ?? ($booking->service?->booking_fee ?? 50.00));
+        $isFeeWaived = ! empty($serviceDetails['booking_fee_waived']) || ($linkedItemOrderForCalc !== null);
+        $downPayment = isset($turnover['reservation_down_payment'])
+            ? (float) $turnover['reservation_down_payment']
+            : ($isFeeWaived ? 0.00 : (float) ($booking->service?->booking_fee ?? 50.00));
         $deliveryFee = (float) ($validated['delivery_fee'] ?? ($turnover['delivery_fee'] ?? ($linkedOrder->delivery_fee ?? 0.0)));
+        $sparePartRem = $linkedItemOrderForCalc
+            ? (float) ($turnover['spare_part_remaining_balance'] ?? $linkedItemOrderForCalc->remaining_balance ?? 0.0)
+            : (float) ($turnover['spare_part_remaining_balance'] ?? 0.0);
 
         if ($turnedOverAmount === null) {
             $unitRem = $linkedOrder ? (float) ($turnover['unit_remaining_balance'] ?? $linkedOrder->remaining_unit_balance ?? 0.0) : 0.0;
-            $turnedOverAmount = max(0.0, ($totalServicePrice - $downPayment) + $unitRem + $deliveryFee);
+            $baseSvcFee = isset($turnover['installation_fee']) ? (float) $turnover['installation_fee'] : $totalServicePrice;
+            $turnedOverAmount = max(0.0, ($baseSvcFee - $downPayment) + $unitRem + $deliveryFee + $sparePartRem);
         }
 
         $turnover['amount_turned_over'] = $turnedOverAmount;
         $turnover['delivery_fee'] = $deliveryFee;
+        $turnover['spare_part_remaining_balance'] = $sparePartRem;
         $turnover['status'] = 'Turnover Verified & Booking Completed';
         $turnoverMethod = $turnover['payment_method'] ?? ($booking->service_payment_method ?? 'Cash');
         $turnoverRef = $turnover['reference_number'] ?? null;
@@ -2155,6 +2282,8 @@ abstract class SuperAdminBaseController extends Controller
             $turnoverMethod,
             $turnoverRef,
             $linkedOrder,
+            $linkedItemOrderForCalc,
+            $sparePartRem,
             $receiptPath,
             $finalBookingStatus,
             $clientUser,
@@ -2199,13 +2328,18 @@ abstract class SuperAdminBaseController extends Controller
                 return str_contains($type, 'turnover') || str_contains($type, 'balance');
             });
 
+            $paymentBookingPrice = $linkedItemOrderForCalc
+                ? max(0.0, (float) ($turnover['installation_fee'] ?? ($totalServicePrice - $sparePartRem)))
+                : $totalServicePrice;
+
             if ($turnoverPayment) {
                 DB::table('payment')
                     ->where('payment_id', $turnoverPayment->payment_id)
                     ->update([
                         'amount_paid' => $effectivePaymentAmount,
-                        'booking_price' => $totalServicePrice,
+                        'booking_price' => $paymentBookingPrice,
                         'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : (float) ($turnoverPayment->unit_price ?? 0),
+                        'spare_parts_price' => $sparePartRem > 0 ? $sparePartRem : (float) ($turnoverPayment->spare_parts_price ?? 0),
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
                         'reference_number' => $turnoverRef ?: $turnoverPayment->reference_number,
@@ -2228,8 +2362,9 @@ abstract class SuperAdminBaseController extends Controller
                         ->where('payment_id', $zeroOrPendingPayment->payment_id)
                         ->update([
                             'amount_paid' => $effectivePaymentAmount,
-                            'booking_price' => $totalServicePrice,
+                            'booking_price' => $paymentBookingPrice,
                             'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
+                            'spare_parts_price' => $sparePartRem,
                             'payment_status' => 'Paid',
                             'payment_method' => $turnoverMethod,
                             'reference_number' => $turnoverRef ?: $zeroOrPendingPayment->reference_number,
@@ -2242,9 +2377,9 @@ abstract class SuperAdminBaseController extends Controller
                 } elseif ($effectivePaymentAmount > 0) {
                     DB::table('payment')->insert([
                         'booking_id' => $bookingId,
-                        'booking_price' => $totalServicePrice,
+                        'booking_price' => $paymentBookingPrice,
                         'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
-                        'spare_parts_price' => 0.00,
+                        'spare_parts_price' => $sparePartRem,
                         'amount_paid' => $effectivePaymentAmount,
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
@@ -2259,9 +2394,9 @@ abstract class SuperAdminBaseController extends Controller
                 } elseif ($existingPayments->isEmpty()) {
                     DB::table('payment')->insert([
                         'booking_id' => $bookingId,
-                        'booking_price' => $totalServicePrice,
+                        'booking_price' => $paymentBookingPrice,
                         'unit_price' => $linkedOrder ? (float) $linkedOrder->unit_price : 0.00,
-                        'spare_parts_price' => 0.00,
+                        'spare_parts_price' => $sparePartRem,
                         'amount_paid' => $totalServicePrice,
                         'payment_status' => 'Paid',
                         'payment_method' => $turnoverMethod,
@@ -2298,6 +2433,43 @@ abstract class SuperAdminBaseController extends Controller
                     $clientUser->contact_number ?? $linkedOrder->contact_number,
                     $linkedOrder->delivery_address ?: ($clientUser->address ?? null)
                 );
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+                $linkedItemOrder = DB::table('item_orders')
+                    ->where('linked_booking_id', $bookingId)
+                    ->whereNotIn('order_status', ['Completed', 'Cancelled'])
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($linkedItemOrder) {
+                    $completerName = $this->formatName($request->user()->given_name ?? '', $request->user()->middle_name ?? '', $request->user()->last_name ?? '') ?: 'Staff';
+                    $receiptRef = $linkedItemOrder->receipt_reference_number ?: ('CT-RCP-' . now()->format('Ymd') . '-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 6)));
+
+                    if (! $linkedItemOrder->stock_deducted && ! $linkedItemOrder->is_order_base) {
+                        $spItem = DB::table('inventory_items')->where('item_id', $linkedItemOrder->item_id)->lockForUpdate()->first();
+                        if ($spItem && (int) $spItem->quantity_on_hand > 0) {
+                            DB::table('inventory_items')->where('item_id', $spItem->item_id)->update([
+                                'quantity_on_hand' => max(0, (int) $spItem->quantity_on_hand - (int) $linkedItemOrder->quantity),
+                                'last_updated' => now(),
+                            ]);
+                        }
+                    }
+
+                    DB::table('item_orders')
+                        ->where('order_id', $linkedItemOrder->order_id)
+                        ->update([
+                            'amount_paid' => $linkedItemOrder->total_amount,
+                            'remaining_balance' => 0.00,
+                            'stock_deducted' => true,
+                            'order_status' => 'Completed',
+                            'confirmed_by' => (int) $request->user()->user_id,
+                            'confirmed_by_name' => $completerName,
+                            'transaction_date' => now(),
+                            'receipt_reference_number' => $receiptRef,
+                            'updated_at' => now(),
+                        ]);
+                }
             }
 
             $this->logActivity(
@@ -2631,6 +2803,10 @@ abstract class SuperAdminBaseController extends Controller
             abort(404);
         }
 
+        if (! $request->filled('details') && $request->filled('elaboration')) {
+            $request->merge(['details' => $request->input('elaboration')]);
+        }
+
         $validated = $request->validate([
             'subject' => ['required', 'string', 'min:2', 'max:160'],
             'details' => ['required', 'string', 'min:3', 'max:2000'],
@@ -2725,6 +2901,71 @@ abstract class SuperAdminBaseController extends Controller
 
         return [
             'message' => 'Report submitted! The Super Admin has been notified and received your message.',
+            'data' => $this->mapBookings(collect([$updated]))->first(),
+        ];
+    }
+
+    /**
+     * Mark manager reports on a booking as reviewed/confirmed by the Super Admin.
+     */
+    protected function handleConfirmReportReviewAction(Request $request, int $bookingId): array
+    {
+        $rawBooking = DB::table('bookings')->where('booking_id', $bookingId)->first();
+        abort_if(! $rawBooking, 404, 'Booking not found.');
+
+        $reviewer = $request->user();
+        $reviewerId = (int) $reviewer->user_id;
+        $reviewerName = trim(($reviewer->first_name ?? '') . ' ' . ($reviewer->last_name ?? '')) ?: 'Super Admin';
+        $nowIso = now()->toISOString();
+
+        $serviceDetails = ! empty($rawBooking->service_details)
+            ? (is_string($rawBooking->service_details) ? (json_decode($rawBooking->service_details, true) ?: []) : (array) $rawBooking->service_details)
+            : [];
+
+        $reports = is_array($serviceDetails['manager_reports'] ?? null) ? $serviceDetails['manager_reports'] : [];
+        $updatedAny = false;
+
+        foreach ($reports as $idx => $report) {
+            if (! is_array($report)) {
+                continue;
+            }
+            if (empty($report['reviewed_at'])) {
+                $reports[$idx]['reviewed_at'] = $nowIso;
+                $reports[$idx]['reviewed_by_user_id'] = $reviewerId;
+                $reports[$idx]['reviewed_by_name'] = $reviewerName;
+                $updatedAny = true;
+            }
+        }
+
+        if ($updatedAny) {
+            $serviceDetails['manager_reports'] = $reports;
+            DB::table('bookings')
+                ->where('booking_id', $bookingId)
+                ->update([
+                    'service_details' => json_encode($serviceDetails),
+                    'updated_at' => now(),
+                ]);
+        }
+
+        DB::table('staff_messages')
+            ->where('recipient_id', $reviewerId)
+            ->where('is_read', false)
+            ->where('subject', 'like', "[Booking #{$bookingId} Report]%")
+            ->update([
+                'is_read' => true,
+                'updated_at' => now(),
+            ]);
+
+        $this->logActivity(
+            $reviewerId,
+            'SUPERADMIN_CONFIRM_BOOKING_REPORT',
+            sprintf('Confirmed review of manager report(s) for Booking #%d', $bookingId)
+        );
+
+        $updated = $this->bookingsBaseQuery()->where('bookings.booking_id', $bookingId)->first();
+
+        return [
+            'message' => 'Report review confirmed.',
             'data' => $this->mapBookings(collect([$updated]))->first(),
         ];
     }

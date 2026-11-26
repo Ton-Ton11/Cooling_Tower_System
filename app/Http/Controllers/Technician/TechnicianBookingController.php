@@ -231,7 +231,44 @@ class TechnicianBookingController extends TechnicianBaseController
                 ->keyBy('installation_booking_id');
         }
 
-        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking, $linkedOrdersByBooking) {
+        $linkedItemOrdersByBooking = collect();
+        $linkedItemOrdersById = collect();
+        if (! empty($bookingIds) && \Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+            $allItemOrders = DB::table('item_orders')
+                ->leftJoin('inventory_items', 'inventory_items.item_id', '=', 'item_orders.item_id')
+                ->whereNotIn('item_orders.order_status', ['Cancelled'])
+                ->select([
+                    'item_orders.*',
+                    'inventory_items.item_name',
+                    'inventory_items.serial_number',
+                    'inventory_items.unit',
+                    'inventory_items.sub_category',
+                ])
+                ->get()
+                ->map(fn ($o) => [
+                    'order_id' => (int) $o->order_id,
+                    'linked_booking_id' => $o->linked_booking_id ? (int) $o->linked_booking_id : null,
+                    'item_id' => (int) $o->item_id,
+                    'item_name' => $o->item_name ?? 'Spare Part',
+                    'serial_number' => $o->serial_number,
+                    'unit' => $o->unit ?? 'pc',
+                    'sub_category' => $o->sub_category,
+                    'quantity' => (int) $o->quantity,
+                    'unit_price' => (float) $o->unit_price,
+                    'total_amount' => (float) $o->total_amount,
+                    'down_payment_amount' => (float) $o->down_payment_amount,
+                    'amount_paid' => (float) $o->amount_paid,
+                    'remaining_balance' => (float) $o->remaining_balance,
+                    'payment_method' => $o->payment_method,
+                    'fulfillment_type' => $o->fulfillment_type,
+                    'order_status' => $o->order_status,
+                    'receipt_reference_number' => $o->receipt_reference_number,
+                ]);
+            $linkedItemOrdersByBooking = $allItemOrders->whereNotNull('linked_booking_id')->keyBy('linked_booking_id');
+            $linkedItemOrdersById = $allItemOrders->keyBy('order_id');
+        }
+
+        $mapped = $rows->map(function ($row) use ($materialsByBooking, $checklistsByBooking, $linkedOrdersByBooking, $linkedItemOrdersByBooking, $linkedItemOrdersById) {
             $leadId = $row->lead_technician_id ?? $row->assigned_tech_id;
             $leadName = ! empty($row->lead_tech_user_id)
                 ? $this->formatName($row->lead_tech_given_name, $row->lead_tech_middle_name, $row->lead_tech_last_name)
@@ -281,12 +318,16 @@ class TechnicianBookingController extends TechnicianBaseController
                 || str_contains(strtolower((string) ($row->service_name ?? '')), 'ocular')
                 || ! empty($serviceDetails['is_ocular_inspection']);
 
+            $linkedItemOrderData = $linkedItemOrdersByBooking->get((int) $row->booking_id)
+                ?? (! empty($serviceDetails['item_order_id']) ? $linkedItemOrdersById->get((int) $serviceDetails['item_order_id']) : null);
+
             return [
                 'booking_id' => (int) $row->booking_id,
                 'is_ocular_inspection' => $isOcularInspection,
                 'ocular_personnel' => \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::normalizeOcularPersonnel($serviceDetails['ocular_personnel'] ?? []),
                 'inspection_status' => $serviceDetails['inspection_status'] ?? null,
                 'ac_unit_order' => $linkedOrdersByBooking->get((int) $row->booking_id) ?? null,
+                'item_order' => $linkedItemOrderData,
                 'client_id' => (int) $row->client_id,
                 'client_name' => $this->formatName($row->client_given_name, $row->client_middle_name, $row->client_last_name),
                 'client_address' => $row->client_address,
@@ -535,7 +576,7 @@ class TechnicianBookingController extends TechnicianBaseController
             'ac_brand' => ['nullable', 'string', 'max:100'],
             'ac_type' => ['nullable', 'string', 'max:100'],
             'unit_serial_number' => ['nullable', 'string', 'max:100'],
-            'total_service_price' => ['required', 'numeric', 'min:50'],
+            'total_service_price' => ['required', 'numeric', 'min:0'],
             'delivery_fee' => ['nullable', 'numeric', 'min:0'],
             'payment_method' => ['required', 'string', 'in:Cash,GCash,Bank Transfer'],
             'reference_number' => ['nullable', 'string', 'max:40'],
@@ -587,18 +628,50 @@ class TechnicianBookingController extends TechnicianBaseController
             }
         }
 
+        $linkedItemOrder = null;
+        if (\Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+            $linkedItemOrder = DB::table('item_orders')
+                ->leftJoin('inventory_items', 'inventory_items.item_id', '=', 'item_orders.item_id')
+                ->where('item_orders.linked_booking_id', $bookingId)
+                ->whereNotIn('item_orders.order_status', ['Cancelled'])
+                ->select(['item_orders.*', 'inventory_items.item_name', 'inventory_items.unit'])
+                ->first();
+            if (! $linkedItemOrder && ! empty($serviceDetails['item_order_id'])) {
+                $linkedItemOrder = DB::table('item_orders')
+                    ->leftJoin('inventory_items', 'inventory_items.item_id', '=', 'item_orders.item_id')
+                    ->where('item_orders.order_id', (int) $serviceDetails['item_order_id'])
+                    ->whereNotIn('item_orders.order_status', ['Cancelled'])
+                    ->select(['item_orders.*', 'inventory_items.item_name', 'inventory_items.unit'])
+                    ->first();
+            }
+        }
+
+        $isBookingFeeWaived = ! empty($serviceDetails['booking_fee_waived']) || ($linkedItemOrder !== null);
         $installationFee = (float) $validated['total_service_price'];
-        $downPayment = (float) ($booking->booking_fee ?? 50.00);
+        $downPayment = $isBookingFeeWaived ? 0.00 : (float) ($booking->booking_fee ?? 50.00);
+
+        if (! $isBookingFeeWaived && $installationFee < $downPayment) {
+            throw ValidationException::withMessages([
+                'total_service_price' => [sprintf('Total service fee must be at least ₱%.2f.', $downPayment)],
+            ]);
+        }
+
         $remainingInstallationFee = max(0.0, $installationFee - $downPayment);
         $unitRemainingBalance = $linkedUnitOrder ? (float) $linkedUnitOrder->remaining_unit_balance : 0.0;
+        $sparePartRemainingBalance = $linkedItemOrder ? max(0.0, (float) $linkedItemOrder->remaining_balance) : 0.0;
         $deliveryFee = $linkedUnitOrder
             ? (isset($validated['delivery_fee']) && $validated['delivery_fee'] !== null && $validated['delivery_fee'] !== ''
                 ? (float) $validated['delivery_fee']
                 : (float) $linkedUnitOrder->delivery_fee)
             : 0.0;
 
-        $totalServicePrice = round($installationFee + $deliveryFee + $unitRemainingBalance, 2);
-        $netCollected = round($remainingInstallationFee + $deliveryFee + $unitRemainingBalance, 2);
+        $totalServicePrice = round($installationFee + $deliveryFee + $unitRemainingBalance + $sparePartRemainingBalance, 2);
+        $netCollected = round($remainingInstallationFee + $deliveryFee + $unitRemainingBalance + $sparePartRemainingBalance, 2);
+
+        $partsReplacedValue = $validated['parts_replaced'] ?? null;
+        if (empty(trim((string) $partsReplacedValue)) && $linkedItemOrder) {
+            $partsReplacedValue = sprintf('%dx %s', (int) $linkedItemOrder->quantity, $linkedItemOrder->item_name ?? 'Spare Part');
+        }
 
         $serviceDetails['payment_turnover'] = [
             'total_service_price' => $totalServicePrice,
@@ -607,6 +680,13 @@ class TechnicianBookingController extends TechnicianBaseController
             'unit_remaining_balance' => $unitRemainingBalance,
             'delivery_fee' => $deliveryFee,
             'ac_unit_order_id' => $linkedUnitOrder ? (int) $linkedUnitOrder->order_id : null,
+            'item_order_id' => $linkedItemOrder ? (int) $linkedItemOrder->order_id : null,
+            'spare_part_name' => $linkedItemOrder ? ($linkedItemOrder->item_name ?? ($serviceDetails['spare_part_name'] ?? 'Spare Part')) : null,
+            'spare_part_quantity' => $linkedItemOrder ? (int) $linkedItemOrder->quantity : null,
+            'spare_part_unit' => $linkedItemOrder ? ($linkedItemOrder->unit ?? 'pc') : null,
+            'spare_part_total_amount' => $linkedItemOrder ? (float) $linkedItemOrder->total_amount : 0.0,
+            'spare_part_paid_amount' => $linkedItemOrder ? (float) $linkedItemOrder->amount_paid : 0.0,
+            'spare_part_remaining_balance' => $sparePartRemainingBalance,
             'reservation_down_payment' => $downPayment,
             'net_collected' => $netCollected,
             'payment_method' => $validated['payment_method'],
@@ -615,7 +695,7 @@ class TechnicianBookingController extends TechnicianBaseController
             'work_done' => $validated['work_done'],
             'ac_brand' => $validated['ac_brand'] ?? null,
             'ac_type' => $validated['ac_type'] ?? null,
-            'parts_replaced' => $validated['parts_replaced'] ?? null,
+            'parts_replaced' => $partsReplacedValue,
             'proof_image_path' => $proofImagePath,
             'proof_image_url' => $proofImageUrl,
             'collected_by_tech_id' => $userId,
@@ -625,7 +705,7 @@ class TechnicianBookingController extends TechnicianBaseController
             'invalid_reason' => null,
         ];
 
-        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $installationFee, $deliveryFee, $downPayment) {
+        DB::transaction(function () use ($bookingId, $booking, $userId, $validated, $serviceDetails, $totalServicePrice, $netCollected, $linkedUnitOrder, $linkedItemOrder, $sparePartRemainingBalance, $installationFee, $deliveryFee, $downPayment, $partsReplacedValue) {
             if ($linkedUnitOrder) {
                 DB::table('ac_unit_orders')
                     ->where('order_id', (int) $linkedUnitOrder->order_id)
@@ -641,9 +721,10 @@ class TechnicianBookingController extends TechnicianBaseController
                 'service_payment_method' => $validated['payment_method'],
                 'service_details' => json_encode($serviceDetails),
                 'notes' => trim(($booking->notes ? $booking->notes . "\n" : '') . sprintf(
-                    '[Technician Payment Turnover]: Total Service ₱%.2f less ₱%.2f down payment = ₱%.2f collected via %s%s. Handed over to Manager for completion.',
+                    '[Technician Payment Turnover]: Total Service ₱%.2f less ₱%.2f down payment%s = ₱%.2f collected via %s%s. Handed over to Manager for completion.',
                     $totalServicePrice,
                     $downPayment,
+                    $sparePartRemainingBalance > 0 ? sprintf(' (incl. Spare Part Remaining Balance ₱%.2f)', $sparePartRemainingBalance) : '',
                     $netCollected,
                     $validated['payment_method'],
                     ! empty($validated['reference_number']) ? " (Ref: {$validated['reference_number']})" : ''
@@ -657,11 +738,14 @@ class TechnicianBookingController extends TechnicianBaseController
                 ->orderByDesc('payment_id')
                 ->first();
 
+            $bookingPriceForPayment = $linkedItemOrder ? round($installationFee + $deliveryFee, 2) : $totalServicePrice;
+
             if ($existingBalancePay) {
                 DB::table('payment')
                     ->where('payment_id', $existingBalancePay->payment_id)
                     ->update([
-                        'booking_price' => $totalServicePrice,
+                        'booking_price' => $bookingPriceForPayment,
+                        'spare_parts_price' => $sparePartRemainingBalance,
                         'amount_paid' => $netCollected,
                         'payment_status' => 'Pending',
                         'payment_method' => $validated['payment_method'],
@@ -673,9 +757,9 @@ class TechnicianBookingController extends TechnicianBaseController
             } elseif ($netCollected > 0) {
                 DB::table('payment')->insert([
                     'booking_id' => $bookingId,
-                    'booking_price' => $totalServicePrice,
+                    'booking_price' => $bookingPriceForPayment,
                     'unit_price' => 0.00,
-                    'spare_parts_price' => 0.00,
+                    'spare_parts_price' => $sparePartRemainingBalance,
                     'amount_paid' => $netCollected,
                     'payment_status' => 'Pending',
                     'payment_method' => $validated['payment_method'],
@@ -694,7 +778,7 @@ class TechnicianBookingController extends TechnicianBaseController
                 'service_name' => $booking->service_name,
                 'diagnosis' => $validated['diagnosis'],
                 'work_done' => $validated['work_done'],
-                'parts_replaced' => $validated['parts_replaced'] ?? null,
+                'parts_replaced' => $partsReplacedValue,
                 'recommendations' => null,
                 'ac_brand' => $validated['ac_brand'] ?? null,
                 'ac_type' => $validated['ac_type'] ?? null,

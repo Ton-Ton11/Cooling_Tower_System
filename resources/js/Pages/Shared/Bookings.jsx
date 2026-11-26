@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePage } from "@inertiajs/react";
 import Modal from "../../Components/Modal";
 import StatusBadge from "../../Components/StatusBadge";
+import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
 import {
     SUPER_ADMIN_ENDPOINTS,
     extractErrorMessage,
@@ -90,6 +91,7 @@ const ReportFlagIcon = ({ size = 14, color = "currentColor" }) => (
 function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMeta = null, defaultTab = "All" }) {
     const { auth } = usePage().props;
     const currentUser = auth?.user;
+    const isSuperAdmin = Number(currentUser?.role_id) === 1;
     const ep = endpoints ?? SUPER_ADMIN_ENDPOINTS;
     const initialTab = navMeta?.tab || defaultTab || "All";
     const [tab, setTab] = useState(initialTab);
@@ -138,6 +140,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
     const [reportForm, setReportForm] = useState({ subject: "", elaboration: "" });
     const [reportConfirmModal, setReportConfirmModal] = useState(false);
     const [reportingSubmitting, setReportingSubmitting] = useState(false);
+    const [reviewReportModal, setReviewReportModal] = useState(null);
+    const [confirmingReportReview, setConfirmingReportReview] = useState(false);
 
     const [clientPanel, setClientPanel] = useState(null);
     const [disabledDatesModal, setDisabledDatesModal] = useState(false);
@@ -353,7 +357,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                 : `/manager/bookings/${reportModal.booking_id}/report`;
             const { data } = await window.axios.post(endpoint, {
                 subject: reportForm.subject.trim(),
-                elaboration: reportForm.elaboration.trim(),
+                details: reportForm.elaboration.trim(),
             });
             addToast(data?.message || "Report submitted to Super Admin.");
             setReportConfirmModal(false);
@@ -365,6 +369,25 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
             addToast(extractErrorMessage(error, "Unable to submit report."), "error");
         } finally {
             setReportingSubmitting(false);
+        }
+    };
+
+    const handleConfirmReportReview = async () => {
+        if (confirmingReportReview || !reviewReportModal) return;
+        setConfirmingReportReview(true);
+        try {
+            const endpoint = ep.confirmReportReview
+                ? ep.confirmReportReview(reviewReportModal.booking_id)
+                : `/super-admin/bookings/${reviewReportModal.booking_id}/report/confirm`;
+            const { data } = await window.axios.post(endpoint);
+            addToast(data?.message || "Report review confirmed.");
+            setReviewReportModal(null);
+            await fetchBookings(false);
+            onDataChanged?.();
+        } catch (error) {
+            addToast(extractErrorMessage(error, "Unable to confirm report review."), "error");
+        } finally {
+            setConfirmingReportReview(false);
         }
     };
 
@@ -802,6 +825,8 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                     const turnover = booking.payment_turnover || booking.service_details?.payment_turnover || null;
                                     const isTurnoverInvalid = Boolean(turnover && (turnover.status === "Invalid" || turnover.is_invalid));
                                     const isTurnoverSubmitted = Boolean(turnover && !isTurnoverInvalid);
+                                    const managerReports = Array.isArray(booking.manager_reports) ? booking.manager_reports : [];
+                                    const unreviewedManagerReportsCount = managerReports.filter((r) => !r?.reviewed_at).length;
 
                                     return (
                                         <tr
@@ -863,8 +888,16 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {formatDateTime(
-                                                    booking.scheduled_date,
+                                                <div>
+                                                    {formatDateTime(
+                                                        booking.scheduled_date,
+                                                    )}
+                                                </div>
+                                                {booking.booking_status === "Completed" && booking.maintenance_reminder && (
+                                                    <MaintenanceReminderCountdown
+                                                        reminder={booking.maintenance_reminder}
+                                                        variant="table"
+                                                    />
                                                 )}
                                             </td>
                                             <td
@@ -1030,25 +1063,74 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                                         </button>
                                                     )}
                                                     {isCompletedBooking && !readOnly && (
-                                                        <button
-                                                            type="button"
-                                                            title="Report Booking to Super Admin"
-                                                            onClick={() => openReportModal(booking)}
-                                                            style={{
-                                                                display: "inline-flex",
-                                                                alignItems: "center",
-                                                                justifyContent: "center",
-                                                                padding: "5px 8px",
-                                                                borderRadius: 8,
-                                                                border: "1px solid #FECACA",
-                                                                background: "#FEF2F2",
-                                                                color: "#DC2626",
-                                                                cursor: "pointer",
-                                                                transition: "all 0.15s ease",
-                                                            }}
-                                                        >
-                                                            <ReportFlagIcon size={13} color="#DC2626" />
-                                                        </button>
+                                                        isSuperAdmin ? (
+                                                            <button
+                                                                type="button"
+                                                                title={
+                                                                    unreviewedManagerReportsCount > 0
+                                                                        ? `Review ${unreviewedManagerReportsCount} new manager report${unreviewedManagerReportsCount > 1 ? "s" : ""}`
+                                                                        : "Review manager report"
+                                                                }
+                                                                onClick={() => setReviewReportModal(booking)}
+                                                                style={{
+                                                                    display: "inline-flex",
+                                                                    alignItems: "center",
+                                                                    gap: 5,
+                                                                    padding: "5px 10px",
+                                                                    borderRadius: 8,
+                                                                    border: unreviewedManagerReportsCount > 0 ? "1px solid #FDE68A" : "1px solid #E2E8F0",
+                                                                    background: unreviewedManagerReportsCount > 0 ? "#FFFBEB" : "#F8FAFC",
+                                                                    color: unreviewedManagerReportsCount > 0 ? "#B45309" : "#64748B",
+                                                                    fontSize: 11,
+                                                                    fontWeight: 700,
+                                                                    cursor: "pointer",
+                                                                    whiteSpace: "nowrap",
+                                                                    transition: "all 0.15s ease",
+                                                                }}
+                                                            >
+                                                                <FileTextIcon size={12} color={unreviewedManagerReportsCount > 0 ? "#B45309" : "#64748B"} />
+                                                                <span>Review Report</span>
+                                                                {unreviewedManagerReportsCount > 0 && (
+                                                                    <span
+                                                                        style={{
+                                                                            minWidth: 16,
+                                                                            height: 16,
+                                                                            padding: "0 4px",
+                                                                            borderRadius: 999,
+                                                                            background: "#DC2626",
+                                                                            color: "#FFFFFF",
+                                                                            fontSize: 10,
+                                                                            fontWeight: 800,
+                                                                            display: "inline-flex",
+                                                                            alignItems: "center",
+                                                                            justifyContent: "center",
+                                                                        }}
+                                                                    >
+                                                                        {unreviewedManagerReportsCount}
+                                                                    </span>
+                                                                )}
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                title="Report Booking to Super Admin"
+                                                                onClick={() => openReportModal(booking)}
+                                                                style={{
+                                                                    display: "inline-flex",
+                                                                    alignItems: "center",
+                                                                    justifyContent: "center",
+                                                                    padding: "5px 8px",
+                                                                    borderRadius: 8,
+                                                                    border: "1px solid #FECACA",
+                                                                    background: "#FEF2F2",
+                                                                    color: "#DC2626",
+                                                                    cursor: "pointer",
+                                                                    transition: "all 0.15s ease",
+                                                                }}
+                                                            >
+                                                                <ReportFlagIcon size={13} color="#DC2626" />
+                                                            </button>
+                                                        )
                                                     )}
                                                     <button
                                                         className="btn-secondary"
@@ -1735,16 +1817,58 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                             </div>
                                         </div>
                                     )}
+                                    {(completeModal.item_order || Number(turnover.spare_part_remaining_balance ?? completeModal.service_details?.spare_part_remaining_balance ?? 0) > 0) && (() => {
+                                        const spRem = Number(
+                                            turnover.spare_part_remaining_balance ??
+                                            completeModal.item_order?.remaining_balance ??
+                                            completeModal.service_details?.spare_part_remaining_balance ??
+                                            0
+                                        );
+                                        const spPaid = Number(
+                                            turnover.spare_part_paid_amount ??
+                                            completeModal.item_order?.amount_paid ??
+                                            completeModal.service_details?.spare_part_paid_amount ??
+                                            0
+                                        );
+                                        const spName = turnover.spare_part_name || completeModal.item_order?.item_name || completeModal.service_details?.spare_part_name || "Spare Part";
+                                        const spQty = turnover.spare_part_quantity || completeModal.item_order?.quantity || completeModal.service_details?.spare_part_quantity || 1;
+                                        const spOrderId = turnover.item_order_id || completeModal.item_order?.order_id || completeModal.service_details?.item_order_id;
+                                        return (
+                                            <div style={{ marginBottom: 8, paddingBottom: 8, borderBottom: "1px dashed #86EFAC" }}>
+                                                <div style={{ fontSize: 11, fontWeight: 800, color: "#1E40AF", marginBottom: 4 }}>
+                                                    Delivered &amp; Replaced Part {spOrderId ? `#${spOrderId} · ` : ""}{spQty}x {spName}
+                                                </div>
+                                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569" }}>
+                                                    <span>Spare Part Balance (Less Paid: {formatCurrency(spPaid)})</span>
+                                                    <span style={{ fontWeight: 700, color: "#0F172A" }}>
+                                                        {formatCurrency(spRem)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569", marginBottom: 4 }}>
-                                        <span>{completeModal.ac_unit_order ? "Installation Service Fee" : "Total Service Fee"}</span>
+                                        <span>
+                                            {completeModal.ac_unit_order
+                                                ? "Installation Service Fee"
+                                                : (completeModal.item_order || Number(turnover.spare_part_remaining_balance || 0) > 0)
+                                                ? "Repair / Service Fee"
+                                                : "Total Service Fee"}
+                                        </span>
                                         <span style={{ fontWeight: 700, color: "#0F172A" }}>
-                                            {formatCurrency(turnover.total_service_price || 0)}
+                                            {formatCurrency(
+                                                (completeModal.item_order || Number(turnover.spare_part_remaining_balance || 0) > 0) && turnover.installation_fee !== undefined
+                                                    ? turnover.installation_fee
+                                                    : (turnover.total_service_price || 0)
+                                            )}
                                         </span>
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#2563EB", marginBottom: 6 }}>
                                         <span>Less Reservation Fee</span>
                                         <span style={{ fontWeight: 700 }}>
-                                            - {formatCurrency(turnover.reservation_down_payment || 50)}
+                                            {(completeModal.service_details?.booking_fee_waived || completeModal.item_order || Number(turnover.reservation_down_payment) === 0)
+                                                ? `${formatCurrency(0)} (Waived)`
+                                                : `- ${formatCurrency(turnover.reservation_down_payment || 50)}`}
                                         </span>
                                     </div>
                                     <div style={{ borderTop: "1px dashed #86EFAC", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 800, color: "#15803D" }}>
@@ -1971,7 +2095,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
 
             {/* Report Booking to Super Admin Modal */}
             <Modal
-                show={!!reportModal && !reportConfirmModal}
+                show={!isSuperAdmin && !!reportModal && !reportConfirmModal}
                 onClose={() => !reportingSubmitting && setReportModal(null)}
                 maxWidth="md"
                 padding={0}
@@ -2058,7 +2182,7 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
 
             {/* Report Confirmation Modal */}
             <Modal
-                show={!!reportModal && reportConfirmModal}
+                show={!isSuperAdmin && !!reportModal && reportConfirmModal}
                 onClose={() => !reportingSubmitting && setReportConfirmModal(false)}
                 maxWidth="sm"
                 padding={0}
@@ -2272,6 +2396,13 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                             </div>
                         </div>
 
+                        {clientPanel.booking_status === "Completed" && clientPanel.maintenance_reminder && (
+                            <MaintenanceReminderCountdown
+                                reminder={clientPanel.maintenance_reminder}
+                                variant="drawer"
+                            />
+                        )}
+
                         {clientPanel.rating != null ? (
                             <div
                                 style={{
@@ -2381,6 +2512,12 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                                                         booking.scheduled_date,
                                                     )}
                                                 </p>
+                                                {booking.booking_status === "Completed" && booking.maintenance_reminder && (
+                                                    <MaintenanceReminderCountdown
+                                                        reminder={booking.maintenance_reminder}
+                                                        variant="table"
+                                                    />
+                                                )}
                                             </div>
                                             <StatusBadge
                                                 status={booking.booking_status}
@@ -2647,6 +2784,127 @@ function Bookings({ addToast, onDataChanged, endpoints, readOnly = false, navMet
                         </div>
                     </form>
                 )}
+            </Modal>
+
+            {/* Super Admin: Review Report Submitted by Manager Modal */}
+            <Modal
+                show={isSuperAdmin && !!reviewReportModal}
+                onClose={() => setReviewReportModal(null)}
+                maxWidth="md"
+                padding={0}
+            >
+                {reviewReportModal && (() => {
+                    const reports = Array.isArray(reviewReportModal.manager_reports)
+                        ? [...reviewReportModal.manager_reports].reverse()
+                        : [];
+                    const hasUnreviewedReports = reports.some((r) => !r?.reviewed_at);
+                    return (
+                        <div style={{ padding: 24 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                                <div>
+                                    <h3 style={{ fontSize: 16, fontWeight: 800, color: "#0F172A", margin: 0 }}>
+                                        Manager Report — Booking #{reviewReportModal.booking_id}
+                                    </h3>
+                                    <p style={{ fontSize: 12, color: "#64748B", margin: "4px 0 0" }}>
+                                        {reviewReportModal.client_name} · {reviewReportModal.service}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setReviewReportModal(null)}
+                                    style={{ background: "none", border: "none", fontSize: 18, color: "#94A3B8", cursor: "pointer" }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {reports.length === 0 ? (
+                                <div
+                                    style={{
+                                        padding: 24,
+                                        borderRadius: 12,
+                                        background: "#F8FAFC",
+                                        border: "1px dashed #CBD5E1",
+                                        textAlign: "center",
+                                        fontSize: 12.5,
+                                        color: "#64748B",
+                                    }}
+                                >
+                                    No report has been submitted by the manager for this booking yet.
+                                </div>
+                            ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 360, overflowY: "auto" }}>
+                                    {reports.map((rep, idx) => (
+                                        <div
+                                            key={`${rep.reported_at || idx}-${idx}`}
+                                            style={{
+                                                padding: 14,
+                                                borderRadius: 12,
+                                                background: rep.reviewed_at ? "#F8FAFC" : "#FFFBEB",
+                                                border: rep.reviewed_at ? "1px solid #E2E8F0" : "1px solid #FDE68A",
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                                    <span style={{ fontSize: 13.5, fontWeight: 800, color: rep.reviewed_at ? "#0F172A" : "#92400E" }}>
+                                                        {rep.subject || "Report"}
+                                                    </span>
+                                                    {rep.reviewed_at && (
+                                                        <span
+                                                            style={{
+                                                                fontSize: 10,
+                                                                fontWeight: 700,
+                                                                padding: "2px 6px",
+                                                                borderRadius: 999,
+                                                                background: "#ECFDF5",
+                                                                color: "#059669",
+                                                                border: "1px solid #A7F3D0",
+                                                            }}
+                                                        >
+                                                            Confirmed
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {rep.reported_at && (
+                                                    <span style={{ fontSize: 10.5, color: rep.reviewed_at ? "#64748B" : "#B45309", whiteSpace: "nowrap" }}>
+                                                        {formatDateTime(rep.reported_at)}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p style={{ margin: "0 0 8px", fontSize: 12.5, color: "#1E293B", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                                                {rep.details}
+                                            </p>
+                                            <div style={{ fontSize: 11, color: rep.reviewed_at ? "#64748B" : "#78350F", fontWeight: 600 }}>
+                                                Submitted by: {rep.reported_by_name || "Manager"}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+                                <button
+                                    type="button"
+                                    className="btn-secondary"
+                                    onClick={() => setReviewReportModal(null)}
+                                    disabled={confirmingReportReview}
+                                >
+                                    Close
+                                </button>
+                                {hasUnreviewedReports && (
+                                    <button
+                                        type="button"
+                                        className="btn-primary"
+                                        onClick={handleConfirmReportReview}
+                                        disabled={confirmingReportReview}
+                                    >
+                                        {confirmingReportReview ? "Confirming..." : "Confirm"}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })()}
             </Modal>
         </div>
     );

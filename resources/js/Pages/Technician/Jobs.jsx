@@ -237,6 +237,7 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                     category_group: group,
                     serial_number: catItem?.serial_number || "",
                     unit: catItem?.unit || "pcs",
+                    quantity_on_hand: catItem?.quantity_on_hand ?? null,
                     quantity: selectedItemsMap[id]?.quantity || 1,
                 };
             });
@@ -528,7 +529,14 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
             return;
         }
         const totalSvcPrice = Number(reportForm.total_service_price);
-        const reservationDownPayment = Number(completeModal?.payment_turnover?.reservation_down_payment ?? (completeModal?.service?.booking_fee ?? 50));
+        const isFeeWaived = Boolean(
+            completeModal?.service_details?.booking_fee_waived ||
+            completeModal?.item_order ||
+            Number(completeModal?.payment_turnover?.reservation_down_payment) === 0
+        );
+        const reservationDownPayment = isFeeWaived
+            ? 0
+            : Number(completeModal?.payment_turnover?.reservation_down_payment ?? (completeModal?.service?.booking_fee ?? 50));
         if (!Number.isFinite(totalSvcPrice) || totalSvcPrice < reservationDownPayment) {
             addToast(`Please enter a valid total service fee (minimum ₱${reservationDownPayment.toFixed(2)}).`, "error");
             return;
@@ -780,20 +788,28 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                                     ? "Damaged"
                                                                     : isLostDamaged
                                                                     ? "Lost / Damaged"
-                                                                    : isBorrowed
+                                                                    : isBorrowed || isPowerTool
                                                                     ? "In Use"
                                                                     : "Out of Stock"}
                                                             </span>
                                                         ) : (
                                                             <span style={{ color: "#059669", fontWeight: 600 }}>
-                                                                Avail: {item.quantity_on_hand} {item.unit || "pcs"}
+                                                                {isPowerTool
+                                                                    ? "Available"
+                                                                    : `Avail: ${item.quantity_on_hand} ${item.unit || "pcs"}`}
                                                             </span>
                                                         )}
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            {isSelected && !isUnavailable && (
+                                            {isSelected && !isUnavailable && isPowerTool && (
+                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#1D4ED8", background: "#DBEAFE", padding: "3px 8px", borderRadius: 6, flexShrink: 0 }}>
+                                                    1 {item.unit || "unit"}
+                                                </span>
+                                            )}
+
+                                            {isSelected && !isUnavailable && !isPowerTool && (
                                                 <div
                                                     style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}
                                                     onClick={(e) => e.stopPropagation()}
@@ -924,10 +940,18 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                                 {it.item_name}
                                                             </div>
                                                             <div style={{ fontSize: 10, color: "#64748B" }}>
-                                                                Avail: {it.quantity_on_hand} {it.unit || "pcs"}
+                                                                {it.category_group === "power_tool"
+                                                                    ? (it.serial_number ? `S/N: ${it.serial_number}` : "Individual Unit")
+                                                                    : `Avail: ${it.quantity_on_hand} ${it.unit || "pcs"}`}
                                                             </div>
                                                         </div>
                                                         <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                                                            {it.category_group === "power_tool" ? (
+                                                                <span style={{ fontSize: 11, fontWeight: 700, color: "#1D4ED8", background: "#DBEAFE", padding: "2px 7px", borderRadius: 5 }}>
+                                                                    1 {it.unit || "unit"}
+                                                                </span>
+                                                            ) : (
+                                                                <>
                                                             <button
                                                                 type="button"
                                                                 onClick={() => decrementItemQuantity(it.item_id)}
@@ -985,6 +1009,8 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                             >
                                                                 +
                                                             </button>
+                                                                </>
+                                                            )}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => toggleItemSelection(it.item_id)}
@@ -1378,15 +1404,16 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                                         setReportForm({
                                                             diagnosis: prevTurnover.diagnosis || prevReport.diagnosis || "None",
                                                             work_done: matchedWorkDone,
-                                                            parts_replaced: prevTurnover.parts_replaced || prevReport.parts_replaced || "",
+                                                            parts_replaced: prevTurnover.parts_replaced || prevReport.parts_replaced || (job.item_order ? `${job.item_order.quantity}x ${job.item_order.item_name}` : ""),
                                                             ac_brand: prevTurnover.ac_brand || prevReport.ac_brand || job.ac_unit_order?.brand || job.units_data?.[0]?.brand || "",
                                                             ac_type: matchedAcType,
                                                             unit_serial_number: prevReport.unit_serial_number || "",
                                                             total_service_price: String(
-                                                                prevTurnover.total_service_price ||
-                                                                    job.service_base_price ||
-                                                                    job.total_price ||
-                                                                    job.base_price ||
+                                                                prevTurnover.installation_fee ??
+                                                                    prevTurnover.total_service_price ??
+                                                                    job.service_base_price ??
+                                                                    job.total_price ??
+                                                                    job.base_price ??
                                                                     1500
                                                             ),
                                                             delivery_fee: String(
@@ -1763,11 +1790,15 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                 <div style={{ display: "grid", gridTemplateColumns: completeModal.ac_unit_order ? "1fr 1fr 1fr" : "1fr 1fr", gap: 12 }}>
                                     <div>
                                         <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4 }}>
-                                            Total Service Fee (₱) *
+                                            {completeModal.item_order ? "Repair / Service Fee (₱) *" : "Total Service Fee (₱) *"}
                                         </label>
                                         <input
                                             type="number"
-                                            min={Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50))}
+                                            min={
+                                                completeModal.service_details?.booking_fee_waived || completeModal.item_order
+                                                    ? 0
+                                                    : Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50))
+                                            }
                                             step="0.01"
                                             className="input-field"
                                             value={reportForm.total_service_price}
@@ -1835,24 +1866,65 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                             </div>
                                         </>
                                     )}
+                                    {(completeModal.item_order || Number(completeModal.service_details?.spare_part_remaining_balance || 0) > 0) && (() => {
+                                        const spRem = Number(
+                                            completeModal.item_order?.remaining_balance ??
+                                            completeModal.service_details?.spare_part_remaining_balance ??
+                                            0
+                                        );
+                                        const spPaid = Number(
+                                            completeModal.item_order?.amount_paid ??
+                                            completeModal.service_details?.spare_part_paid_amount ??
+                                            0
+                                        );
+                                        const spLabel = completeModal.item_order
+                                            ? `${completeModal.item_order.quantity}x ${completeModal.item_order.item_name}`
+                                            : (completeModal.service_details?.spare_part_name || "Spare Part");
+                                        return (
+                                            <div style={{ borderBottom: "1px dashed #DCFCE7", paddingBottom: 6, marginBottom: 2 }}>
+                                                <div style={{ display: "flex", justifyContent: "space-between", color: "#1E3A8A" }}>
+                                                    <span>Delivered &amp; Replaced Part ({spLabel}) Remaining Balance:</span>
+                                                    <strong>₱{spRem.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                                </div>
+                                                {spPaid > 0 && (
+                                                    <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                                                        Customer already paid ₱{spPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} down payment via GCash
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                     <div style={{ display: "flex", justifyContent: "space-between", color: "#4B5563" }}>
-                                        <span>Total Service Price:</span>
+                                        <span>{completeModal.item_order ? "Repair / Service Fee:" : "Total Service Price:"}</span>
                                         <strong>₱{Number(reportForm.total_service_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                                     </div>
                                     {(() => {
-                                        const downPaymentAmt = Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50));
+                                        const isFeeWaived = Boolean(
+                                            completeModal.service_details?.booking_fee_waived ||
+                                            completeModal.item_order ||
+                                            Number(completeModal.payment_turnover?.reservation_down_payment) === 0
+                                        );
+                                        const downPaymentAmt = isFeeWaived
+                                            ? 0
+                                            : Number(completeModal.payment_turnover?.reservation_down_payment ?? (completeModal.service?.booking_fee ?? 50));
+                                        const sparePartRemAmt = Number(
+                                            completeModal.item_order?.remaining_balance ??
+                                            completeModal.service_details?.spare_part_remaining_balance ??
+                                            0
+                                        );
                                         return (
                                             <>
                                                 <div style={{ display: "flex", justifyContent: "space-between", color: "#2563EB" }}>
                                                     <span>Less Reservation Fee:</span>
-                                                    <strong>- ₱{downPaymentAmt.toFixed(2)}</strong>
+                                                    <strong>{isFeeWaived ? "₱0.00 (Waived)" : `- ₱${downPaymentAmt.toFixed(2)}`}</strong>
                                                 </div>
                                                 <div style={{ display: "flex", justifyContent: "space-between", color: "#15803D", fontSize: 13, fontWeight: 700, borderTop: "1px dashed #BBF7D0", paddingTop: 6, marginTop: 2 }}>
                                                     <span>Net Balance to Turn Over:</span>
                                                     <span>
                                                         ₱{(
                                                             Math.max(0, Number(reportForm.total_service_price || 0) - downPaymentAmt) +
-                                                            (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0)
+                                                            (completeModal.ac_unit_order ? Number(completeModal.ac_unit_order.remaining_unit_balance || 0) + Math.max(0, Number(reportForm.delivery_fee || 0)) : 0) +
+                                                            sparePartRemAmt
                                                         ).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({reportForm.payment_method})
                                                     </span>
                                                 </div>
@@ -2011,6 +2083,9 @@ export default function TechnicianJobs({ addToast, onDataChanged }) {
                                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, color: "#166534" }}>
                                         <div>Total Fee: <strong>₱{Number(viewReportModal.payment_turnover.total_service_price || 0).toFixed(2)}</strong></div>
                                         <div>Method: <strong>{viewReportModal.payment_turnover.payment_method || "Cash"}</strong></div>
+                                        {Number(viewReportModal.payment_turnover.spare_part_remaining_balance || 0) > 0 && (
+                                            <div>Spare Part Balance: <strong>₱{Number(viewReportModal.payment_turnover.spare_part_remaining_balance).toFixed(2)}</strong></div>
+                                        )}
                                         <div>Net Turned Over: <strong>₱{Number(viewReportModal.payment_turnover.net_collected || 0).toFixed(2)}</strong></div>
                                         {viewReportModal.payment_turnover.reference_number && (
                                             <div>Ref No.: <strong>{viewReportModal.payment_turnover.reference_number}</strong></div>

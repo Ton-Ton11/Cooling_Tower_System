@@ -288,7 +288,11 @@ export default function OcularInspections({
                 (item) =>
                     String(item.item_type || "").toLowerCase() === "tool" &&
                     String(item.category || "").toLowerCase() !== "materials"
-            );
+            ).map((item) => ({
+                ...item,
+                category: item.category_group || item.category || (String(item.tool_subtype || "").toLowerCase() === "power" ? "power_tool" : "hand_tool"),
+                stock_quantity: Number(item.quantity_on_hand ?? item.stock_quantity ?? 0),
+            }));
             setCatalogTools(toolsOnly);
         } catch (err) {
             addToast?.(
@@ -306,15 +310,16 @@ export default function OcularInspections({
             if (exists) {
                 return prev.filter((i) => i.item_id !== tool.item_id);
             }
+            const isPowerTool = (tool.category || tool.category_group || "") === "power_tool" || String(tool.tool_subtype || "").toLowerCase() === "power";
             return [
                 ...prev,
                 {
                     item_id: tool.item_id,
                     tool_name: tool.item_name,
-                    category: tool.category || "hand_tool",
+                    category: isPowerTool ? "power_tool" : (tool.category || "hand_tool"),
                     item_type: "Tool",
                     quantity: 1,
-                    max_stock: Number(tool.stock_quantity) || 1,
+                    max_stock: isPowerTool ? 1 : (Number(tool.stock_quantity ?? tool.quantity_on_hand) || 1),
                 },
             ];
         });
@@ -2519,18 +2524,23 @@ export default function OcularInspections({
                                     const selected = checklistItems.find(
                                         (i) => i.item_id === tool.item_id
                                     );
+                                    const isPowerTool = (tool.category || tool.category_group || "") === "power_tool" || String(tool.tool_subtype || "").toLowerCase() === "power";
+                                    const isUnavailable = tool.is_available === false || Number(tool.stock_quantity ?? tool.quantity_on_hand ?? 0) <= 0;
                                     return (
                                         <div
                                             key={tool.item_id}
                                             className={`p-2.5 flex items-center justify-between text-xs ${
                                                 selected
                                                     ? "bg-blue-50/60"
+                                                    : isUnavailable
+                                                    ? "bg-gray-50/70 opacity-60"
                                                     : "hover:bg-gray-50"
                                             }`}
                                         >
-                                            <label className="flex items-center gap-2.5 cursor-pointer flex-1">
+                                            <label className={`flex items-center gap-2.5 flex-1 ${isUnavailable && !selected ? "cursor-not-allowed" : "cursor-pointer"}`}>
                                                 <input
                                                     type="checkbox"
+                                                    disabled={isUnavailable && !selected}
                                                     checked={Boolean(selected)}
                                                     onChange={() =>
                                                         toggleCatalogTool(tool)
@@ -2540,12 +2550,23 @@ export default function OcularInspections({
                                                 <span className="font-medium text-gray-900">
                                                     {tool.item_name}
                                                 </span>
-                                                <span className="text-[11px] text-gray-400">
-                                                    (Avail:{" "}
-                                                    {tool.stock_quantity})
+                                                {tool.serial_number && (
+                                                    <span className="text-[11px] font-mono text-gray-500">
+                                                        (S/N: {tool.serial_number})
+                                                    </span>
+                                                )}
+                                                <span className={`text-[11px] ${isUnavailable ? "text-red-500 font-semibold" : "text-gray-400"}`}>
+                                                    {isPowerTool
+                                                        ? `(${isUnavailable ? (tool.unavailable_reason || "In Use") : "Available"})`
+                                                        : `(Avail: ${tool.stock_quantity})`}
                                                 </span>
                                             </label>
                                             {selected && (
+                                                isPowerTool ? (
+                                                    <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                                                        1 unit
+                                                    </span>
+                                                ) : (
                                                 <div className="flex items-center gap-1.5">
                                                     <span className="text-[11px] text-gray-500">
                                                         Qty:
@@ -2570,6 +2591,7 @@ export default function OcularInspections({
                                                         className="input-field py-1 px-2 w-16 text-xs text-center"
                                                     />
                                                 </div>
+                                                )
                                             )}
                                         </div>
                                     );

@@ -170,6 +170,8 @@ class CustomerDashboardController extends Controller
 
         $services = Service::active()
             ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->where('service_name', 'not like', 'Retail Sale:%')
+            ->where('service_name', 'not like', 'Spare Part Sale:%')
             ->orderBy('display_order')
             ->get()
             ->map(function ($s) {

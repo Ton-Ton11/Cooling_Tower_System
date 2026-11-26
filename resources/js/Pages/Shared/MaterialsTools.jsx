@@ -690,21 +690,16 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
 
     const isLowStockItem = useCallback((item) => {
         if (!item || item.is_archived || isDamagedOrLostItem(item)) return false;
+        // Power tools are individual serialized equipment; low stock thresholds do not apply
+        if (item.item_type === 'Tool' && item.tool_subtype === 'power') return false;
         const qty = Number(item.quantity_on_hand ?? 0);
         const reorder = Number(item.reorder_level ?? 0);
-        if (item.item_type === 'Tool' && item.tool_subtype === 'power') {
-            const initial = Number(item.initial_stock ?? 1);
-            if (initial <= 1 && reorder === 1) {
-                return qty <= 0;
-            }
-        }
         return qty <= reorder;
     }, []);
 
     const lowStockWorkerMaterials = useMemo(() => workerMaterials.filter(isLowStockItem), [workerMaterials, isLowStockItem]);
     const lowStockHandTools = useMemo(() => handTools.filter(isLowStockItem), [handTools, isLowStockItem]);
-    const lowStockPowerTools = useMemo(() => powerTools.filter(isLowStockItem), [powerTools, isLowStockItem]);
-    const lowStockWorker = useMemo(() => [...lowStockWorkerMaterials, ...lowStockHandTools, ...lowStockPowerTools], [lowStockWorkerMaterials, lowStockHandTools, lowStockPowerTools]);
+    const lowStockWorker = useMemo(() => [...lowStockWorkerMaterials, ...lowStockHandTools], [lowStockWorkerMaterials, lowStockHandTools]);
     const lowStockSale = useMemo(() => saleItems.filter(isLowStockItem), [saleItems, isLowStockItem]);
     const totalLowStockCount = useMemo(() => (isToolsMan ? lowStockWorker.length : (lowStockWorker.length + lowStockSale.length)), [isToolsMan, lowStockWorker.length, lowStockSale.length]);
 
@@ -1236,7 +1231,7 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 serial_number: ptForm.serial_number,
                 quantity_on_hand: 1,
                 initial_stock: 1,
-                reorder_level: 1,
+                reorder_level: 0,
                 unit: ptForm.unit,
                 status: 'Available',
                 managed_by: ptForm.managed_by || currentUserName,
@@ -1352,8 +1347,6 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                 status: editPTForm.status,
                 sub_category: editPTForm.sub_category,
                 folder_id: catObj?.id || editPTTarget.folder_id,
-                initial_stock: parseInt(editPTForm.initial_stock) ?? editPTTarget.initial_stock,
-                quantity_on_hand: parseInt(editPTForm.quantity_on_hand) ?? editPTTarget.quantity_on_hand,
                 managed_by: currentUserName,
             });
             addToast(`Power tool "${editPTForm.item_name}" (${editPTForm.serial_number}) updated.`);
@@ -1682,7 +1675,6 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                     { key: 'all', label: `All (${lowStockWorker.length})` },
                                     { key: 'materials', label: `Materials (${lowStockWorkerMaterials.length})` },
                                     { key: 'hand', label: `Hand Tools (${lowStockHandTools.length})` },
-                                    { key: 'power', label: `Power Tools (${lowStockPowerTools.length})` },
                                 ].map(pill => {
                                     const active = lowStockWorkerTypeFilter === pill.key;
                                     return (
@@ -2519,8 +2511,6 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                                 </div>
                                                             ) : (
                                                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-                                                                    <button className="btn-secondary" style={{ padding: '4px 9px', fontSize: 11 }}
-                                                                        onClick={() => { trackRecentItem(item.item_id); setQtyAction({ item, mode: 'add' }); setQtyValue(''); }}>+ Stock</button>
                                                                     <button className="btn-primary" style={{ padding: '4px 12px', fontSize: 11 }}
                                                                         onClick={() => {
                                                                             trackRecentItem(item.item_id);
@@ -2532,8 +2522,6 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                                                                 status: item.status || 'Available',
                                                                                 sub_category: item.sub_category || 'General Power Tools',
                                                                                 folder_id: item.folder_id,
-                                                                                initial_stock: String(item.initial_stock ?? item.quantity_on_hand ?? 1),
-                                                                                quantity_on_hand: String(item.quantity_on_hand ?? 1),
                                                                                 managed_by: currentUserName,
                                                                             });
                                                                         }}>Manage</button>
@@ -4675,15 +4663,8 @@ function MaterialsTools({ addToast: propAddToast, onDataChanged, endpoints, curr
                                 </select>
                             </div>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                            <div>
-                                <p className="section-label" style={{ marginBottom: 5 }}>Initial Stock</p>
-                                <input type="number" className="input-field" value={editPTForm.initial_stock} onChange={e => setEditPTForm(p => ({ ...p, initial_stock: e.target.value }))} />
-                            </div>
-                            <div>
-                                <p className="section-label" style={{ marginBottom: 5 }}>Quantity on Hand</p>
-                                <input type="number" className="input-field" value={editPTForm.quantity_on_hand} onChange={e => setEditPTForm(p => ({ ...p, quantity_on_hand: e.target.value }))} />
-                            </div>
+                        <div style={{ fontSize: 11, color: '#64748B', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 12px' }}>
+                            Individual serialized unit (Qty: 1 when Available). Add units with unique serial numbers separately.
                         </div>
                         <div>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>

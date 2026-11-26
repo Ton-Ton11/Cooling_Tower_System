@@ -103,11 +103,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             $validated['compatible_brands'] = implode(', ', array_filter(array_map('trim', $validated['compatible_brands'])));
         }
 
-        if (($validated['tool_subtype'] ?? null) === 'power' && empty($validated['serial_number'])) {
-            throw ValidationException::withMessages([
-                'serial_number' => ['Serial number is required for power tools.'],
-            ]);
-        }
+        $this->normalizePowerToolInventoryMutation($validated);
 
         $itemId = DB::table('inventory_items')->insertGetId(array_merge($validated, [
             'created_at' => now(),
@@ -158,8 +154,19 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             'status' => ['sometimes', Rule::in(['Available', 'Borrowed', 'Damaged', 'Lost', 'Lost/Damaged', 'Order Base', 'Defect', 'Warranty Reserved', 'Sold', 'Out of Stock', 'Low Stock'])],
         ]);
 
-        // When stock is added via added_stock, automatically increment both quantity_on_hand and initial_stock
-        if ($request->has('added_stock')) {
+        $hasAddedStock = $request->has('added_stock');
+        $isPowerTool = $this->isPowerToolInventoryItem(
+            $validated['item_type'] ?? $item->item_type,
+            array_key_exists('tool_subtype', $validated) ? $validated['tool_subtype'] : $item->tool_subtype
+        );
+
+        // Reject stacking stock via added_stock on individual Power Tools; otherwise add stock for materials/hand tools
+        if ($hasAddedStock) {
+            if ($isPowerTool) {
+                throw ValidationException::withMessages([
+                    'added_stock' => ['Power tools are tracked individually by serial number and cannot be stacked by stock quantity.'],
+                ]);
+            }
             $added = (int) $request->input('added_stock');
             if ($added > 0) {
                 $currentOnHand = (int) $item->quantity_on_hand;
@@ -200,14 +207,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             }
         }
 
-        if (isset($validated['tool_subtype']) && $validated['tool_subtype'] === 'power') {
-            $serialNumber = $validated['serial_number'] ?? $item->serial_number;
-            if (empty($serialNumber)) {
-                throw ValidationException::withMessages([
-                    'serial_number' => ['Serial number is required for power tools.'],
-                ]);
-            }
-        }
+        $this->normalizePowerToolInventoryMutation($validated, $item);
 
         $updateData = array_merge($validated, ['last_updated' => now()]);
         unset($updateData['created_at']);
@@ -385,10 +385,12 @@ class SuperAdminInventoryController extends SuperAdminBaseController
         $logType = $validated['log_type'] ?? ($item->item_type === 'Material' ? 'material_usage' : 'borrow');
 
         if ($item->item_type === 'Tool' && $item->tool_subtype === 'power') {
-            if ($item->status === 'Borrowed') {
+            if ($item->status === 'Borrowed' || (int) $item->quantity_on_hand <= 0) {
                 return response()->json(['message' => 'This power tool is currently checked out.'], 422);
             }
+            $qty = 1;
             DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                'quantity_on_hand' => 0,
                 'status' => 'Borrowed',
                 'last_updated' => now(),
             ]);
@@ -472,6 +474,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
 
         if ($item->item_type === 'Tool' && $item->tool_subtype === 'power') {
             DB::table('inventory_items')->where('item_id', $item->item_id)->update([
+                'quantity_on_hand' => 1,
                 'status' => 'Available',
                 'last_updated' => now(),
             ]);
@@ -524,6 +527,7 @@ class SuperAdminInventoryController extends SuperAdminBaseController
             ->leftJoin('users as clients', 'clients.user_id', '=', 'bookings.client_id')
             ->leftJoin('users as techs', 'techs.user_id', '=', 'tool_checklists.technician_id')
             ->leftJoin('technician_teams', 'technician_teams.team_id', '=', 'tool_checklists.team_id')
+            ->whereIn('tool_checklists.status', ['Approved', 'Completed'])
             ->select([
                 'tool_checklist_items.id as item_row_id',
                 'tool_checklist_items.checklist_id',

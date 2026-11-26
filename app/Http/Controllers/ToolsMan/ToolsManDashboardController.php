@@ -26,9 +26,16 @@ class ToolsManDashboardController extends ToolsManBaseController
             })
             ->where('is_archived', false);
 
+        $lowStockBaseQuery = (clone $baseQuery)
+            ->where(function ($q) {
+                $q->whereRaw("LOWER(COALESCE(item_type, '')) != 'tool'")
+                    ->orWhereRaw("LOWER(COALESCE(tool_subtype, '')) NOT LIKE '%power%'");
+            })
+            ->whereColumn('quantity_on_hand', '<=', 'reorder_level');
+
         $stats = [
             'total_items'    => (clone $baseQuery)->count(),
-            'low_stock_items' => (clone $baseQuery)->whereColumn('quantity_on_hand', '<=', 'reorder_level')->count(),
+            'low_stock_items' => (clone $lowStockBaseQuery)->count(),
             'total_tools'    => (clone $baseQuery)->where('item_type', 'Tool')->count(),
             'total_materials' => (clone $baseQuery)->where('item_type', 'Material')->count(),
             'announcements'  => DB::table('announcements')->count(),
@@ -52,8 +59,7 @@ class ToolsManDashboardController extends ToolsManBaseController
             ->limit(4)
             ->get();
 
-        $lowStockItems = (clone $baseQuery)
-            ->whereColumn('quantity_on_hand', '<=', 'reorder_level')
+        $lowStockItems = (clone $lowStockBaseQuery)
             ->orderBy('quantity_on_hand')
             ->limit(5)
             ->get();

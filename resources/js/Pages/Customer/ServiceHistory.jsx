@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import StatusBadge from "../../Components/StatusBadge";
+import MaintenanceReminderCountdown from "../../Components/MaintenanceReminderCountdown";
 import FeedbackModal from "./FeedbackModal";
 import { CUSTOMER_ENDPOINTS, extractErrorMessage, formatCurrency, formatDateTime } from "../../utils/superAdmin";
 
@@ -159,6 +160,21 @@ export default function ServiceHistory({ addToast, onNavigate, onSelectServiceTo
                                     <p className="font-bold text-emerald-700 mt-0.5">Paid in Full ({b.service_payment_method || "Cash"})</p>
                                 </div>
                             </div>
+
+                            {b.maintenance_reminder && (
+                                <MaintenanceReminderCountdown
+                                    reminder={b.maintenance_reminder}
+                                    variant="card"
+                                    onBookService={(serviceId) => {
+                                        if (onSelectServiceToBook) {
+                                            onSelectServiceToBook(serviceId);
+                                        }
+                                        if (onNavigate) {
+                                            onNavigate("book");
+                                        }
+                                    }}
+                                />
+                            )}
 
                             {/* Feedback Preview if already reviewed */}
                             {b.feedback && (

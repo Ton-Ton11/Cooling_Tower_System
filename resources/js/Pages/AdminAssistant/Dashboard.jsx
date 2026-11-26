@@ -7,10 +7,12 @@ import SalesRecords from '../Shared/SalesRecords';
 import Documents from '../Shared/Documents';
 import Announcements from '../Shared/Announcements';
 import OcularInspections from './OcularInspections';
+import ItemOrders from './ItemOrders';
 import { ADMIN_ASSISTANT_ENDPOINTS } from '../../utils/superAdmin';
 
 const ic = {
     dashboard: "M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10",
+    item_orders: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4",
     ocular: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
     staff: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2 M12 11a4 4 0 100-8 4 4 0 000 8z",
     acunits: "M14 14.76V3.5a2.5 2.5 0 00-5 0v11.26a4.5 4.5 0 105 0z",
@@ -22,6 +24,7 @@ const ic = {
 
 const navItems = [
     { id: "dashboard", label: "Dashboard", icon: ic.dashboard },
+    { id: "item_orders", label: "Item Orders", icon: ic.item_orders },
     { id: "ocular", label: "Ocular Inspections", icon: ic.ocular },
     { id: "staff", label: "Staff Accounts", icon: ic.staff },
     { id: "acunits", label: "AC Units Inventory", icon: ic.acunits },
@@ -44,6 +47,13 @@ export default function Dashboard() {
         ),
         ocular: (
             <OcularInspections
+                addToast={addToast}
+                onDataChanged={handleDataChanged}
+                endpoints={ADMIN_ASSISTANT_ENDPOINTS}
+            />
+        ),
+        item_orders: (
+            <ItemOrders
                 addToast={addToast}
                 onDataChanged={handleDataChanged}
                 endpoints={ADMIN_ASSISTANT_ENDPOINTS}

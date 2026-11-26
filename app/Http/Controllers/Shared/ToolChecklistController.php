@@ -71,15 +71,15 @@ class ToolChecklistController extends Controller
             } elseif ($isBorrowed) {
                 $unavailableReason = 'Currently In Use';
             } elseif ($isOutOfStock) {
-                $unavailableReason = 'Out of Stock';
+                $unavailableReason = ($isTool && str_contains(strtolower((string) ($item->tool_subtype ?? '')), 'power'))
+                    ? 'Currently In Use'
+                    : 'Out of Stock';
             }
 
             $subtypeRaw = strtolower((string) ($item->tool_subtype ?? ''));
             $normalizedSubtype = $isTool ? (str_contains($subtypeRaw, 'power') ? 'power' : 'hand') : null;
             $categoryGroup = ! $isTool ? 'material' : ($normalizedSubtype === 'power' ? 'power_tool' : 'hand_tool');
-            $isLowStock = ($normalizedSubtype === 'power' && $initial <= 1 && $reorder === 1)
-                ? ($onHand <= 0)
-                : ($onHand <= $reorder);
+            $isLowStock = ($normalizedSubtype === 'power') ? false : ($onHand <= $reorder);
 
             return [
                 'item_id' => (int) $item->item_id,
@@ -311,8 +311,10 @@ class ToolChecklistController extends Controller
             ]);
         }
 
+        $normalizedItems = $this->normalizeSubmittedItems($validated['items']);
+
         // Strict validation: tools must not be damaged/lost/in-use, materials excluded for Ocular Inspection
-        foreach ($validated['items'] as $itemData) {
+        foreach ($normalizedItems as $itemData) {
             $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->first();
             if (! $invItem) {
                 throw ValidationException::withMessages([
@@ -355,6 +357,11 @@ class ToolChecklistController extends Controller
             }
 
             $requestedQty = (int) $itemData['quantity'];
+            if ($this->isPowerToolItem($invItem) && $requestedQty > 1) {
+                throw ValidationException::withMessages([
+                    'items' => ["Power tool '{$invItem->item_name}' is tracked individually by serial number and cannot exceed quantity 1."],
+                ]);
+            }
             $availableQty = (int) $invItem->quantity_on_hand;
 
             if ($availableQty <= 0) {
@@ -374,7 +381,7 @@ class ToolChecklistController extends Controller
             }
         }
 
-        $checklist = DB::transaction(function () use ($validated, $userId, $user, $booking) {
+        $checklist = DB::transaction(function () use ($validated, $normalizedItems, $userId, $booking) {
             $alreadyExists = ToolChecklist::where('booking_id', $booking->booking_id)
                 ->lockForUpdate()
                 ->first();
@@ -393,11 +400,16 @@ class ToolChecklistController extends Controller
                 'notes' => $validated['notes'] ?? null,
             ]);
 
-            foreach ($validated['items'] as $itemData) {
+            foreach ($normalizedItems as $itemData) {
                 $qty = (int) $itemData['quantity'];
                 $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->lockForUpdate()->first();
                 $isTool = strtolower((string) ($invItem ? $invItem->item_type : 'Tool')) === 'tool';
-                $isPowerTool = $isTool && str_contains(strtolower((string) ($invItem->tool_subtype ?? '')), 'power');
+
+                if ($invItem && (int) $invItem->quantity_on_hand < $qty) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Requested quantity for '{$invItem->item_name}' ({$qty}) exceeds available stock ({$invItem->quantity_on_hand} {$invItem->unit})."],
+                    ]);
+                }
 
                 ToolChecklistItem::create([
                     'checklist_id' => $checklist->checklist_id,
@@ -408,69 +420,6 @@ class ToolChecklistController extends Controller
                     'status' => $isTool ? 'assigned' : 'consumed',
                     'notes' => $itemData['notes'] ?? null,
                 ]);
-
-                if ($invItem) {
-                    if ($isTool) {
-                        $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
-                        $newStatus = ($isPowerTool || $newQty <= 0) ? 'Borrowed' : 'Available';
-                        DB::table('inventory_items')->where('item_id', $itemData['item_id'])->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
-                    } else {
-                        // Consumable material: automatically reduce inventory quantity
-                        $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
-                        $newStatus = $newQty <= 0
-                            ? 'Out of Stock'
-                            : ($newQty <= (int) ($invItem->reorder_level ?? 0) ? 'Low Stock' : 'Available');
-                        DB::table('inventory_items')->where('item_id', $itemData['item_id'])->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
-
-                        if ($booking->booking_id) {
-                            $existingMat = DB::table('booking_materials')
-                                ->where('booking_id', $booking->booking_id)
-                                ->where('item_id', $itemData['item_id'])
-                                ->first();
-                            if ($existingMat) {
-                                DB::table('booking_materials')
-                                    ->where('usage_id', $existingMat->usage_id)
-                                    ->update([
-                                        'quantity_used' => $qty,
-                                        'logged_at' => now(),
-                                    ]);
-                            } else {
-                                DB::table('booking_materials')->insert([
-                                    'booking_id' => $booking->booking_id,
-                                    'item_id' => $itemData['item_id'],
-                                    'quantity_used' => $qty,
-                                    'logged_at' => now(),
-                                ]);
-                            }
-                        }
-                    }
-
-                    $clientName = $booking->client ? $booking->client->name : 'Client';
-                    DB::table('tool_checkouts')->insert([
-                        'item_id' => $itemData['item_id'],
-                        'technician_id' => $userId,
-                        'technician_name' => $user->name ?? 'Assigned Technician',
-                        'service_name' => $booking->service?->service_name ?? 'Aircon Service',
-                        'booking_id' => $booking->booking_id,
-                        'item_name' => $invItem->item_name,
-                        'item_type' => $invItem->item_type,
-                        'log_type' => $isTool ? 'borrow' : 'material_usage',
-                        'quantity' => $qty,
-                        'checkout_date' => now(),
-                        'status' => $isTool ? 'Checked Out' : 'Used / Consumed',
-                        'notes' => sprintf('Checklist #%d (Pending) • Booking #%d (%s)', $checklist->checklist_id, $booking->booking_id, $clientName),
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
             }
 
             return $checklist;
@@ -521,8 +470,18 @@ class ToolChecklistController extends Controller
             'items.*.notes' => ['nullable', 'string', 'max:255'],
         ]);
 
+        $normalizedItems = $this->normalizeSubmittedItems($validated['items']);
+
+        $legacyPendingCheckouts = $checklist->booking_id
+            ? DB::table('tool_checkouts')
+                ->where('booking_id', $checklist->booking_id)
+                ->where('notes', 'like', '%(Pending)%')
+                ->get()
+                ->keyBy('item_id')
+            : collect();
+
         // Strict validation: tools must not be damaged/lost/in-use, and materials must not be out-of-stock
-        foreach ($validated['items'] as $itemData) {
+        foreach ($normalizedItems as $itemData) {
             $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->first();
             if (! $invItem) {
                 throw ValidationException::withMessages([
@@ -556,19 +515,22 @@ class ToolChecklistController extends Controller
                 ]);
             }
 
-            $existingItem = ToolChecklistItem::where('checklist_id', $checklist->checklist_id)
-                ->where('item_id', $itemData['item_id'])
-                ->first();
-            $existingQty = $existingItem ? (int) ($existingItem->quantity_approved ?: $existingItem->quantity_requested) : 0;
+            $legacyRow = $legacyPendingCheckouts->get($itemData['item_id']);
+            $legacyDeductedQty = $legacyRow ? (int) $legacyRow->quantity : 0;
 
-            if ($isTool && $statusLower === 'borrowed' && $existingQty <= 0) {
+            if ($isTool && $statusLower === 'borrowed' && $legacyDeductedQty <= 0) {
                 throw ValidationException::withMessages([
                     'items' => ["Tool '{$invItem->item_name}' is currently in use / borrowed and cannot be added to the checklist."],
                 ]);
             }
 
             $requestedQty = (int) $itemData['quantity'];
-            $availableQty = (int) $invItem->quantity_on_hand + $existingQty;
+            if ($this->isPowerToolItem($invItem) && $requestedQty > 1) {
+                throw ValidationException::withMessages([
+                    'items' => ["Power tool '{$invItem->item_name}' is tracked individually by serial number and cannot exceed quantity 1."],
+                ]);
+            }
+            $availableQty = (int) $invItem->quantity_on_hand + $legacyDeductedQty;
 
             if ($availableQty <= 0) {
                 throw ValidationException::withMessages([
@@ -587,65 +549,37 @@ class ToolChecklistController extends Controller
             }
         }
 
-        DB::transaction(function () use ($checklist, $validated, $user) {
+        DB::transaction(function () use ($checklist, $validated, $normalizedItems) {
             $checklist->update([
                 'notes' => $validated['notes'] ?? $checklist->notes,
             ]);
 
-            // First: restore previously deducted stock for this checklist
-            $previousItems = ToolChecklistItem::where('checklist_id', $checklist->checklist_id)->get();
-            foreach ($previousItems as $prevItem) {
-                $inv = DB::table('inventory_items')->where('item_id', $prevItem->item_id)->lockForUpdate()->first();
-                if ($inv) {
-                    $isTool = strtolower((string) ($inv->item_type ?? '')) === 'tool';
-                    $prevQty = (int) ($prevItem->quantity_approved ?: $prevItem->quantity_requested ?: 1);
+            // Restore any legacy pre-fix Pending deduction so pending checklists never hold inventory prematurely
+            if ($checklist->booking_id) {
+                $legacyRows = DB::table('tool_checkouts')
+                    ->where('booking_id', $checklist->booking_id)
+                    ->where('notes', 'like', '%(Pending)%')
+                    ->get();
 
-                    if ($isTool) {
-                        $newQty = (int) $inv->quantity_on_hand + $prevQty;
-                        if (! empty($inv->initial_stock) && (int) $inv->initial_stock > 0) {
-                            $newQty = min((int) $inv->initial_stock, $newQty);
-                        }
-                        $hasOtherBorrowed = DB::table('tool_checklists')
-                            ->join('tool_checklist_items', 'tool_checklists.checklist_id', '=', 'tool_checklist_items.checklist_id')
-                            ->where('tool_checklists.checklist_id', '!=', $checklist->checklist_id)
-                            ->whereIn('tool_checklists.status', ['Pending', 'Approved'])
-                            ->where('tool_checklist_items.item_id', $prevItem->item_id)
-                            ->where('tool_checklist_items.status', 'assigned')
-                            ->exists();
-
-                        DB::table('inventory_items')->where('item_id', $prevItem->item_id)->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $hasOtherBorrowed ? 'Borrowed' : 'Available',
-                            'last_updated' => now(),
-                        ]);
-                    } else {
-                        $newQty = (int) $inv->quantity_on_hand + $prevQty;
-                        $newStatus = $newQty <= 0
-                            ? 'Out of Stock'
-                            : ($newQty <= (int) ($inv->reorder_level ?? 0) ? 'Low Stock' : 'Available');
-                        DB::table('inventory_items')->where('item_id', $prevItem->item_id)->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
+                foreach ($legacyRows as $legacyRow) {
+                    $inv = DB::table('inventory_items')->where('item_id', $legacyRow->item_id)->lockForUpdate()->first();
+                    if ($inv) {
+                        $this->restoreStockForItem($inv, (int) ($legacyRow->quantity ?: 1));
                     }
+                    DB::table('tool_checkouts')->where('checkout_id', $legacyRow->checkout_id)->delete();
+                    DB::table('booking_materials')
+                        ->where('booking_id', $checklist->booking_id)
+                        ->where('item_id', $legacyRow->item_id)
+                        ->delete();
                 }
             }
 
             ToolChecklistItem::where('checklist_id', $checklist->checklist_id)->delete();
-            if ($checklist->booking_id) {
-                DB::table('tool_checkouts')->where('booking_id', $checklist->booking_id)->delete();
-                DB::table('booking_materials')->where('booking_id', $checklist->booking_id)->delete();
-            }
 
-            $booking = $checklist->booking;
-            $userId = (int) ($user->user_id ?? $checklist->technician_id);
-
-            foreach ($validated['items'] as $itemData) {
+            foreach ($normalizedItems as $itemData) {
                 $qty = (int) $itemData['quantity'];
                 $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->lockForUpdate()->first();
                 $isTool = strtolower((string) ($invItem ? $invItem->item_type : 'Tool')) === 'tool';
-                $isPowerTool = $isTool && str_contains(strtolower((string) ($invItem->tool_subtype ?? '')), 'power');
 
                 ToolChecklistItem::create([
                     'checklist_id' => $checklist->checklist_id,
@@ -656,55 +590,6 @@ class ToolChecklistController extends Controller
                     'status' => $isTool ? 'assigned' : 'consumed',
                     'notes' => $itemData['notes'] ?? null,
                 ]);
-
-                if ($invItem) {
-                    if ($isTool) {
-                        $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
-                        $newStatus = ($isPowerTool || $newQty <= 0) ? 'Borrowed' : 'Available';
-                        DB::table('inventory_items')->where('item_id', $itemData['item_id'])->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
-                    } else {
-                        $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
-                        $newStatus = $newQty <= 0
-                            ? 'Out of Stock'
-                            : ($newQty <= (int) ($invItem->reorder_level ?? 0) ? 'Low Stock' : 'Available');
-                        DB::table('inventory_items')->where('item_id', $itemData['item_id'])->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
-
-                        if ($booking && $booking->booking_id) {
-                            DB::table('booking_materials')->insert([
-                                'booking_id' => $booking->booking_id,
-                                'item_id' => $itemData['item_id'],
-                                'quantity_used' => $qty,
-                                'logged_at' => now(),
-                            ]);
-                        }
-                    }
-
-                    $clientName = $booking?->client ? $booking->client->name : 'Client';
-                    DB::table('tool_checkouts')->insert([
-                        'item_id' => $itemData['item_id'],
-                        'technician_id' => $userId,
-                        'technician_name' => $user->name ?? 'Assigned Technician',
-                        'service_name' => $booking?->service?->service_name ?? 'Aircon Service',
-                        'booking_id' => $checklist->booking_id,
-                        'item_name' => $invItem->item_name,
-                        'item_type' => $invItem->item_type,
-                        'log_type' => $isTool ? 'borrow' : 'material_usage',
-                        'quantity' => $qty,
-                        'checkout_date' => now(),
-                        'status' => $isTool ? 'Checked Out' : 'Used / Consumed',
-                        'notes' => sprintf('Checklist #%d (Pending) • Booking #%d (%s)', $checklist->checklist_id, $checklist->booking_id, $clientName),
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
             }
         });
 
@@ -762,58 +647,64 @@ class ToolChecklistController extends Controller
             abort(403, 'Only Tools Man or Admin can approve checklists.');
         }
 
-        $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'booking.leadTechnician', 'booking.assistantTechnician', 'team', 'technician', 'items.inventoryItem'])->findOrFail($checklistId);
-
-        if ($checklist->status !== 'Pending') {
-            throw ValidationException::withMessages([
-                'checklist' => ["Checklist #{$checklist->checklist_id} has already been {$checklist->status}."],
-            ]);
-        }
-
         $userId = (int) $user->user_id;
 
-        DB::transaction(function () use ($checklist, $userId) {
-            // Pre-validate inventory availability inside transaction (only for items not already deducted)
+        $checklist = DB::transaction(function () use ($checklistId, $userId) {
+            $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'booking.leadTechnician', 'booking.assistantTechnician', 'team', 'technician', 'items.inventoryItem'])
+                ->lockForUpdate()
+                ->findOrFail($checklistId);
+
+            if ($checklist->status !== 'Pending') {
+                throw ValidationException::withMessages([
+                    'checklist' => ["Checklist #{$checklist->checklist_id} has already been {$checklist->status}."],
+                ]);
+            }
+
+            $legacyPendingCheckouts = $checklist->booking_id
+                ? DB::table('tool_checkouts')
+                    ->where('booking_id', $checklist->booking_id)
+                    ->where('notes', 'like', '%(Pending)%')
+                    ->get()
+                    ->keyBy('item_id')
+                : collect();
+
+            // Pre-validate inventory availability inside transaction using row locks
             foreach ($checklist->items as $item) {
                 $qty = (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1);
-                $hasCheckout = DB::table('tool_checkouts')
-                    ->where('booking_id', $checklist->booking_id)
-                    ->where('item_id', $item->item_id)
-                    ->exists();
+                $inv = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
+                if (! $inv) {
+                    throw ValidationException::withMessages([
+                        'checklist' => ["Item '{$item->inventoryItem?->item_name}' was not found in worker inventory."],
+                    ]);
+                }
 
-                if (! $hasCheckout) {
-                    $inv = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
-                    if (! $inv) {
-                        throw ValidationException::withMessages([
-                            'checklist' => ["Item '{$item->inventoryItem?->item_name}' was not found in worker inventory."],
-                        ]);
-                    }
+                $isTool = strtolower((string) ($inv->item_type ?? $item->item_type ?? '')) === 'tool';
+                $statusLower = strtolower($inv->status ?? 'available');
+                $isPowerTool = $this->isPowerToolItem($inv);
+                $legacyRow = $legacyPendingCheckouts->get($item->item_id);
+                $alreadyDeducted = $legacyRow ? (int) $legacyRow->quantity : 0;
+                $neededFromStock = $qty - $alreadyDeducted;
 
-                    $isTool = strtolower((string) ($inv->item_type ?? $item->item_type ?? '')) === 'tool';
-                    $statusLower = strtolower($inv->status ?? 'available');
-                    $isPowerTool = $isTool && str_contains(strtolower((string) ($inv->tool_subtype ?? '')), 'power');
+                if ($isTool && in_array($statusLower, ['lost/damaged', 'damaged', 'lost', 'broken'], true)) {
+                    throw ValidationException::withMessages([
+                        'checklist' => ["Tool '{$inv->item_name}' is marked as damaged/lost and cannot be issued."],
+                    ]);
+                }
 
-                    if ($isTool && in_array($statusLower, ['lost/damaged', 'damaged', 'lost', 'broken'], true)) {
-                        throw ValidationException::withMessages([
-                            'checklist' => ["Tool '{$inv->item_name}' is marked as damaged/lost and cannot be issued."],
-                        ]);
-                    }
+                if ($isPowerTool && $statusLower === 'borrowed' && $alreadyDeducted <= 0) {
+                    throw ValidationException::withMessages([
+                        'checklist' => ["Power tool '{$inv->item_name}' is already borrowed / in use."],
+                    ]);
+                }
 
-                    if ($isPowerTool && $statusLower === 'borrowed') {
-                        throw ValidationException::withMessages([
-                            'checklist' => ["Power tool '{$inv->item_name}' is already borrowed / in use."],
-                        ]);
-                    }
-
-                    if ((int) $inv->quantity_on_hand < $qty) {
-                        throw ValidationException::withMessages([
-                            'checklist' => [
-                                $isTool
-                                    ? "Insufficient stock for tool '{$inv->item_name}' (Requested: {$qty}, Available: {$inv->quantity_on_hand} {$inv->unit})."
-                                    : "Insufficient stock for material '{$inv->item_name}' (Requested: {$qty}, Available: {$inv->quantity_on_hand} {$inv->unit})."
-                            ],
-                        ]);
-                    }
+                if ($neededFromStock > 0 && (int) $inv->quantity_on_hand < $neededFromStock) {
+                    throw ValidationException::withMessages([
+                        'checklist' => [
+                            $isTool
+                                ? "Insufficient stock for tool '{$inv->item_name}' (Requested: {$qty}, Available: {$inv->quantity_on_hand} {$inv->unit})."
+                                : "Insufficient stock for material '{$inv->item_name}' (Requested: {$qty}, Available: {$inv->quantity_on_hand} {$inv->unit})."
+                        ],
+                    ]);
                 }
             }
 
@@ -884,65 +775,65 @@ class ToolChecklistController extends Controller
 
             $freshChecklist = $checklist->fresh(['booking.client', 'booking.service', 'booking.leadTechnician', 'booking.assistantTechnician', 'team', 'technician', 'items.inventoryItem']);
 
-            // Synchronize tool checkouts record for custody tracking and ensure stock is deducted in worker inventory
+            // Deduct approved materials, hand tools, and power tools from worker inventory and record custody/usage logs
             foreach ($freshChecklist->items as $item) {
                 $qty = (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1);
-                $inv = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
+                $inv = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
                 if (! $inv) {
                     continue;
                 }
 
                 $isTool = strtolower((string) ($inv->item_type ?? $item->item_type ?? '')) === 'tool';
-                $isPowerTool = $isTool && str_contains(strtolower((string) ($inv->tool_subtype ?? '')), 'power');
+                $legacyRow = $legacyPendingCheckouts->get($item->item_id);
+                $alreadyDeducted = $legacyRow ? (int) $legacyRow->quantity : 0;
+                $deltaToDeduct = $qty - $alreadyDeducted;
 
-                $existingCheckout = DB::table('tool_checkouts')
-                    ->where('booking_id', $freshChecklist->booking_id)
-                    ->where('item_id', $item->item_id)
-                    ->first();
-
-                if (! $existingCheckout) {
-                    if ($isTool) {
-                        $newQty = max(0, (int) $inv->quantity_on_hand - $qty);
-                        $newStatus = ($isPowerTool || $newQty <= 0) ? 'Borrowed' : 'Available';
-                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
+                if ($deltaToDeduct > 0) {
+                    if ((int) $inv->quantity_on_hand < $deltaToDeduct) {
+                        throw ValidationException::withMessages([
+                            'checklist' => [
+                                sprintf("Insufficient stock for '%s' (Needed: %d, Available: %d %s).", $inv->item_name, $deltaToDeduct, $inv->quantity_on_hand, $inv->unit),
+                            ],
                         ]);
-                    } else {
-                        $newQty = max(0, (int) $inv->quantity_on_hand - $qty);
-                        $newStatus = $newQty <= 0
-                            ? 'Out of Stock'
-                            : ($newQty <= (int) ($inv->reorder_level ?? 0) ? 'Low Stock' : 'Available');
-                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => $newStatus,
-                            'last_updated' => now(),
-                        ]);
-
-                        if ($freshChecklist->booking_id) {
-                            $existingMat = DB::table('booking_materials')
-                                ->where('booking_id', $freshChecklist->booking_id)
-                                ->where('item_id', $item->item_id)
-                                ->first();
-                            if ($existingMat) {
-                                DB::table('booking_materials')
-                                    ->where('usage_id', $existingMat->usage_id)
-                                    ->update([
-                                        'quantity_used' => $qty,
-                                        'logged_at' => now(),
-                                    ]);
-                            } else {
-                                DB::table('booking_materials')->insert([
-                                    'booking_id' => $freshChecklist->booking_id,
-                                    'item_id' => $item->item_id,
-                                    'quantity_used' => $qty,
-                                    'logged_at' => now(),
-                                ]);
-                            }
-                        }
                     }
+                    $this->deductStockForApprovedItem($inv, $deltaToDeduct);
+                } elseif ($deltaToDeduct < 0) {
+                    $this->restoreStockForItem($inv, abs($deltaToDeduct), $item->id);
+                }
 
+                if (! $isTool && $freshChecklist->booking_id) {
+                    $existingMat = DB::table('booking_materials')
+                        ->where('booking_id', $freshChecklist->booking_id)
+                        ->where('item_id', $item->item_id)
+                        ->first();
+                    if ($existingMat) {
+                        DB::table('booking_materials')
+                            ->where('usage_id', $existingMat->usage_id)
+                            ->update([
+                                'quantity_used' => $qty,
+                                'logged_at' => now(),
+                            ]);
+                    } else {
+                        DB::table('booking_materials')->insert([
+                            'booking_id' => $freshChecklist->booking_id,
+                            'item_id' => $item->item_id,
+                            'quantity_used' => $qty,
+                            'logged_at' => now(),
+                        ]);
+                    }
+                }
+
+                if ($legacyRow) {
+                    DB::table('tool_checkouts')
+                        ->where('checkout_id', $legacyRow->checkout_id)
+                        ->update([
+                            'quantity' => $qty,
+                            'checkout_date' => now(),
+                            'status' => $isTool ? 'Checked Out' : 'Used / Consumed',
+                            'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
+                            'updated_at' => now(),
+                        ]);
+                } else {
                     DB::table('tool_checkouts')->insert([
                         'item_id' => $item->item_id,
                         'technician_id' => $freshChecklist->technician_id,
@@ -959,15 +850,10 @@ class ToolChecklistController extends Controller
                         'created_at' => now(),
                         'updated_at' => now(),
                     ]);
-                } else {
-                    DB::table('tool_checkouts')
-                        ->where('checkout_id', $existingCheckout->checkout_id)
-                        ->update([
-                            'notes' => $this->buildChecklistLogDescription($freshChecklist, $item),
-                            'updated_at' => now(),
-                        ]);
                 }
             }
+
+            return $checklist;
         });
 
         // Activity log
@@ -996,6 +882,12 @@ class ToolChecklistController extends Controller
         }
 
         $checklist = ToolChecklist::with('booking.service')->findOrFail($checklistId);
+        if ($checklist->status === 'Completed') {
+            throw ValidationException::withMessages([
+                'checklist' => ['Completed checklists cannot be modified.'],
+            ]);
+        }
+
         $isOcular = $this->isOcularBooking($checklist->booking);
 
         $validated = $request->validate([
@@ -1006,8 +898,18 @@ class ToolChecklistController extends Controller
             'items.*.notes' => ['nullable', 'string', 'max:255'],
         ]);
 
+        $normalizedItems = $this->normalizeSubmittedItems($validated['items'], 'quantity_approved');
+
+        $legacyPendingCheckouts = ($checklist->status === 'Pending' && $checklist->booking_id)
+            ? DB::table('tool_checkouts')
+                ->where('booking_id', $checklist->booking_id)
+                ->where('notes', 'like', '%(Pending)%')
+                ->get()
+                ->keyBy('item_id')
+            : collect();
+
         // Pre-validate inventory availability & mode
-        foreach ($validated['items'] as $itemData) {
+        foreach ($normalizedItems as $itemData) {
             $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->first();
             if (! $invItem) {
                 throw ValidationException::withMessages([
@@ -1015,7 +917,6 @@ class ToolChecklistController extends Controller
                 ]);
             }
 
-            // Must be worker inventory
             if ($invItem->inventory_mode === 'sale') {
                 throw ValidationException::withMessages([
                     'items' => ["Item '{$invItem->item_name}' is for customer sale and cannot be added to a worker checklist."],
@@ -1037,45 +938,72 @@ class ToolChecklistController extends Controller
             }
 
             $requestedQty = (int) $itemData['quantity_approved'];
+            if ($this->isPowerToolItem($invItem) && $requestedQty > 1) {
+                throw ValidationException::withMessages([
+                    'items' => ["Power tool '{$invItem->item_name}' is tracked individually by serial number and cannot exceed quantity 1."],
+                ]);
+            }
             $existingItem = ToolChecklistItem::where('checklist_id', $checklist->checklist_id)
                 ->where('item_id', $itemData['item_id'])
                 ->first();
             $existingQty = $existingItem ? (int) ($existingItem->quantity_approved ?: $existingItem->quantity_requested) : 0;
-            $deltaQty = $requestedQty - $existingQty;
-
             $onHand = (int) $invItem->quantity_on_hand;
 
-            // If increasing quantity or adding new item, verify inventory has enough stock
-            if ($deltaQty > 0) {
-                if ($onHand <= 0) {
+            if ($checklist->status === 'Pending') {
+                // Pending checklists have not deducted worker inventory yet (unless legacy pre-fix Pending checkout exists)
+                $legacyRow = $legacyPendingCheckouts->get($itemData['item_id']);
+                $legacyDeducted = $legacyRow ? (int) $legacyRow->quantity : 0;
+                $availableQty = $onHand + $legacyDeducted;
+
+                if ($isTool && $statusLower === 'borrowed' && $legacyDeducted <= 0) {
                     throw ValidationException::withMessages([
-                        'items' => [
-                            $isTool
-                                ? "Tool '{$invItem->item_name}' is currently unavailable (0 in stock)."
-                                : "Material '{$invItem->item_name}' is out of stock and cannot be added to the checklist."
-                        ],
+                        'items' => ["Tool '{$invItem->item_name}' is currently in use / borrowed and cannot be added to the checklist."],
                     ]);
                 }
 
-                if ($deltaQty > $onHand) {
+                if ($requestedQty > $availableQty) {
                     throw ValidationException::withMessages([
                         'items' => [
                             sprintf(
-                                "Cannot add %d %s of '%s'. Only %d available in inventory.",
+                                "Cannot set %d %s of '%s'. Only %d available in inventory.",
                                 $requestedQty,
                                 $invItem->unit ?: 'pcs',
                                 $invItem->item_name,
-                                $onHand
+                                $availableQty
                             ),
                         ],
                     ]);
                 }
+            } else {
+                // Approved checklists have already deducted existingQty
+                $deltaQty = $requestedQty - $existingQty;
+                if (! $existingItem && $isTool && $statusLower === 'borrowed') {
+                    throw ValidationException::withMessages([
+                        'items' => ["Tool '{$invItem->item_name}' is currently in use / borrowed and cannot be added to the checklist."],
+                    ]);
+                }
+
+                if ($deltaQty > 0) {
+                    if ($onHand <= 0 || $deltaQty > $onHand) {
+                        throw ValidationException::withMessages([
+                            'items' => [
+                                sprintf(
+                                    "Cannot add %d more %s of '%s'. Only %d available in inventory.",
+                                    $deltaQty,
+                                    $invItem->unit ?: 'pcs',
+                                    $invItem->item_name,
+                                    $onHand
+                                ),
+                            ],
+                        ]);
+                    }
+                }
             }
         }
 
-        DB::transaction(function () use ($checklist, $validated) {
-            foreach ($validated['items'] as $itemData) {
-                $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->first();
+        DB::transaction(function () use ($checklist, $normalizedItems) {
+            foreach ($normalizedItems as $itemData) {
+                $invItem = DB::table('inventory_items')->where('item_id', $itemData['item_id'])->lockForUpdate()->first();
                 $isTool = strtolower($invItem ? $invItem->item_type : '') === 'tool';
 
                 $existing = ToolChecklistItem::where('checklist_id', $checklist->checklist_id)
@@ -1083,7 +1011,7 @@ class ToolChecklistController extends Controller
                     ->first();
 
                 if ($existing) {
-                    $prevApproved = (int) $existing->quantity_approved;
+                    $prevApproved = (int) ($existing->quantity_approved ?: $existing->quantity_requested ?: 1);
                     $newApproved = (int) $itemData['quantity_approved'];
                     $delta = $newApproved - $prevApproved;
 
@@ -1094,17 +1022,44 @@ class ToolChecklistController extends Controller
                     ]);
 
                     if ($checklist->status === 'Approved' && $invItem && $delta !== 0) {
-                        if (! ($isTool && ($invItem->tool_subtype ?? '') === 'power')) {
-                            $newQty = max(0, (int) $invItem->quantity_on_hand - $delta);
-                            DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
-                                'quantity_on_hand' => $newQty,
-                                'last_updated' => now(),
-                            ]);
+                        // Only adjust active inventory for materials or still-assigned tools
+                        if (! $isTool || $existing->status === 'assigned') {
+                            if ($delta > 0) {
+                                if ((int) $invItem->quantity_on_hand < $delta) {
+                                    throw ValidationException::withMessages([
+                                        'items' => [
+                                            sprintf("Insufficient stock for '%s' (Only %d %s remaining).", $invItem->item_name, $invItem->quantity_on_hand, $invItem->unit ?: 'pcs'),
+                                        ],
+                                    ]);
+                                }
+                                $this->deductStockForApprovedItem($invItem, $delta);
+                            } else {
+                                $this->restoreStockForItem($invItem, abs($delta), $existing->id);
+                            }
+                        }
+
+                        if (! $isTool && $checklist->booking_id) {
+                            $existingMat = DB::table('booking_materials')
+                                ->where('booking_id', $checklist->booking_id)
+                                ->where('item_id', $invItem->item_id)
+                                ->first();
+                            if ($existingMat) {
+                                DB::table('booking_materials')
+                                    ->where('usage_id', $existingMat->usage_id)
+                                    ->update(['quantity_used' => $newApproved, 'logged_at' => now()]);
+                            } else {
+                                DB::table('booking_materials')->insert([
+                                    'booking_id' => $checklist->booking_id,
+                                    'item_id' => $invItem->item_id,
+                                    'quantity_used' => $newApproved,
+                                    'logged_at' => now(),
+                                ]);
+                            }
                         }
                     }
                 } else {
                     $qty = (int) $itemData['quantity_approved'];
-                    ToolChecklistItem::create([
+                    $created = ToolChecklistItem::create([
                         'checklist_id' => $checklist->checklist_id,
                         'item_id' => $itemData['item_id'],
                         'item_type' => $invItem ? $invItem->item_type : 'Tool',
@@ -1114,19 +1069,22 @@ class ToolChecklistController extends Controller
                         'notes' => $itemData['notes'] ?? null,
                     ]);
 
-                    // If checklist is already approved, deduct stock / update status for newly added item
+                    // If checklist is already approved, deduct stock immediately for materials, hand tools, or power tools
                     if ($checklist->status === 'Approved' && $invItem) {
-                        if ($isTool && ($invItem->tool_subtype ?? '') === 'power') {
-                            DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
-                                'status' => 'Borrowed',
-                                'last_updated' => now(),
+                        if ((int) $invItem->quantity_on_hand < $qty) {
+                            throw ValidationException::withMessages([
+                                'items' => [
+                                    sprintf("Insufficient stock for '%s' (Only %d %s remaining).", $invItem->item_name, $invItem->quantity_on_hand, $invItem->unit ?: 'pcs'),
+                                ],
                             ]);
-                        } else {
-                            $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
-                            DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
-                                'quantity_on_hand' => $newQty,
-                                'last_updated' => now(),
-                            ]);
+                        }
+                        $this->deductStockForApprovedItem($invItem, $qty);
+
+                        if (! $isTool && $checklist->booking_id) {
+                            DB::table('booking_materials')->updateOrInsert(
+                                ['booking_id' => $checklist->booking_id, 'item_id' => $invItem->item_id],
+                                ['quantity_used' => $qty, 'logged_at' => now()]
+                            );
                         }
                     }
                 }
@@ -1215,6 +1173,12 @@ class ToolChecklistController extends Controller
             ->where('id', $itemId)
             ->firstOrFail();
 
+        if ($item->checklist && $item->checklist->status === 'Pending') {
+            throw ValidationException::withMessages([
+                'status' => ['Tool custody status can only be updated after the checklist is approved.'],
+            ]);
+        }
+
         // Materials do not have custody or return status tracking
         if (strtolower($item->item_type ?? '') !== 'tool') {
             throw ValidationException::withMessages([
@@ -1263,6 +1227,12 @@ class ToolChecklistController extends Controller
         $checklist = ToolChecklist::with(['booking.client', 'booking.service', 'team', 'technician', 'items.inventoryItem'])
             ->findOrFail($checklistId);
 
+        if ($checklist->status === 'Pending') {
+            throw ValidationException::withMessages([
+                'status' => ['Tool custody status can only be updated after the checklist is approved.'],
+            ]);
+        }
+
         DB::transaction(function () use ($checklist, $validated) {
             foreach ($validated['items'] as $itData) {
                 $itemId = (int) $itData['item_id'];
@@ -1306,18 +1276,14 @@ class ToolChecklistController extends Controller
 
         // Synchronize tool_checkouts and inventory status
         if ($item->checklist && $item->checklist->booking_id) {
-            $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
+            $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
             $itemQty = (int) ($item->quantity_approved ?: $item->quantity_requested ?: 1);
             $description = $this->buildChecklistLogDescription($item->checklist, $item);
 
-            // If transitioning away from 'returned' on a hand tool, deduct the previously returned stock
-            if ($previousStatus === 'returned' && $newStatus !== 'returned' && $invItem && strtolower($invItem->item_type ?? '') === 'tool' && ($invItem->tool_subtype ?? '') !== 'power') {
-                $newQty = max(0, (int) $invItem->quantity_on_hand - $itemQty);
-                DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                    'quantity_on_hand' => $newQty,
-                    'last_updated' => now(),
-                ]);
-                $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->first();
+            // If transitioning away from 'returned' on any tool (hand or power), re-deduct the previously returned stock
+            if ($previousStatus === 'returned' && $newStatus !== 'returned' && $invItem && strtolower((string) ($invItem->item_type ?? '')) === 'tool') {
+                $this->deductStockForApprovedItem($invItem, $itemQty);
+                $invItem = DB::table('inventory_items')->where('item_id', $item->item_id)->lockForUpdate()->first();
             }
 
             if ($newStatus === 'returned' && $previousStatus !== 'returned') {
@@ -1331,25 +1297,9 @@ class ToolChecklistController extends Controller
                         'updated_at' => now(),
                     ]);
 
-                // Restore power tool / available status in inventory
-                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
-                    if (str_contains(strtolower((string) ($invItem->tool_subtype ?? '')), 'power')) {
-                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                            'status' => 'Available',
-                            'last_updated' => now(),
-                        ]);
-                    } else {
-                        // Hand tool: increment available stock
-                        $newQty = (int) $invItem->quantity_on_hand + $itemQty;
-                        if (! empty($invItem->initial_stock) && (int) $invItem->initial_stock > 0) {
-                            $newQty = min((int) $invItem->initial_stock, $newQty);
-                        }
-                        DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                            'quantity_on_hand' => $newQty,
-                            'status' => 'Available',
-                            'last_updated' => now(),
-                        ]);
-                    }
+                // Restore both hand tool and power tool stock & Available status in inventory
+                if ($invItem && strtolower((string) ($invItem->item_type ?? '')) === 'tool') {
+                    $this->restoreStockForItem($invItem, $itemQty, $item->id);
                 }
             } elseif ($newStatus === 'damaged' && $previousStatus !== 'damaged') {
                 DB::table('tool_checkouts')
@@ -1363,8 +1313,8 @@ class ToolChecklistController extends Controller
                     ]);
 
                 // Record damaged tool in inventory and place in Damaged / Lost category
-                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
-                    if (($invItem->tool_subtype ?? '') === 'power' || (int) $invItem->quantity_on_hand <= 0) {
+                if ($invItem && strtolower((string) ($invItem->item_type ?? '')) === 'tool') {
+                    if ($this->isPowerToolItem($invItem) || (int) $invItem->quantity_on_hand <= 0) {
                         DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                             'status' => 'Damaged',
                             'sub_category' => 'Damaged / Lost',
@@ -1403,8 +1353,8 @@ class ToolChecklistController extends Controller
                     ]);
 
                 // Record lost tool in inventory and place in Damaged / Lost category
-                if ($invItem && strtolower($invItem->item_type ?? '') === 'tool') {
-                    if (($invItem->tool_subtype ?? '') === 'power' || (int) $invItem->quantity_on_hand <= 0) {
+                if ($invItem && strtolower((string) ($invItem->item_type ?? '')) === 'tool') {
+                    if ($this->isPowerToolItem($invItem) || (int) $invItem->quantity_on_hand <= 0) {
                         DB::table('inventory_items')->where('item_id', $item->item_id)->update([
                             'status' => 'Lost',
                             'sub_category' => 'Damaged / Lost',
@@ -1445,7 +1395,7 @@ class ToolChecklistController extends Controller
 
                 if ($invItem && strtolower((string) ($invItem->item_type ?? '')) === 'tool') {
                     DB::table('inventory_items')->where('item_id', $item->item_id)->update([
-                        'status' => 'Borrowed',
+                        'status' => ($this->isPowerToolItem($invItem) || (int) $invItem->quantity_on_hand <= 0) ? 'Borrowed' : 'Available',
                         'last_updated' => now(),
                     ]);
                 }
@@ -1486,54 +1436,49 @@ class ToolChecklistController extends Controller
                 ->get();
 
             foreach ($itemsToRemove as $it) {
-                // If checklist was pending or approved, return deducted stock back to inventory
-                if (in_array($checklist->status, ['Pending', 'Approved'], true)) {
-                    $qty = (int) ($it->quantity_approved ?: $it->quantity_requested ?: 1);
-                    $inv = DB::table('inventory_items')->where('item_id', $it->item_id)->first();
+                $qty = (int) ($it->quantity_approved ?: $it->quantity_requested ?: 1);
+
+                if ($checklist->status === 'Approved') {
+                    $inv = DB::table('inventory_items')->where('item_id', $it->item_id)->lockForUpdate()->first();
                     if ($inv) {
                         $isTool = strtolower((string) ($inv->item_type ?? $it->item_type ?? '')) === 'tool';
+                        // Restore stock for materials or still-assigned tools (avoid double-restoring returned/damaged/lost tools)
+                        if (! $isTool || $it->status === 'assigned') {
+                            $this->restoreStockForItem($inv, $qty, $it->id);
+                        }
 
-                        if ($isTool) {
-                            $newQty = (int) $inv->quantity_on_hand + $qty;
-                            $hasOtherBorrowed = DB::table('tool_checklists')
-                                ->join('tool_checklist_items', 'tool_checklists.checklist_id', '=', 'tool_checklist_items.checklist_id')
-                                ->where('tool_checklists.status', 'Approved')
-                                ->where('tool_checklist_items.item_id', $it->item_id)
-                                ->where('tool_checklist_items.id', '!=', $it->id)
-                                ->where('tool_checklist_items.status', 'assigned')
-                                ->exists();
-
-                            DB::table('inventory_items')->where('item_id', $it->item_id)->update([
-                                'quantity_on_hand' => $newQty,
-                                'status' => $hasOtherBorrowed ? 'Borrowed' : 'Available',
-                                'last_updated' => now(),
-                            ]);
-                        } else {
-                            $newQty = (int) $inv->quantity_on_hand + $qty;
-                            $newStatus = $newQty <= 0
-                                ? 'Out of Stock'
-                                : ($newQty <= (int) ($inv->reorder_level ?? 0) ? 'Low Stock' : 'Available');
-
-                            DB::table('inventory_items')->where('item_id', $it->item_id)->update([
-                                'quantity_on_hand' => $newQty,
-                                'status' => $newStatus,
-                                'last_updated' => now(),
-                            ]);
-
-                            if ($checklist->booking_id) {
-                                DB::table('booking_materials')
-                                    ->where('booking_id', $checklist->booking_id)
-                                    ->where('item_id', $it->item_id)
-                                    ->delete();
-                            }
+                        if (! $isTool && $checklist->booking_id) {
+                            DB::table('booking_materials')
+                                ->where('booking_id', $checklist->booking_id)
+                                ->where('item_id', $it->item_id)
+                                ->delete();
                         }
                     }
 
-                    // Delete tool_checkouts record if exists
                     if ($checklist->booking_id) {
                         DB::table('tool_checkouts')
                             ->where('booking_id', $checklist->booking_id)
                             ->where('item_id', $it->item_id)
+                            ->delete();
+                    }
+                } elseif ($checklist->status === 'Pending' && $checklist->booking_id) {
+                    // Clean up only if this Pending checklist had a legacy pre-fix Pending deduction
+                    $legacyCheckout = DB::table('tool_checkouts')
+                        ->where('booking_id', $checklist->booking_id)
+                        ->where('item_id', $it->item_id)
+                        ->where('notes', 'like', '%(Pending)%')
+                        ->first();
+                    if ($legacyCheckout) {
+                        $inv = DB::table('inventory_items')->where('item_id', $it->item_id)->lockForUpdate()->first();
+                        if ($inv) {
+                            $this->restoreStockForItem($inv, (int) ($legacyCheckout->quantity ?: $qty), $it->id);
+                        }
+                        DB::table('booking_materials')
+                            ->where('booking_id', $checklist->booking_id)
+                            ->where('item_id', $it->item_id)
+                            ->delete();
+                        DB::table('tool_checkouts')
+                            ->where('checkout_id', $legacyCheckout->checkout_id)
                             ->delete();
                     }
                 }
@@ -1761,5 +1706,96 @@ class ToolChecklistController extends Controller
                 ];
             })->values(),
         ];
+    }
+
+    /**
+     * Merge duplicate item_ids in a submitted checklist payload cleanly.
+     */
+    protected function normalizeSubmittedItems(array $items, string $qtyKey = 'quantity'): array
+    {
+        $merged = [];
+        foreach ($items as $row) {
+            $id = (int) $row['item_id'];
+            $qty = max(1, (int) ($row[$qtyKey] ?? 1));
+            if (isset($merged[$id])) {
+                $merged[$id][$qtyKey] += $qty;
+                if (empty($merged[$id]['notes']) && ! empty($row['notes'])) {
+                    $merged[$id]['notes'] = $row['notes'];
+                }
+                if (isset($row['status'])) {
+                    $merged[$id]['status'] = $row['status'];
+                }
+            } else {
+                $merged[$id] = array_merge($row, [
+                    'item_id' => $id,
+                    $qtyKey => $qty,
+                ]);
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    protected function isPowerToolItem(?object $invItem): bool
+    {
+        return $invItem
+            && strtolower((string) ($invItem->item_type ?? '')) === 'tool'
+            && str_contains(strtolower((string) ($invItem->tool_subtype ?? '')), 'power');
+    }
+
+    protected function deductStockForApprovedItem(object $invItem, int $qty): void
+    {
+        $isTool = strtolower((string) ($invItem->item_type ?? '')) === 'tool';
+        $newQty = max(0, (int) $invItem->quantity_on_hand - $qty);
+        $isPower = $this->isPowerToolItem($invItem);
+
+        if ($isTool) {
+            $newStatus = ($isPower || $newQty <= 0) ? 'Borrowed' : 'Available';
+        } else {
+            $newStatus = $newQty <= 0
+                ? 'Out of Stock'
+                : ($newQty <= (int) ($invItem->reorder_level ?? 0) ? 'Low Stock' : 'Available');
+        }
+
+        DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
+            'quantity_on_hand' => $newQty,
+            'status' => $newStatus,
+            'last_updated' => now(),
+        ]);
+    }
+
+    protected function restoreStockForItem(object $invItem, int $qty, ?int $excludeChecklistItemId = null): void
+    {
+        $isTool = strtolower((string) ($invItem->item_type ?? '')) === 'tool';
+        $isPower = $this->isPowerToolItem($invItem);
+        $newQty = (int) $invItem->quantity_on_hand + $qty;
+
+        if ($isTool) {
+            if (! empty($invItem->initial_stock) && (int) $invItem->initial_stock > 0) {
+                $newQty = min((int) $invItem->initial_stock, $newQty);
+            } elseif ($isPower) {
+                $newQty = max(1, $newQty);
+            }
+
+            $hasOtherBorrowed = DB::table('tool_checklists')
+                ->join('tool_checklist_items', 'tool_checklists.checklist_id', '=', 'tool_checklist_items.checklist_id')
+                ->where('tool_checklists.status', 'Approved')
+                ->where('tool_checklist_items.item_id', $invItem->item_id)
+                ->when($excludeChecklistItemId !== null, fn ($q) => $q->where('tool_checklist_items.id', '!=', $excludeChecklistItemId))
+                ->where('tool_checklist_items.status', 'assigned')
+                ->exists();
+
+            $newStatus = ($newQty <= 0 || ($isPower && $hasOtherBorrowed)) ? 'Borrowed' : 'Available';
+        } else {
+            $newStatus = $newQty <= 0
+                ? 'Out of Stock'
+                : ($newQty <= (int) ($invItem->reorder_level ?? 0) ? 'Low Stock' : 'Available');
+        }
+
+        DB::table('inventory_items')->where('item_id', $invItem->item_id)->update([
+            'quantity_on_hand' => $newQty,
+            'status' => $newStatus,
+            'last_updated' => now(),
+        ]);
     }
 }

@@ -68,10 +68,12 @@ class CustomerBookingController extends Controller
         DB::table('bookings')->whereIn('service_id', [5, 8, 15])->update(['service_id' => 2]);
         DB::table('bookings')->whereIn('service_id', [16])->update(['service_id' => 3]);
 
-        // 2. Remove any services outside 1, 2, 3, 4 (preserve internal AC Unit Sale service if present)
+        // 2. Remove any services outside 1, 2, 3, 4 (preserve internal AC Unit / Retail / Spare Part Sale services if present)
         DB::table('services')
             ->whereNotIn('service_id', [1, 2, 3, 4])
             ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->where('service_name', 'not like', 'Retail Sale:%')
+            ->where('service_name', 'not like', 'Spare Part Sale:%')
             ->delete();
 
         // 3. Upsert IDs 1, 2, 3, 4 with primary definitions (insert only if missing to preserve manager/admin edits)
@@ -122,6 +124,8 @@ class CustomerBookingController extends Controller
 
         $services = Service::active()
             ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->where('service_name', 'not like', 'Retail Sale:%')
+            ->where('service_name', 'not like', 'Spare Part Sale:%')
             ->orderBy('display_order')
             ->get();
 
@@ -139,6 +143,8 @@ class CustomerBookingController extends Controller
 
         $services = Service::active()
             ->where('service_name', 'not like', 'AC Unit Sale%')
+            ->where('service_name', 'not like', 'Retail Sale:%')
+            ->where('service_name', 'not like', 'Spare Part Sale:%')
             ->orderBy('display_order')
             ->get();
 
@@ -287,6 +293,8 @@ class CustomerBookingController extends Controller
      */
     public static function autoExpireIncompletePayments(): void
     {
+        CustomerItemOrderController::autoExpireIncompleteItemOrders();
+
         $expiredBookings = Booking::with('payments')
             ->where('booking_status', 'Payment Incomplete')
             ->get();
@@ -460,8 +468,9 @@ class CustomerBookingController extends Controller
         $ordersByOcularBooking = $customerOrders->whereNotNull('ocular_booking_id')->groupBy('ocular_booking_id');
         $ordersByInstallBooking = $customerOrders->whereNotNull('installation_booking_id')->keyBy('installation_booking_id');
         $ordersById = $customerOrders->keyBy('order_id');
+        $maintenanceRemindersByBooking = app(\App\Services\ForecastingService::class)->getBookingMaintenanceRemindersMap($bookingModels);
 
-        $bookings = $bookingModels->map(function ($b) use ($serviceReports, $ocularRoomsByBooking, $ocularRecsByBooking, $ordersByOcularBooking, $ordersByInstallBooking, $ordersById) {
+        $bookings = $bookingModels->map(function ($b) use ($serviceReports, $ocularRoomsByBooking, $ocularRecsByBooking, $ordersByOcularBooking, $ordersByInstallBooking, $ordersById, $maintenanceRemindersByBooking) {
             $isOcular = static::isOcularBooking($b);
             $details = is_array($b->service_details) ? $b->service_details : [];
             $ocularPersonnel = \App\Http\Controllers\SuperAdmin\SuperAdminBaseController::normalizeOcularPersonnel($details['ocular_personnel'] ?? []);
@@ -616,9 +625,9 @@ class CustomerBookingController extends Controller
                 'notes' => $b->notes,
                 'created_at' => $b->created_at?->toISOString(),
                 'created_at_formatted' => $b->created_at ? $b->created_at->format('M d, Y h:i A') : '',
-                'payment_status' => $latestPay?->payment_status ?? ($isOcular ? 'Free' : 'Pending'),
-                'payment_method' => $latestPay?->payment_method ?? ($isOcular ? 'Free Service' : 'GCash'),
-                'booking_fee_paid' => $isOcular ? 0.0 : (float) ($reservationPay?->amount_paid ?? ($b->service?->booking_fee ?? 50)),
+                'payment_status' => $latestPay?->payment_status ?? (($isOcular || ! empty($details['booking_fee_waived'])) ? 'Free' : 'Pending'),
+                'payment_method' => $latestPay?->payment_method ?? (($isOcular || ! empty($details['booking_fee_waived'])) ? 'Free Service' : 'GCash'),
+                'booking_fee_paid' => ($isOcular || ! empty($details['booking_fee_waived'])) ? 0.0 : (float) ($reservationPay?->amount_paid ?? ($b->service?->booking_fee ?? 50)),
                 'reference_number' => $reservationPay?->reference_number ?? $latestPay?->reference_number,
                 'payments' => $b->payments->map(function ($p) {
                     return [
@@ -640,6 +649,7 @@ class CustomerBookingController extends Controller
                     'feedback' => $b->feedback->feedback,
                     'submitted_at' => $b->feedback->submitted_at?->toISOString(),
                 ] : null,
+                'maintenance_reminder' => $maintenanceRemindersByBooking[(int) $b->booking_id] ?? null,
                 'is_rescheduled' => $b->rescheduleBookings->isNotEmpty(),
                 'reschedules' => $b->rescheduleBookings->map(function ($r) {
                     return [
@@ -722,11 +732,31 @@ class CustomerBookingController extends Controller
             $request->merge(['service_id' => $resolvedId]);
         }
 
+        $rawServiceDetailsInput = $request->input('service_details');
+        if (is_string($rawServiceDetailsInput)) {
+            $rawServiceDetailsInput = json_decode($rawServiceDetailsInput, true) ?: [];
+        }
+        $requestedItemOrderId = (int) ($request->input('item_order_id') ?: ($rawServiceDetailsInput['item_order_id'] ?? 0));
+        $paidSparePartOrder = null;
+        if ($requestedItemOrderId > 0 && \Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+            $paidSparePartOrder = DB::table('item_orders')
+                ->where('order_id', $requestedItemOrderId)
+                ->where('client_id', $userId)
+                ->where('item_category', 'spare_part')
+                ->where('payment_review_status', 'Sufficient')
+                ->whereNotIn('order_status', ['Cancelled', 'Completed'])
+                ->first();
+            if ($paidSparePartOrder) {
+                $request->merge(['service_id' => 2]);
+            }
+        }
+
         $targetService = Service::active()->find((int) $request->input('service_id'));
         $targetBookingFee = $targetService ? (float) ($targetService->booking_fee ?? 50.00) : 50.00;
         $isOcularRequest = ((int) $request->input('service_id') === 4)
             || ($targetService && stripos((string) $targetService->service_name, 'ocular') !== false)
             || $targetBookingFee == 0.0;
+        $isFeeExemptRequest = $isOcularRequest || (bool) $paidSparePartOrder;
 
         $validated = $request->validate([
             'service_id' => [
@@ -735,6 +765,7 @@ class CustomerBookingController extends Controller
                 Rule::exists('services', 'service_id')->where('is_active', true),
             ],
             'ac_unit_order_id' => ['nullable', 'integer'],
+            'item_order_id' => ['nullable', 'integer'],
             'units' => ['nullable'],
             'service_details' => ['nullable'],
             'aircon_brand' => ['nullable', 'string', 'max:100'],
@@ -761,7 +792,7 @@ class CustomerBookingController extends Controller
             'alternative_schedule' => ['nullable', 'string', 'max:150'],
             'service_payment_method' => ['nullable', 'string', Rule::in(['Cash', 'GCash', 'Bank Transfer', 'Free'])],
             'booking_fee' => ['nullable', 'numeric', 'min:0'],
-            'reference_number' => $isOcularRequest
+            'reference_number' => $isFeeExemptRequest
                 ? ['nullable', 'string', 'max:40']
                 : ['required', 'string', 'min:5', 'max:13'],
             'sender_name' => ['nullable', 'string', 'max:150'],
@@ -803,7 +834,7 @@ class CustomerBookingController extends Controller
         $service = Service::active()->findOrFail($validated['service_id']);
         $isOcularInspection = ((int) $service->service_id === 4) || stripos((string) $service->service_name, 'ocular') !== false;
         $configuredFee = (float) ($service->booking_fee ?? ($isOcularInspection ? 0.00 : 50.00));
-        $bookingFee = $isOcularInspection
+        $bookingFee = ($isOcularInspection || $paidSparePartOrder)
             ? 0.00
             : (isset($validated['booking_fee']) && is_numeric($validated['booking_fee'])
                 ? (float) $validated['booking_fee']
@@ -968,6 +999,39 @@ class CustomerBookingController extends Controller
                 }
             }
 
+            $linkedItemOrder = null;
+            if ($paidSparePartOrder && \Illuminate\Support\Facades\Schema::hasTable('item_orders')) {
+                $linkedItemOrder = DB::table('item_orders')
+                    ->where('order_id', (int) $paidSparePartOrder->order_id)
+                    ->where('client_id', $userId)
+                    ->lockForUpdate()
+                    ->first();
+                if ($linkedItemOrder) {
+                    $spItem = DB::table('inventory_items')->where('item_id', $linkedItemOrder->item_id)->lockForUpdate()->first();
+                    $serviceDetails['item_order_id'] = (int) $linkedItemOrder->order_id;
+                    $serviceDetails['spare_part_item_id'] = (int) $linkedItemOrder->item_id;
+                    $serviceDetails['spare_part_name'] = $spItem->item_name ?? 'Spare Part';
+                    $serviceDetails['spare_part_quantity'] = (int) $linkedItemOrder->quantity;
+                    $serviceDetails['spare_part_paid_amount'] = (float) $linkedItemOrder->amount_paid;
+                    $serviceDetails['spare_part_remaining_balance'] = (float) $linkedItemOrder->remaining_balance;
+                    $serviceDetails['booking_fee_waived'] = true;
+                    $serviceDetails['booking_fee_waived_reason'] = 'Waived — Spare Part Down Payment Paid';
+
+                    if ($spItem && ! $linkedItemOrder->is_order_base && ! $linkedItemOrder->stock_deducted && (int) $spItem->quantity_on_hand > 0) {
+                        $newQty = max(0, (int) $spItem->quantity_on_hand - (int) $linkedItemOrder->quantity);
+                        $reorder = (int) ($spItem->reorder_level ?? 5);
+                        $nextStatus = in_array($spItem->status, ['Order Base', 'Warranty Reserved'], true)
+                            ? $spItem->status
+                            : ($newQty === 0 ? 'Out of Stock' : ($newQty <= $reorder ? 'Low Stock' : 'Available / On Hand'));
+                        DB::table('inventory_items')->where('item_id', $spItem->item_id)->update([
+                            'quantity_on_hand' => $newQty,
+                            'status' => $nextStatus,
+                            'last_updated' => now(),
+                        ]);
+                    }
+                }
+            }
+
             if ((int) $service->service_id === 1 && ! array_key_exists('company_supplied_unit', $serviceDetails)) {
                 $serviceDetails['company_supplied_unit'] = (($serviceDetails['unit_available'] ?? 'Yes') === 'No');
             }
@@ -1003,6 +1067,18 @@ class CustomerBookingController extends Controller
                     ->update([
                         'installation_booking_id' => $booking->booking_id,
                         'order_status' => 'Installation Scheduled',
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            if ($linkedItemOrder) {
+                DB::table('item_orders')
+                    ->where('order_id', $linkedItemOrder->order_id)
+                    ->update([
+                        'fulfillment_type' => 'delivery_replace',
+                        'linked_booking_id' => $booking->booking_id,
+                        'stock_deducted' => ! $linkedItemOrder->is_order_base ? true : (bool) $linkedItemOrder->stock_deducted,
+                        'order_status' => 'Scheduled for Replacement',
                         'updated_at' => now(),
                     ]);
             }

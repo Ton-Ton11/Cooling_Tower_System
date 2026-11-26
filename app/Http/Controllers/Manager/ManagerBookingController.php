@@ -62,6 +62,7 @@ class ManagerBookingController extends ManagerBaseController
     public function reportBooking(Request $request, int $bookingId): JsonResponse
     {
         $this->authorizeRole($request);
+        abort_if((int) ($request->user()?->role_id ?? 0) === 1, 403, 'Super Admin cannot submit reports on completed bookings.');
 
         return response()->json($this->handleReportBookingAction($request, $bookingId));
     }

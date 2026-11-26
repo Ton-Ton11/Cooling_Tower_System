@@ -38,7 +38,14 @@ class SuperAdminController extends SuperAdminBaseController
             })->count(),
             'pending_bookings' => DB::table('bookings')->where('booking_status', 'Pending')->count(),
             'pending_checklists' => DB::table('tool_checklists')->where('status', 'Pending')->count(),
-            'low_stock_items' => DB::table('inventory_items')->whereColumn('quantity_on_hand', '<=', 'reorder_level')->count(),
+            'low_stock_items' => DB::table('inventory_items')
+                ->where('is_archived', false)
+                ->where(function ($q) {
+                    $q->whereRaw("LOWER(COALESCE(item_type, '')) != 'tool'")
+                        ->orWhereRaw("LOWER(COALESCE(tool_subtype, '')) NOT LIKE '%power%'");
+                })
+                ->whereColumn('quantity_on_hand', '<=', 'reorder_level')
+                ->count(),
             'available_ac_units' => DB::table('ac_units_inventory')->where('status', 'Available')->count(),
             'announcements' => DB::table('announcements')->count(),
             'pending_reports' => $pendingReportsCount,

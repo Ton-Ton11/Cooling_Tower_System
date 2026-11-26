@@ -63,6 +63,13 @@ class SuperAdminBookingController extends SuperAdminBaseController
     {
         $this->authorizeSuperAdmin($request);
 
-        return response()->json($this->handleReportBookingAction($request, $bookingId));
+        abort(403, 'Super Admin cannot submit reports on completed bookings. Review reports submitted by the manager instead.');
+    }
+
+    public function confirmReportReview(Request $request, int $bookingId): JsonResponse
+    {
+        $this->authorizeSuperAdmin($request);
+
+        return response()->json($this->handleConfirmReportReviewAction($request, $bookingId));
     }
 }

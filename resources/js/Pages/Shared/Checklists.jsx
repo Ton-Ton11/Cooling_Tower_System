@@ -594,6 +594,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
             if (data?.data) {
                 setManagingChecklist(data.data);
             }
+            await fetchCatalog();
             await fetchChecklists(false);
             onDataChanged?.();
         } catch (error) {
@@ -628,6 +629,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                 status: newStatus,
             });
             addToast(data?.message || `Status updated to ${newStatus}.`);
+            await fetchCatalog();
             await fetchChecklists(false);
             onDataChanged?.();
         } catch (error) {
@@ -657,7 +659,15 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
 
         if (delta > 0 && inv) {
             const onHand = Math.max(0, Number(inv.quantity_on_hand) || 0);
-            if (delta > onHand) {
+            if (managingChecklist.status === "Pending") {
+                if (newQty > onHand) {
+                    addToast(
+                        `Cannot set quantity to ${newQty} for "${targetItem.item_name}". Only ${onHand} available in inventory.`,
+                        "error",
+                    );
+                    return;
+                }
+            } else if (delta > onHand) {
                 addToast(
                     `Cannot add ${delta} more unit(s) of "${targetItem.item_name}". Only ${onHand} available in inventory.`,
                     "error",
@@ -789,6 +799,14 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
             const isTool = (selectedCategoryItem.item_type || "").toLowerCase() === "tool";
 
             if (matchIndex >= 0) {
+                if (addCategoryModal.categoryKey === "power_tool") {
+                    addToast(
+                        `"${selectedCategoryItem.item_name}" is already in this checklist.`,
+                        "error",
+                    );
+                    setSubmittingCategoryItem(false);
+                    return;
+                }
                 const newTotal = existingItems[matchIndex].quantity_approved + qty;
                 if (newTotal > categoryItemAvailableStock) {
                     addToast(
@@ -902,6 +920,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                 data?.message || "Checklist declared complete successfully!",
             );
             setManagingChecklist(null);
+            await fetchCatalog();
             await fetchChecklists(false);
             onDataChanged?.();
         } catch (error) {
@@ -2214,11 +2233,24 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                         </td>
                                                                         <td style={{ padding: "6px 12px" }}>
                                                                             {(() => {
+                                                                                const isPowerToolRow =
+                                                                                    grp.key === "power_tool" ||
+                                                                                    (item.tool_subtype || "").toLowerCase() === "power";
+                                                                                if (isPowerToolRow) {
+                                                                                    return (
+                                                                                        <span style={{ fontSize: 12, fontWeight: 700, color: "#1E2F5F" }}>
+                                                                                            1 {item.unit || "unit"}
+                                                                                        </span>
+                                                                                    );
+                                                                                }
                                                                                 const inv = workerInventoryCatalog.find(
                                                                                     (c) => Number(c.item_id) === Number(item.item_id),
                                                                                 );
+                                                                                const itemQty = Number(item.quantity_approved ?? item.quantity_requested ?? 1);
                                                                                 const availableOnHand = inv
-                                                                                    ? Math.max(0, Number(inv.quantity_on_hand) || 0)
+                                                                                    ? managingChecklist.status === "Pending"
+                                                                                        ? Math.max(0, (Number(inv.quantity_on_hand) || 0) - itemQty)
+                                                                                        : Math.max(0, Number(inv.quantity_on_hand) || 0)
                                                                                     : undefined;
                                                                                 return (
                                                                                     <QtyStepper
@@ -2297,7 +2329,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                                                                     value={item.status}
                                                                                     disabled={
                                                                                         isUpdating ||
-                                                                                        managingChecklist.status === "Completed"
+                                                                                        managingChecklist.status !== "Approved"
                                                                                     }
                                                                                     onChange={(e) =>
                                                                                         handleStatusChange(
@@ -2472,6 +2504,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                 const isBorrowed = statusLower === "borrowed";
                                 const isOutOfStock = Number(catItem.quantity_on_hand) <= 0;
                                 const isArchived = Boolean(catItem.is_archived);
+                                const isPowerCat = addCategoryModal.categoryKey === "power_tool";
                                 const isUnavailable =
                                     isArchived || isLost || isDamaged || isLostDamaged || isBorrowed || isOutOfStock;
                                 const statusText = isLost
@@ -2480,10 +2513,12 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                     ? "DAMAGED"
                                     : isLostDamaged
                                     ? "LOST / DAMAGED"
-                                    : isBorrowed
+                                    : isBorrowed || (isPowerCat && isOutOfStock)
                                     ? "CURRENTLY IN USE"
                                     : isOutOfStock
                                     ? "OUT OF STOCK"
+                                    : isPowerCat
+                                    ? "Available"
                                     : `Stock: ${catItem.quantity_on_hand} ${catItem.unit || "pcs"}`;
 
                                 return (
@@ -2578,13 +2613,21 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                                         </span>
                                     ) : categoryItemAvailableStock > 0 ? (
                                         <span style={{ color: "#166534", fontWeight: 600 }}>
-                                            Available Stock:{" "}
-                                            <strong>{categoryItemAvailableStock}</strong>{" "}
-                                            {selectedCategoryItem.unit || "pcs"}
+                                            {addCategoryModal.categoryKey === "power_tool" ? (
+                                                <strong>Available (Individual Unit)</strong>
+                                            ) : (
+                                                <>
+                                                    Available Stock:{" "}
+                                                    <strong>{categoryItemAvailableStock}</strong>{" "}
+                                                    {selectedCategoryItem.unit || "pcs"}
+                                                </>
+                                            )}
                                         </span>
                                     ) : (
                                         <span style={{ color: "#DC2626", fontWeight: 700 }}>
-                                            Out of stock (0 available)
+                                            {addCategoryModal.categoryKey === "power_tool"
+                                                ? "Currently in use / unavailable"
+                                                : "Out of stock (0 available)"}
                                         </span>
                                     )}
                                 </div>
@@ -2593,6 +2636,11 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                     })()}
 
                     {/* Quantity Input */}
+                    {addCategoryModal.categoryKey === "power_tool" ? (
+                        <div style={{ fontSize: 12, color: "#475569", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 8, padding: "8px 12px", fontWeight: 600 }}>
+                            Quantity: 1 {selectedCategoryItem?.unit || "unit"} (Individual serialized unit)
+                        </div>
+                    ) : (
                     <div>
                         <label
                             style={{
@@ -2664,6 +2712,7 @@ export default function Checklists({ addToast, onDataChanged, endpoints, current
                             </span>
                         </div>
                     </div>
+                    )}
                 </div>
             </Modal>
 
